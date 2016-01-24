@@ -1,0 +1,49 @@
+# Makefile of the mock generator for Google Mock
+
+THIS_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
+include $(THIS_DIR)Makefile_vars
+
+GENERATED_SOURCES=$(notdir $(wildcard $(GENERATED_FILE_DIR)/*.cpp))
+ALL_OBJS+=$(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES)))
+VPATH+=$(GENERATED_FILE_DIR)
+
+$(TESTER_OBJS): $(CXXFLAGS) += $(CXXFLAGS_TESTED)
+$(TESTED_OBJS): $(CXXFLAGS) += $(CXXFLAGS_TESTER)
+$(TESTER_DEPENDS): $(CXXFLAGS) += $(CXXFLAGS_TESTED)
+$(TESTED_DEPENDS): $(CXXFLAGS) += $(CXXFLAGS_TESTER)
+$(TESTER_PROCESSED_CPPS): $(CXXFLAGS) += $(CXXFLAGS_TESTED)
+$(TESTED_PROCESSED_CPPS): $(CXXFLAGS) += $(CXXFLAGS_TESTER)
+
+ALL_UPDATED_VARIABLES+= THIS_DIR GENERATED_SOURCES
+
+.SUFFIXES: .o .cpp .cc $(PROCESSED_CPP_SUFFIX)
+.PHONY: all show
+
+all : $(PROCESSED_CPPS) $(ALL_OBJS)
+
+$(OBJ_DIR)/%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -o $@ -c $<
+
+$(OBJ_DIR)/%.o: %.cc
+	$(CXX) $(CXXFLAGS_GTEST_GMOCK) -o $@ -c $<
+
+# -MG indicates that CXX disregards generated headers
+$(OBJ_DIR)/%.d: %.cpp
+	$(CXX) $(CXXFLAGS) -MM -MG $< | sed 's|\(.*\)\.o|$(OBJ_DIR)/\1\.o|' > $@
+
+$(OBJ_DIR)/%$(PROCESSED_CPP_SUFFIX): %.cpp
+	$(CXX) $(CXXFLAGS) -o $@ -E $<
+
+%.h: ;
+
+show:
+	$(foreach v, $(ALL_UPDATED_VARIABLES), $(info $(v) = $($(v))))
+
+ifeq (,$(filter $(MAKECMDGOALS),clean rebuild))
+-include $(DEPENDS)
+endif
+
+#Local Variables:
+#mode: Makefile
+#coding: utf-8-dos
+#End:
