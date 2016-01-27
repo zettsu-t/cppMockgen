@@ -1,4 +1,5 @@
 #include <sstream>
+#include <cstdlib>
 #include <boost/utility.hpp>
 
 #ifndef MOCKGEN_SAMPLE1_HPP
@@ -57,7 +58,9 @@ namespace Sample1 {
         extern ::Sample1::Types::ConstructorWithArg aCtorWithArg;
     }
 
+    const size_t g_SampleArrayIndex = 1;
     extern int SampleFunc(void);
+    extern int SampleFuncArray(void);
     extern int SampleFuncCtorWithArg(void);
 }
 
@@ -67,6 +70,19 @@ public:
     TopLevelClass(void);
     virtual ~TopLevelClass(void);
     virtual int GetValue(void);
+    virtual int FuncArrayArgument(int array[]);
+    virtual int FuncNoVariableName(long);
+    virtual int FuncPtrArgument(void(*funcptr)(int));
+};
+
+class ClassNotInstanciated {
+public:
+    ClassNotInstanciated(void) = default;
+    virtual ~ClassNotInstanciated(void) = default;
+    // These operators are for testing use only. Do not call them
+    static void *operator new(std::size_t s) { return &instance_; }
+    static void operator delete(void *p) {}
+    static ClassNotInstanciated instance_;
 };
 
 extern TopLevelClass aTopLevelObject;

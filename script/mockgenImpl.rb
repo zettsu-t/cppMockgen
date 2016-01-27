@@ -207,7 +207,11 @@ module Mockgen
     ## Implementation detail (public for testing)
     def parse(line)
       return if line.empty? || line[-1] == ")"
-      wordSet = line.split(/[\s\*&;]+/).reject do |word|
+
+      md = line.match(/^([^\]]*)(\[[^\]]*\]).*/)
+      body = md ? md[1] : line
+
+      wordSet = body.split(/[\s\*&;]+/).reject do |word|
         ["extern", "class", "struct", "static", "const"].any? { |key| key == word }
       end
 
@@ -224,17 +228,159 @@ module Mockgen
 
   # Extract argument variables from a typed argument list
   class ArgVariableSet
-    attr_reader :str
+    attr_reader :preFuncSet, :postFuncSet, :funcName, :argSetStr, :argTypeStr, :argNameStr
 
-    def initialize(typedArgPhase)
-      md = typedArgPhase.match(/^\s*(.*)\s*$/)
-      phrase = md[1]
+    def initialize(line)
+      # Allow nil for testing
+      return unless line
 
-      @str = ""
-      unless (phrase.empty? || phrase == "void")
-        @str = phrase.split(/\s*,/).map do |arg|
-          arg.split(/[\s\*&]+/)[-1]
-        end.join(", ")
+      argSetStr, @preFuncSet, @postFuncSet, @funcName = splitByArgSet(line)
+      @argSetStr, @argTypeStr, @argNameStr = extractArgSet(argSetStr) if argSetStr
+    end
+
+    def splitByArgSet(line)
+      argSetStr = nil
+      preFuncSet = []
+      postFuncSet = []
+      funcName = ""
+
+      phraseSet = splitByOuterParenthesis(line)
+      phraseSet.reverse.each do |phrase, inParenthesis|
+        if inParenthesis
+          if argSetStr
+            preFuncSet << phrase
+          else
+            md = phrase.match(/^\((.*)\)$/)
+            argSetStr = md[1]
+          end
+        else
+          if argSetStr
+            preFuncSet << phrase
+          else
+            postFuncSet << phrase
+          end
+        end
+      end
+
+      # Preserve delimiters *, & and white spaces
+      preFuncWordSet = preFuncSet.reverse.join(" ").split(/([\*&\s]+)/)
+      funcName = preFuncWordSet[-1].strip unless preFuncWordSet.empty?
+      preFuncStr = (preFuncWordSet.size > 1) ? preFuncWordSet[0..-2].map(&:strip).join(" ").gsub(/\s+/, " ").strip : ""
+      return argSetStr, preFuncStr, postFuncSet.reverse.join(" "), funcName
+    end
+
+    def extractArgSet(line)
+      argSetStr = line.strip
+      return ["", "", ""] if argSetStr.empty? || (argSetStr == "void")
+
+      serial = 1
+
+      argTypeSet = []
+      argNameSet = []
+      newArgStrSet = []
+      argSetStr.split(/,/).each do |argStr|
+        argType, argName, newArgStr = parseArg(argStr.strip, serial)
+        argTypeSet << argType
+        argNameSet << argName
+        newArgStrSet << newArgStr
+        serial += 1
+      end
+
+      return newArgStrSet.join(","), argTypeSet.join(","), argNameSet.join(",")
+    end
+
+    def parseArg(argStr, serial)
+      # Remove default argument
+      newArgStr = argStr.dup
+      pos = argStr.index("=")
+      poststr = pos ? argStr[0..(pos-1)] : argStr
+
+      # Check int array[] and int[] array
+      arrayBlock = nil
+      str = poststr
+      leftpos = poststr.index("[")
+      rightpos = poststr.index("]")
+      if leftpos && rightpos && (leftpos < rightpos)
+        arrayBlock = poststr[leftpos..rightpos]
+        str = poststr.dup
+        str.slice!(leftpos, rightpos - leftpos + 1)
+      end
+
+      # Assume T(f)(args) as a pointer to a function
+      # T(f[])(args) is not supported
+      phraseSet = splitByOuterParenthesis(str)
+      if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
+        return parseFuncPtrArg(phraseSet, serial)
+      end
+
+      wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(" ")
+      if (wordSet.size == 0 || (wordSet.size == 1 && arrayBlock) ||
+          Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_SET.any? { |word| word == wordSet[-1] })
+        argType = wordSet.join(" ")
+        argName = "dummy#{serial}"
+        newArgStr = str + " #{argName}"
+        newArgStr += arrayBlock if arrayBlock
+      else
+        argType = wordSet[0..-2].join(" ")
+        argName = wordSet[-1]
+      end
+
+      argType += arrayBlock if arrayBlock
+      return argType, argName, newArgStr
+    end
+
+    def parseFuncPtrArg(phraseSet, serial)
+      phCount = 0
+      argTypeSet = []
+      argName = nil
+      newArgStrSet = []
+
+      phraseSet.reverse.each do |phrase, inParenthesis|
+        if inParenthesis
+          phCount += 1
+          if phCount == 2
+            argType, argName, argStr = extractFuncPtrName(inParenthesis, serial)
+            argTypeSet << "(#{argType})"
+            newArgStrSet << "(#{argStr})"
+          else
+            argTypeSet << phrase
+            newArgStrSet << phrase
+          end
+        else
+          argTypeSet << phrase
+          newArgStrSet << phrase
+        end
+      end
+
+      return argTypeSet.reverse.join(" "), argName, newArgStrSet.reverse.join(" ")
+    end
+
+    def extractFuncPtrName(phrase, serial)
+      argType = phrase.gsub(/[^\*]/, "")
+      name = phrase.tr("*", "")
+      argStr = phrase
+
+      if (name.empty?)
+        argType = phrase.include?("*") ? phrase : ""
+        name = "dummy#{serial}"
+        argStr = argType + name
+      end
+
+      return argType, name, argStr
+    end
+
+    # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]]
+    def splitByOuterParenthesis(line)
+      # Recursive regular expresstion to split () (()) () ...
+      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
+      phraseSet = line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+
+      # Remove spaces between parenthesis
+      spacePattern = Regexp.new('\s*(\(|\))\s*')
+      phraseSet.map do |phrase, captured|
+        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
+        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
+        [left, right]
       end
     end
   end
@@ -250,10 +396,11 @@ module Mockgen
     def parse(line, className)
       return [false, "", ""] unless md = line.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
       typedArgSet = md[1]
-      argSet = ArgVariableSet.new(typedArgSet).str
 
-      # Treat void argument as empty
-      typedArgSet = (argSet.empty?) ? "" : typedArgSet
+      argVariableSet = ArgVariableSet.new(line)
+      typedArgSet = argVariableSet.argSetStr
+      argSet = argVariableSet.argNameStr
+
       # Add a comma to cascade other initializer arguments
       callBase = (argSet.empty?) ? "" : "#{className}(#{argSet}), "
       [true, typedArgSet, callBase]
@@ -311,8 +458,7 @@ module Mockgen
       end
 
       # Remove trailing spaces
-      return unless md = body.match(/^(.*\S)\s*$/)
-      parse(md[1])
+      parse(body.rstrip)
     end
 
     def canTraverse
@@ -374,26 +520,33 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def parse(line)
-      elements = splitLine(removeAttribute(line))
-      return unless elements
-      # Include * and & ahead function names in preFunc
-      preFunc, funcName, typedArgSet, postFunc = elements
-
-      # Skip pure virtual functions
-      return if isPureVirtual(postFunc)
-
-      @constMemfunc = isConstMemberFunction(postFunc)
-      @staticMemfunc, @returnType, @returnVoid = extractReturnType(preFunc)
-      @decl = @returnType + " #{funcName}(" + typedArgSet + ")"
-      @decl = @decl+ " " + postFunc unless postFunc.empty?
-
       # Split by , and collect variable names ahead ,
       # Note : assuming variable names are not omitted
-      @argSet = ArgVariableSet.new(typedArgSet).str
-      @argSignature = extractArgSignature(funcName, typedArgSet, @constMemfunc)
+      argVariableSet = ArgVariableSet.new(removeAttribute(line))
+      @typedArgSet = argVariableSet.argSetStr
+      return false unless @typedArgSet
+
+      @preFunc = argVariableSet.preFuncSet
+      postFunc = argVariableSet.postFuncSet
+      funcName = argVariableSet.funcName
+      argTypeStr = argVariableSet.argTypeStr
+      @argSet  = argVariableSet.argNameStr
+
+      # Exclude destructors
+      return false if funcName.include?("~")
+      # Skip pure virtual functions
+      return false if isPureVirtual(postFunc)
+      # Operators are not supported
+      return false if line.match(/\Woperator\W/)
+
+      @constMemfunc = isConstMemberFunction(postFunc)
+      @staticMemfunc, @returnType, @returnVoid = extractReturnType(@preFunc)
+      @decl = @returnType + " #{funcName}(" + @typedArgSet + ")"
+      @decl = @decl+ " " + postFunc unless postFunc.empty?
+
+      @argSignature = extractArgSignature(funcName, argTypeStr, @constMemfunc)
 
       @funcName = funcName
-      @typedArgSet = typedArgSet
       @postFunc = postFunc
       @valid = true
     end
@@ -403,29 +556,6 @@ module Mockgen
       keyword = Mockgen::Constants::KEYWORD_ATTRIBUTE
       # Recursive regular expression
       phrase.gsub(/#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
-    end
-
-    def splitLine(line)
-      preFunc = nil
-      funcName = nil
-      typedArgSet = nil
-      postFunc = nil
-
-      # Exclude constructors
-      return nil unless md = line.match(/^(.*\S)\s+([\*&]*)(\S+)\((.*)\)/)
-      preFunc  = md[1] + md[2]  # Return type words
-      funcName = md[3]    # Function name
-      typedArgSet = md[4] # Arguments
-
-      # Split before and after "(...)" and leave after ")" such as const and override
-      declWords = line.split(/[\(\)]\s*/)
-      postFunc = (declWords.size > 2) ? declWords[2..-1].join(" ") : ""
-
-      # Destructors and operators not supported
-      return nil if funcName.include?("~")
-      return nil if funcName.match(/^operator\W/)
-
-      [preFunc, funcName, typedArgSet, postFunc]
     end
 
     def isPureVirtual(phrase)
@@ -456,18 +586,9 @@ module Mockgen
     # Distinguish const and non-const member function.
     # Discard return type because it may be covariant and
     # be determined unique by function name and argument types
-    def extractArgSignature(funcName, phrase, constMemfunc)
-      args = ""
-      unless phrase == "void"
-        args = phrase.split(/\s*,/).map do |arg|
-          # split * and &
-          argWords = splitByReferenceMarks(arg)
-          argWords.size > 1 ? argWords[0..-2].join(" ") : argWords[0]
-        end.join(",")
-      end
-
+    def extractArgSignature(funcName, argTypeStr, constMemfunc)
       constStr = constMemfunc ? "const" : ""
-      "#{funcName}(#{args})#{constStr}"
+      "#{funcName}(#{argTypeStr})#{constStr}"
     end
 
     def splitByReferenceMarks(phrase)
@@ -476,7 +597,6 @@ module Mockgen
   end
 
   # Class and struct
-  # Template is not supported yet
   class ClassBlock < BaseBlock
     attr_reader :mockName, :decoratorName, :forwarderName
 
@@ -496,8 +616,12 @@ module Mockgen
         body = md[1]
       end
 
-      # Determine whether this block can be handled after parsed
-      @valid = parseClassName(body)
+      # Template is not supported yet
+      @valid = false
+      unless body.match(/^\s*template\s+/)
+        # Determine whether this block can be handled after parsed
+        @valid = parseClassName(body)
+      end
 
       # One or more constructors
       @constructorSet = []
@@ -884,13 +1008,9 @@ module Mockgen
     ## Implementation detail (public for testing)
     def readAllLines(file)
       while rawLine = file.gets
-        line = Mockgen::Common::LineWithoutCRLF.new(rawLine).line
-        # Remove leading and trailing spaces and discard empty lines
-        md = line.match(/^\s*(.*)\s*$/)
-        next if md.nil?
-        sentence = md[1]
-        next if sentence.empty?
-        parseLine(sentence)
+        line = Mockgen::Common::LineWithoutCRLF.new(rawLine).line.strip
+        next if line.empty?
+        parseLine(line.strip)
       end
     end
 
@@ -963,14 +1083,24 @@ module Mockgen
       declStr = ""
       defStr = ""
 
+      typeSwapperStrSet = []
+      varSwapperStrSet = []
+      declStrSet = []
+      defStrSet = []
+
       varSet.each do |varName, varFullname, className|
         typeSwapperS, varSwapperS, declS, defS = makeTypeVarAliasElements(classSet, varName, varFullname, className)
-        typeSwapperStr += typeSwapperS
-        varSwapperStr += varSwapperS
-        declStr += declS
-        defStr += defS
+        typeSwapperStrSet << typeSwapperS
+        varSwapperStrSet << varSwapperS
+        declStrSet << declS
+        defStrSet <<  defS
       end
 
+      # Uniq stable
+      typeSwapperStr = typeSwapperStrSet.uniq.join("")
+      varSwapperStr = varSwapperStrSet.uniq.join("")
+      declStr = declStrSet.uniq.join("")
+      defStr = defStrSet.uniq.join("")
       return typeSwapperStr, varSwapperStr, declStr, defStr
     end
 

@@ -15,6 +15,13 @@ module Mockgen
 
     # Keywords which are excluded to make mocks in class member functions
     MEMFUNC_WORD_SKIPPED_SET = ["virtual", "inline", "explicit", "static"].map(&:freeze).freeze
+    # Keywords to detect no argument variable is specified
+    MEMFUNC_WORD_RESERVED_TYPE_SET = [
+      "bool", "char", "short", "int", "long", "float", "double",
+      "unsigned", "size_t", "ssize_t", "uintptr_t", "intptr_t", "ptrdiff_t",
+      "int8_t", "int16_t", "int32_t", "int64_t",
+      "uint8_t", "uint16_t", "uint32_t", "uint64_t"].map(&:freeze).freeze
+    MEMFUNC_WORD_END_OF_TYPE_SET = ["*", "&", "]", MEMFUNC_WORD_RESERVED_TYPE_SET].flatten.map(&:freeze).freeze
 
     # The namespace which containts generated codes
     GENERATED_SYMBOL_NAMESPACE = "MyUnittest".freeze

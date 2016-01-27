@@ -31,6 +31,11 @@ int ConstructorWithArg::Get(void) const { return value_; }
 TopLevelClass::TopLevelClass(void) {}
 TopLevelClass::~TopLevelClass(void) {}
 int TopLevelClass::GetValue(void) { return 0; }
+int TopLevelClass::FuncArrayArgument(int array[]) { return 0; }
+int TopLevelClass::FuncNoVariableName(long) { return 0; }
+int TopLevelClass::FuncPtrArgument(void(*funcptr)(int)) { return 0; }
+
+ClassNotInstanciated ClassNotInstanciated::instance_;
 
 /*
 Local Variables:

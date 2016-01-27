@@ -42,6 +42,23 @@ TEST_F(TestSample, SwapType) {
     ASSERT_FALSE(localObject.pMock_);
 }
 
+TEST_F(TestSample, SwapArray) {
+    EXPECT_EQ(0, SampleFunc());
+    {
+        MOCK_OF(DerivedClass) mockA(localObjectSetA[g_SampleArrayIndex]);
+        MOCK_OF(DerivedClass) mockB(localObjectSetB[g_SampleArrayIndex]);
+        const int expectedA = 1;
+        const int expectedB = 2;
+        EXPECT_CALL(mockA, Func(0, 0)).Times(1).WillOnce(::testing::Return(expectedA));
+        EXPECT_CALL(mockB, Func(0, 0)).Times(1).WillOnce(::testing::Return(expectedB));
+
+        // Call the mock instead of the swapped object
+        EXPECT_EQ(expectedA + expectedB, SampleFuncArray());
+    }
+    ASSERT_FALSE(localObjectSetA[g_SampleArrayIndex].pMock_);
+    ASSERT_FALSE(localObjectSetB[g_SampleArrayIndex].pMock_);
+}
+
 TEST_F(TestSample, MockClassMember) {
     EXPECT_EQ(0, SampleFunc());
     {

@@ -9,6 +9,8 @@
 // These types are swapped to their decorators
 namespace Sample2 {
     DerivedClass localObject;
+    DerivedClass localObjectSetA[3];
+    DerivedClass localObjectSetB[5];
     ConstructorWithArg localCtorWithArg(::CTOR_VALUE_localCtorWithArg);
 }
 
@@ -21,6 +23,11 @@ using namespace Sample2;
 namespace Sample1 {
     int SampleFunc(void) {
         return anObject.Func(0, 0) + localObject.Func(0, 0);
+    }
+
+    int SampleFuncArray(void) {
+        return localObjectSetA[g_SampleArrayIndex].Func(0, 0)
+            + localObjectSetB[g_SampleArrayIndex].Func(0, 0);
     }
 
     int SampleFuncCtorWithArg(void) {

@@ -198,26 +198,200 @@ class TestExternVariableStatement < Test::Unit::TestCase
     assert_false(block.isClassVariable?)
   end
 
+  data(
+    'blank' => ['Type a[];', "Type", "a"],
+    'num' => ['Type a [ 1 ];', "Type", "a"],
+    'pointer'  => ['class Type *pA[ size ];',  "Type", "pA"])
+  def test_parseArray(data)
+     line, type, var = data
+     block = ExternVariableStatement.new("extern #{line}")
+     assert_true(block.canTraverse)
+     assert_true(block.isClassVariable?)
+     assert_equal(type, block.className)
+     assert_equal(var, block.getFullname)
+  end
+
   # getFullname() is tested in the base class.
 end
 
 class TestArgVariableSet < Test::Unit::TestCase
   data(
-    'no args' => ["", ""],
-    'void arg' => ["void", ""],
-    'primitive' => ["int arg", "arg"],
-    'reference1' => ["int& arg", "arg"],
-    'reference2' => ["int & arg", "arg"],
-    'pointer1' => ["void* arg", "arg"],
-    'pointer2' => ["void * arg", "arg"],
-    'pointer double' => ["void ** arg", "arg"],
-    'pointer and const' => ["const void *  const arg", "arg"],
-    'pointer and reference' => ["void*& arg", "arg"],
-    'multiple args' => ["int a, long b", "a, b"],
-    'mixed args' => ["int a, long b, const void* p", "a, b, p"])
-  def test_initialize(data)
-    phrase, expected = data
-    assert_equal(expected, ArgVariableSet.new(phrase).str)
+    'ConstructorNoArgs' => ["Func()", "", "", "Func", "", "", ""],
+    'ConstructorOneArg' => ["Func(int a)", "", "", "Func", "int a", "int", "a"],
+    'ConstructorTwoArgs' => ["Func (int a,long b)", "", "", "Func", "int a,long b", "int,long", "a,b"],
+    'FuncTwoArgs' => ["int Func (int a,long b)", "int", "", "Func", "int a,long b", "int,long", "a,b"],
+    'FuncTwoTypes' => ["void Func (int,long)", "void", "", "Func", "int dummy1,long dummy2", "int,long", "dummy1,dummy2"],
+    'FuncTwoArgsPostfix' => ["void* Func (int a) const override", "void *", "const override",
+                             "Func", "int a", "int", "a"],
+    'FuncPtr1' => ["int Func (int(f)(int)) const", "int", "const",
+                   "Func", "int (f) (int)", "int () (int)", "f"],
+    'FuncPtr2' => ["int Func(long a,int(*f)(int))const", "int", "const",
+                   "Func", "long a,int (*f) (int)", "long,int (*) (int)", "a,f"],
+    'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const",
+                   "Func", "int (*f) (int),void (*g) (void*)", "int (*) (int),void (*) (void*)", "f,g"],
+    'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func", "int a=0,long b=(long)0", "int,long", "a,b"])
+  def test_splitByArgSet(data)
+    line, expectedPre, expectedPost, expectedFuncname, expectedSet, expectedType, expectedName = data
+
+    argVariableSet = ArgVariableSet.new(line)
+    assert_equal(expectedPre, argVariableSet.preFuncSet)
+    assert_equal(expectedPost, argVariableSet.postFuncSet)
+    assert_equal(expectedFuncname, argVariableSet.funcName)
+    assert_equal(expectedSet, argVariableSet.argSetStr)
+    assert_equal(expectedType, argVariableSet.argTypeStr)
+    assert_equal(expectedName, argVariableSet.argNameStr)
+  end
+
+  data(
+    'no args' => ["", "", ""],
+    'void arg' => ["void", "", ""],
+    'primitive' => ["int arg", "int", "arg"],
+    'array1' => ["T[] array", "T[]", "array"],
+    'array1' => ["T[2] array", "T[2]", "array"],
+    'reference1' => ["int& arg", "int &", "arg"],
+    'reference2' => ["int & arg", "int &", "arg"],
+    'pointer1' => ["void* arg", "void *", "arg"],
+    'pointer2' => ["void * arg", "void *", "arg"],
+    'pointer double' => ["void ** arg", "void * *", "arg"],
+    'pointer and const' => ["const void *  const arg", "const void * const", "arg"],
+    'pointer and reference' => ["void*& arg", "void * &", "arg"],
+    'multiple args' => ["int a,long b", "int,long", "a,b"],
+    'mixed args' => ["int a,long b,const void* p", "int,long,const void *", "a,b,p"])
+  def test_extractArgSet(data)
+    line, expectedArgTypeSet, expectedArgNameSet = data
+    argSetStr, argTypeSet, argNameSet = ArgVariableSet.new(nil).extractArgSet(" #{line} ")
+
+    expected = (line == "void") ? "" : line
+    assert_equal(expected, argSetStr)
+    assert_equal(expectedArgTypeSet, argTypeSet)
+    assert_equal(expectedArgNameSet, argNameSet)
+  end
+
+  data(
+    'primitive' => ["int", "int dummy1", "int", "dummy1"],
+    'pointer' => ["void*", "void* dummy1", "void *", "dummy1"],
+    'array1' => ["T[]", "T dummy1[]", "T[]", "dummy1"],
+    'array2' => ["T[10]", "T dummy1[10]", "T[10]", "dummy1"],
+    'two args' => ["void*,int", "void* dummy1,int dummy2", "void *,int", "dummy1,dummy2"])
+  def test_extractArgSetVariableName(data)
+    line, expectedArgStrSet, expectedArgTypeSet, expectedArgNameSet = data
+    argSetStr, argTypeSet, argNameSet = ArgVariableSet.new(nil).extractArgSet(" #{line} ")
+
+    assert_equal(expectedArgStrSet, argSetStr)
+    assert_equal(expectedArgTypeSet, argTypeSet)
+    assert_equal(expectedArgNameSet, argNameSet)
+  end
+
+  data(
+    'primitive1' => ["int a", "int", "a"],
+    'primitive2' => [" int a", "int", "a"],
+    'primitive3' => [" int a ", "int", "a"],
+    'pointer' => ["void* p", "void *", "p"],
+    'double pointer' => ["void **p", "void * *", "p"],
+    'reference' => ["void& a", "void &", "a"],
+    'reference to pointer' => ["void*&p", "void * &", "p"],
+    'default argument1' => ["void*&p=nullptr", "void * &", "p"],
+    'default argument2' => ["int a=(bool)(0)", "int", "a"],
+    'decltype' => ["decltype(g) a", "decltype(g)", "a"]
+  )
+  def test_parseArgSet(data)
+    line, expectedArgType, expectedArgName = data
+    argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(line, 1)
+    assert_equal(expectedArgType, argType)
+    assert_equal(expectedArgName, argName)
+    assert_equal(line, newArgStr)
+  end
+
+  data(
+    'pointer' => ["void*", "void *", "void* dummy2"],
+    'reference' => ["int&", "int &", "int& dummy2"],
+    'pointer to const' => ["const void *", "const void *", "const void * dummy2"],
+    'reference to const' => ["const T &", "const T &", "const T & dummy2"])
+  def test_parseArgSetWithoutPtrRefName(data)
+    line, expectedArgType, expectedArgStr = data
+    argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(line, 2)
+    assert_equal(expectedArgType, argType)
+    assert_equal("dummy2", argName)
+    assert_equal(expectedArgStr, newArgStr)
+  end
+
+  data(
+    'array' => ["int a[]", "int[]", "a", "int a[]"],
+    'array with size' => ["int a[10]", "int[10]", "a", "int a[10]"],
+    'array without varname' => ["int[]", "int[]", "dummy3", "int dummy3[]"],
+    'array with size1' => ["int[10]", "int[10]", "dummy3", "int dummy3[10]"],
+    'array with size2' => ["T[10]", "T[10]", "dummy3", "T dummy3[10]"])
+  def test_parseArgSetArray(data)
+    line, expectedArgType, expectedArgName, expectedArgStr = data
+    argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(line, 3)
+    assert_equal(expectedArgType, argType)
+    assert_equal(expectedArgName, argName)
+    assert_equal(expectedArgStr, newArgStr)
+  end
+
+  def test_parseArgSetWithoutVariableName
+    ["bool", "char", "short", "int", "long", "float", "double",
+     "unsigned", "size_t", "ssize_t", "uintptr_t", "intptr_t", "ptrdiff_t",
+     "int8_t", "int16_t", "int32_t", "int64_t",
+     "uint8_t", "uint16_t", "uint32_t", "uint64_t"].each do |word|
+      argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(word, 3)
+      assert_equal(word, argType)
+      assert_equal("dummy3", argName)
+      assert_equal("#{word} dummy3", newArgStr)
+
+      line = "const " + word
+      argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(line, 4)
+      assert_equal(line, argType)
+      assert_equal("dummy4", argName)
+      assert_equal("#{line} dummy4", newArgStr)
+    end
+  end
+
+  data(
+    'emptye' => ["int()()", "int () ()", "dummy1", "int (dummy1) ()"],
+    'no varname' => ["int(*)()", "int (*) ()", "dummy1", "int (*dummy1) ()"],
+    'varname' => ["int(f)()", "int () ()", "f", "int (f) ()"],
+    'one word' => ["int(*f)()", "int (*) ()", "f", "int (*f) ()"],
+    'multi words' => ["const void* (*f)()", "const void* (*) ()", "f", "const void* (*f) ()"],
+  )
+  def test_parseArgSetFuncPtr(data)
+    line, expectedArgType, expectedArgName, expectedNewArgStr = data
+    argType, argName, newArgStr = ArgVariableSet.new(nil).parseArg(line, 1)
+    assert_equal(expectedArgType, argType)
+    assert_equal(expectedArgName, argName)
+    assert_equal(expectedNewArgStr, newArgStr)
+  end
+
+  data(
+    'empty' => ["", "", "dummy1", "dummy1"],
+    'ptr' => ["*", "*", "dummy1", "*dummy1"],
+    'name' => ["f", "", "f", "f"],
+    'ptrName1' => ["*f", "*", "f", "*f"],
+    'ptrName2' => ["f**", "**", "f", "f**"])
+  def test_extractFuncPtrName(data)
+    line, expectedArgType, expectedName, expectedArgStr = data
+    argType, name, argStr = ArgVariableSet.new(nil).extractFuncPtrName(line, 1)
+    assert_equal(expectedArgType, argType)
+    assert_equal(expectedName, name)
+    assert_equal(expectedArgStr, argStr)
+  end
+
+  data(
+    'empty' => ["", []],
+    'one' => ["()", [["()", ""]]],
+    'one+str1' => ["(a)", [["(a)", "a"]]],
+    'one+str2' => ["( a )", [["(a)", "a"]]],
+    'two' => ["()( )", [["()", ""], ["()", ""]]],
+    'two+str' => ["( a ) ( b )", [["(a)", "a"], ["(b)", "b"]]],
+    'nested' => ["((a))( ( ( b ) ) )", [["((a))", "(a)"], ["(((b)))", "((b))"]]],
+    'out1' => ["f()", [["f", nil], ["()", ""]]],
+    'out2' => ["f ()g", [["f", nil], ["()", ""], ["g", nil]]],
+    'funcPtr1' => [" result(*f)(arg)", [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]],
+    'funcPtr2' => [" const T* (*func) (void) const; ",
+                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]]])
+  def test_splitByOuterParenthesis(data)
+    line, expected = data
+    assert_equal(expected, ArgVariableSet.new(nil).splitByOuterParenthesis(line))
   end
 end
 
@@ -228,7 +402,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     'one arg' =>
     ["NameC(long a)", "long a", ", long a", "NameC(a), "],
     'two args' =>
-    ["NameC(long a, const void* p)", "long a, const void* p", ", long a, const void* p", "NameC(a, p), "])
+    ["NameC(long a, const void* p)", "long a,const void* p", ", long a,const void* p", "NameC(a,p), "])
   def test_initializeAndAll(data)
     line, expectedTypedArgSet, expectedArgsForBaseClass, expectedCallBase = data
     name = "NameC"
@@ -257,6 +431,11 @@ class TestConstructorBlock < Test::Unit::TestCase
 end
 
 class TestMemberFunctionBlock < Test::Unit::TestCase
+  def test_trial
+    line = "virtual int FuncFuncPtrArgument(void(*funcptr)(int,const char*));"
+    block = MemberFunctionBlock.new(line)
+  end
+
   data(
     'void no args' =>
     ["void Func()",
@@ -275,9 +454,9 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      false, true, "int", false, "b", "Func", "long b", ""],
     'multiple word type and poset modifier' =>
     ["virtual const void* Func(int a, const T* p);",
-     "const void * Func(int a, const T* p)",
+     "const void * Func(int a,const T* p)",
      "Func(int,const T *)",
-     false, false, "const void *", false, "a, p", "Func", "int a, const T* p", ""],
+     false, false, "const void *", false, "a,p", "Func", "int a,const T* p", ""],
     'inline and reference' =>
     ["inline T&* Func(T& a) const",
      "T & * Func(T& a) const",
@@ -305,7 +484,6 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
   data(
     'empty' => "",
-    'constructor' => "Ctor(void)",
     'desctructor' => "~Dtor(void)",
     'virtual desctructor' => "virtual ~Dtor(void)",
     'copy constructor' => "T& operator=(const T& rhs)",
@@ -352,10 +530,10 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
   data(
     'no args' =>
     ["void Func(void)",
-     "    MOCK_METHOD0(Func,void(void))",
-     "    void Func(void) { if (pMock_) { pMock_->Func(); return; } " +
+     "    MOCK_METHOD0(Func,void())",
+     "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
      "Super::Func(); }\n",
-     "    void Func(void) { if (pMock_) { pMock_->Func(); return; } " +
+     "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
      "static_cast<Super*>(pActual_)->Func(); }\n"],
     'no args const' =>
     ["void Func2() const override",
@@ -373,11 +551,11 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       "return static_cast<Super*>(pActual_)->Func(a); }\n"],
     'two args return reference' =>
      ["T& Func(int a, const void* p)",
-      "    MOCK_METHOD2(Func,T &(int a, const void* p))",
-      "    T & Func(int a, const void* p) { if (pMock_) { return pMock_->Func(a, p); } " +
-      "return Super::Func(a, p); }\n",
-      "    T & Func(int a, const void* p) { if (pMock_) { return pMock_->Func(a, p); } " +
-      "return static_cast<Super*>(pActual_)->Func(a, p); }\n"])
+      "    MOCK_METHOD2(Func,T &(int a,const void* p))",
+      "    T & Func(int a,const void* p) { if (pMock_) { return pMock_->Func(a,p); } " +
+      "return Super::Func(a,p); }\n",
+      "    T & Func(int a,const void* p) { if (pMock_) { return pMock_->Func(a,p); } " +
+      "return static_cast<Super*>(pActual_)->Func(a,p); }\n"])
   def test_makeDefSet(data)
      line, mock, decorator, forwarder = data
      className = "Super"
@@ -442,50 +620,49 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
   data(
     'no args void' =>
-    ["void Func()", "void", "Func", "", ""],
+    ["void Func()", "void", "Func", ""],
     'return type' =>
-    ["int Func2(void)", "int", "Func2", "void", ""],
+    ["int Func2(void)", "int", "Func2", ""],
     'static' =>
-    ["static int Func2(void)", "static int", "Func2", "void", ""],
+    ["static int Func2(void)", "static int", "Func2", ""],
     'attribute static' =>
-    ["__attribute__((unused)) static int Func2(void)", "static int", "Func2", "void", ""],
+    ["__attribute__((unused)) static int Func2(void)", "static int", "Func2", ""],
     'inline' =>
-    ["inline void Func(int a)", "inline void", "Func", "int a", ""],
+    ["inline void Func(int a)", "inline void", "Func", ""],
     'virtual and pointer' =>
-    ["virtual void* Func(int a, const T* p)", "virtual void*", "Func", "int a, const T* p", ""],
+    ["virtual void* Func(int a, const T* p)", "virtual void *", "Func", ""],
     'pointer **' =>
-    ["virtual void **Func(int a, const T* p)", "virtual void**", "Func", "int a, const T* p", ""],
+    ["virtual void **Func(int a, const T* p)", "virtual void **", "Func", ""],
     'override' =>
-    ["int Func(long a) const override", "int", "Func", "long a", "const override"],
+    ["int Func(long a) const override", "int", "Func", "const override"],
     'type which includes reserved word static' =>
-    ["staticType Func()", "staticType", "Func", "", ""],
+    ["staticType Func()", "staticType", "Func", ""],
     'function name which includes reserved word static' =>
-    ["int staticA(int a)", "int", "staticA", "int a", ""],
+    ["int staticA(int a)", "int", "staticA", ""],
     'function name which includes reserved word operator' =>
-    ["int operatorB(int a)", "int", "operatorB", "int a", ""])
-  def test_splitLineAccepted(data)
-    line, expectedPreFunc, expectedFuncName, expectedTypedArgSet, expectedPostFunc = data
+    ["int operatorB(int a)", "int", "operatorB", ""])
+  def test_parseLineAccepted(data)
+    line, expectedPreFunc, expectedFuncName, expectedPostFunc = data
     block = MemberFunctionBlock.new("")
 
-    noAttr = block.removeAttribute(line)
-    preFunc, funcName, typedArgSet, postFunc = block.splitLine(noAttr)
-    assert_equal(expectedPreFunc, preFunc)
-    assert_equal(expectedFuncName, funcName)
-    assert_equal(expectedTypedArgSet, typedArgSet)
-    assert_equal(expectedPostFunc, postFunc)
+    assert_true(block.parse(line))
+    assert_equal(expectedPreFunc, block.instance_variable_get(:@preFunc))
+    assert_equal(expectedFuncName, block.instance_variable_get(:@funcName))
+    assert_equal(expectedPostFunc, block.instance_variable_get(:@postFunc))
   end
 
   data(
     'empty' => "",
-    'constructor' => "Ctor(void)",
     'desctructor' => "~Dtor(void)",
     'virtual desctructor' => "virtual ~Dtor(void)",
     'copy constructor' => "T& operator=(const T& rhs)",
-    'operator' => "bool operator<(void)")
-  def test_splitLineRejected(data)
+    'operator <' => "bool operator<(void)",
+    'operator new' => "static void *operator new(std::size_t s)",
+    'operator delete' => "static void operator delete(void *p)")
+  def test_parseLineRejected(data)
     line = data
     block = MemberFunctionBlock.new("")
-    assert_nil(block.splitLine(line))
+    assert_false(block.parse(line))
   end
 
   data(
@@ -539,18 +716,17 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
   end
 
   data(
-    'no args' => ["", ""],
-    'void arg' => ["void", ""],
-    'primitive' => ["int arg", "int"],
-    'reference1' => ["int& arg", "int &"],
-    'reference2' => ["int & arg", "int &"],
-    'pointer1' => ["void* arg", "void *"],
-    'pointer2' => ["void * arg", "void *"],
-    'pointer double' => ["void ** arg", "void * *"],
-    'pointer and const' => ["const void *  const arg", "const void * const"],
-    'pointer and reference' => ["void*& arg", "void * &"],
-    'multiple args' => ["int a, long b", "int,long"],
-    'mixed args' => ["int a, long b, const void* p", "int,long,const void *"])
+    'no args or void' => ["", ""],
+    'primitive' => ["int", "int"],
+    'reference1' => ["int&", "int&"],
+    'reference2' => ["int &", "int &"],
+    'pointer1' => ["void*", "void*"],
+    'pointer2' => ["void *", "void *"],
+    'pointer double' => ["void * *", "void * *"],
+    'pointer and const' => ["const void * const", "const void * const"],
+    'pointer and reference' => ["void * &", "void * &"],
+    'multiple args' => ["int,long", "int,long"],
+    'mixed args' => ["int,long,const void *", "int,long,const void *"])
   def test_extractArgSignature(data)
     phrase, typeSet = data
     funcName = "Func"
@@ -581,13 +757,7 @@ class TestClassBlock < Test::Unit::TestCase
   data(
     'base class' => ["class NameC", "", "NameC", "class", false, []],
     'derived class' => ["class NameC : public Base", "", "NameC", "class", false, ["Base"]],
-    'derived struct' => ["struct NameS : Base", "", "NameS", "struct", true, ["Base"]],
-    'template class' => [
-      "template <typename T> class NameC : public B", "template <typename T>",
-      "NameC", "class", false, ["B"]],
-    'template class multi types' => [
-      "template <typename T, typename S> struct StructName : private B, protected C, public D, E",
-      "template <typename T, typename S>", "StructName", "struct", true, ["D", "E"]])
+    'derived struct' => ["struct NameS : Base", "", "NameS", "struct", true, ["Base"]])
   def test_initializeAndParse(data)
     line, th, name, tn, pub, bnSet = data
     block = ClassBlock.new(line + " {")
@@ -606,6 +776,21 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(tn, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
     assert_equal(bnSet, block.instance_variable_get(:@baseClassNameSet))
+  end
+
+  # Template is not supported yet
+  data(
+    'template class' => [
+      "template <typename T> class NameC : public B", "template <typename T>",
+      "NameC", "class", false, ["B"]],
+    'template class multi types' => [
+      "template <typename T, typename S> struct StructName : private B, protected C, public D, E",
+      "template <typename T, typename S>", "StructName", "struct", true, ["D", "E"]])
+  def test_initializeAndParseTemplate(data)
+    line, th, name, tn, pub, bnSet = data
+    block = ClassBlock.new(line + " {")
+    assert_false(block.canTraverse)
+    assert_false(block.isClass?)
   end
 
   def test_parseChildrenClass
@@ -864,7 +1049,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    MOCK_METHOD0(Func,void());\n"
     expected += "    MOCK_CONST_METHOD0(Func,void());\n"
     expected += "    MOCK_METHOD1(Func,void(int a));\n"
-    expected += "    MOCK_METHOD2(Other,int(long a, T* b));\n"
+    expected += "    MOCK_METHOD2(Other,int(long a,T* b));\n"
     expected += "    Decorator* pDecorator_;\n"
     expected += "    Forwarder* pForwarder_;\n"
     expected += "};\n\n"
@@ -932,8 +1117,8 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    void Func() const override { if (pMock_) { pMock_->Func(); return; } " +
                 "#{baseName}::Func(); }\n"
     expected += "    void Func(int a) { if (pMock_) { pMock_->Func(a); return; } #{baseName}::Func(a); }\n"
-    expected += "    int Other(long a, T* b) { if (pMock_) { return pMock_->Other(a, b); } " +
-                "return #{baseName}::Other(a, b); }\n"
+    expected += "    int Other(long a,T* b) { if (pMock_) { return pMock_->Other(a,b); } " +
+                "return #{baseName}::Other(a,b); }\n"
     expected += "    #{mockName}* pMock_;\n"
     expected += "    static Mock* pClassMock_;\n"
     expected += "};\n\n"
@@ -976,8 +1161,8 @@ class TestClassBlock < Test::Unit::TestCase
                 "static_cast<#{baseName}*>(pActual_)->Func(); }\n"
     expected += "    void Func(int a) { if (pMock_) { pMock_->Func(a); return; } " +
                 "static_cast<#{baseName}*>(pActual_)->Func(a); }\n"
-    expected += "    int Other(long a, T* b) { if (pMock_) { return pMock_->Other(a, b); } " +
-                "return static_cast<#{baseName}*>(pActual_)->Other(a, b); }\n"
+    expected += "    int Other(long a,T* b) { if (pMock_) { return pMock_->Other(a,b); } " +
+                "return static_cast<#{baseName}*>(pActual_)->Other(a,b); }\n"
     expected += "    #{testedName}* pActual_;\n"
     expected += "    #{mockName}* pMock_;\n"
     expected += "};\n\n"
@@ -1089,8 +1274,9 @@ class TestBlockFactory < Test::Unit::TestCase
     classBlock = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
 
+    # Template is not supported yet
     line = "template <typename T> class ClassName {"
-    assert_true(factory.createBlock(line, rootBlock).isClass?)
+    assert_false(factory.createBlock(line, rootBlock).isClass?)
 
     line = "extern const ClassName& obj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse)
@@ -1263,28 +1449,37 @@ class TestCppFileParser < Test::Unit::TestCase
     parser = CppFileParser.new(nsName, nil, nil)
 
     varNameB = "varB_"
+    varNameC = "varC_"
     varNameD = "varD_"
     varSet = [[varNameB, "::#{varNameB}", classNameB], [varNameD, "::A::#{varNameD}", classNameD]]
-    classSet = {classNameB => blockB,  classNameD => blockD }
-    tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliases(varSet, classSet)
+    classSet = {classNameB => blockB, classNameD => blockD}
 
-    postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
-    expected = "#define #{classNameB} ::#{nsName}::#{classNameB}#{postfix}\n"
-    expected += "#define #{classNameD} ::#{nsName}::#{classNameD}#{postfix}\n"
-    assert_equal(expected, tsStr)
+    # Test duplicate declarations and types many times
+    2.times do |i|
+      varSet.concat([[varNameC, "::#{varNameC}", classNameB]]) if (i == 1)
+      tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliases(varSet, classSet)
 
-    postfix = Mockgen::Constants::CLASS_POSTFIX_FORWARDER
-    expected =  "using ::#{varNameB};\n#define #{varNameB} ::#{nsName}::#{varNameB}#{postfix}\n"
-    expected += "using ::A::#{varNameD};\n#define #{varNameD} ::#{nsName}::#{varNameD}#{postfix}\n"
-    assert_equal(expected, vsStr)
+      postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
+      expected =  "#define #{classNameB} ::#{nsName}::#{classNameB}#{postfix}\n"
+      expected += "#define #{classNameD} ::#{nsName}::#{classNameD}#{postfix}\n"
+      assert_equal(expected, tsStr)
 
-    expected =  "extern #{classNameB}#{postfix} #{varNameB}#{postfix};\n"
-    expected += "extern #{classNameD}#{postfix} #{varNameD}#{postfix};\n"
-    assert_equal(expected, declStr)
+      postfix = Mockgen::Constants::CLASS_POSTFIX_FORWARDER
+      expected =  "using ::#{varNameB};\n#define #{varNameB} ::#{nsName}::#{varNameB}#{postfix}\n"
+      expected += "using ::A::#{varNameD};\n#define #{varNameD} ::#{nsName}::#{varNameD}#{postfix}\n"
+      expected += "using ::#{varNameC};\n#define #{varNameC} ::#{nsName}::#{varNameC}#{postfix}\n" if (i == 1)
+      assert_equal(expected, vsStr)
 
-    expected =  "#{classNameB}#{postfix} #{varNameB}#{postfix}(::#{varNameB});\n"
-    expected += "#{classNameD}#{postfix} #{varNameD}#{postfix}(::A::#{varNameD});\n"
-    assert_equal(expected, defStr)
+      expected =  "extern #{classNameB}#{postfix} #{varNameB}#{postfix};\n"
+      expected += "extern #{classNameD}#{postfix} #{varNameD}#{postfix};\n"
+      expected += "extern #{classNameB}#{postfix} #{varNameC}#{postfix};\n" if (i == 1)
+      assert_equal(expected, declStr)
+
+      expected =  "#{classNameB}#{postfix} #{varNameB}#{postfix}(::#{varNameB});\n"
+      expected += "#{classNameD}#{postfix} #{varNameD}#{postfix}(::A::#{varNameD});\n"
+      expected += "#{classNameB}#{postfix} #{varNameC}#{postfix}(::#{varNameC});\n" if (i == 1)
+      assert_equal(expected, defStr)
+    end
   end
 
   data(

@@ -8,6 +8,8 @@ using namespace Sample1::Types;
 // Variables swapped to decorators
 namespace Sample2 {
     extern DerivedClass localObject;
+    extern DerivedClass localObjectSetA[];
+    extern DerivedClass localObjectSetB[5];
     extern ConstructorWithArg localCtorWithArg;
 }
 
