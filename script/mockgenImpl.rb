@@ -87,7 +87,7 @@ module Mockgen
       false
     end
 
-    def isClassVariable?
+    def isNonMemberInstanceOfClass?
       false
     end
 
@@ -109,6 +109,11 @@ module Mockgen
       nil
     end
 
+    # To mock only undefined references
+    def filterByReferences(arg)
+      true
+    end
+
     # Append :: prefix to the arg name in a namespace
     # Be consistent for clang output
     def addTopNamespace(name)
@@ -118,6 +123,19 @@ module Mockgen
 
     def isConstructor(line)
       line.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
+    end
+
+    # Treat type(*func)(args...) as a variable having a function pointer
+    def isPointerToFunction(line)
+      # Recursive regular expression
+      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
+      newline = ChompAfterDelimiter.new(ChompAfterDelimiter.new(line, ";").str, "{").str
+      phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+
+      return false unless phraseSet
+      elementSet = phraseSet.map { |p| p[1] }.compact
+      return false if elementSet.size < 2
+      !(phraseSet[-1])[1].nil? && elementSet[-2].include?("*")
     end
 
     # Concatenate this block's namespaces with the arg name
@@ -183,59 +201,157 @@ module Mockgen
     end
   end
 
-  # Extern Variable (not extern typename)
-  class ExternVariableStatement < BaseBlock
-    # the className is CV removed and dereferenced
-    attr_reader :varName, :className
-
+  # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]]
+  class StringOfParenthesis
     def initialize(line)
-      super
-      @varName = ""
-      @className = ""
-      @canTraverse = false
-      parse(line.gsub(/\s*[{;].*$/,""))
+      @line = line
     end
 
-    def canTraverse
-      @canTraverse
+    def parse
+      # Recursive regular expresstion to split () (()) () ...
+      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
+      phraseSet = @line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+
+      # Remove spaces between parenthesis
+      spacePattern = Regexp.new('\s*(\(|\))\s*')
+      phraseSet.map do |phrase, captured|
+        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
+        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
+        [left, right]
+      end
+    end
+  end
+
+  # Extract type of a variable
+  class TypedVariable
+    def initialize(line)
+      @line = line
     end
 
-    def isClassVariable?
-      @canTraverse
-    end
+    def parse(serial)
+      # Remove default argument
+      newArgStr = @line.dup
 
-    ## Implementation detail (public for testing)
-    def parse(line)
-      return if line.empty? || line[-1] == ")"
+      splitter = ChompAfterDelimiter.new(@line, "=")
+      poststr = splitter.str
+      defaultValueBlock = splitter.tailStr
+      str, arrayBlock = splitArrayBlock(poststr)
 
-      md = line.match(/^([^\]]*)(\[[^\]]*\]).*/)
-      body = md ? md[1] : line
-
-      wordSet = body.split(/[\s\*&;]+/).reject do |word|
-        ["extern", "class", "struct", "static", "const"].any? { |key| key == word }
+      # Assume T(f)(args) as a pointer to a function
+      # T(f[])(args) is not supported
+      phraseSet = StringOfParenthesis.new(str).parse
+      if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
+        return parseFuncPtrArg(phraseSet, defaultValueBlock, serial)
       end
 
-      return if wordSet.size < 2
-      @varName = wordSet[-1]
-      @className = wordSet[-2]
-      @canTraverse = true
+      wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(" ")
+      if (wordSet.size <= 1 ||
+          Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_SET.any? { |word| word == wordSet[-1] })
+        argType = wordSet.join(" ")
+        argName = "dummy#{serial}"
+        newArgStr = "#{str} #{argName}"
+        newArgStr += arrayBlock if arrayBlock
+      else
+        argType = wordSet[0..-2].join(" ")
+        argName = wordSet[-1]
+      end
+
+      argType += arrayBlock if arrayBlock
+      return argType, argName, newArgStr
     end
 
-    def getFullname
-      getNonTypedFullname(@varName)
+    def parseAsArgument(serial)
+      parse(serial)
+    end
+
+    def parseAsMemberVariable
+      argType, argName, newArgStr = parse(0)
+      # move int[] a to int a[]
+      typeStr, arrayBlock = splitArrayBlock(argType)
+      if arrayBlock
+        argType = typeStr
+        argName += arrayBlock
+      end
+      return argType, argName
+    end
+
+    def splitArrayBlock(phrase)
+      # Check int array[] and int[] array
+      arrayBlock = nil
+      str = phrase
+      leftpos = phrase.index("[")
+      rightpos = phrase.index("]")
+      if leftpos && rightpos && (leftpos < rightpos)
+        arrayBlock = phrase[leftpos..rightpos]
+        str = phrase.dup
+        str.slice!(leftpos, rightpos - leftpos + 1)
+      end
+
+      return str, arrayBlock
+    end
+
+    def parseFuncPtrArg(phraseSet, defaultValueBlock, serial)
+      phCount = 0
+      argTypeSet = []
+      argName = nil
+      newArgStrSet = []
+
+      phraseSet.reverse.each do |phrase, inParenthesis|
+        if inParenthesis
+          phCount += 1
+          if phCount == 2
+            argType, argName, argStr = extractFuncPtrName(inParenthesis, serial)
+            argTypeSet << "(#{argType})"
+            newArgStrSet << "(#{argStr})"
+          else
+            argTypeSet << phrase
+            newArgStrSet << phrase
+          end
+        else
+          argTypeSet << phrase
+          newArgStrSet << phrase
+        end
+      end
+
+      newArgStrSet.insert(0, defaultValueBlock) if defaultValueBlock
+      return argTypeSet.reverse.join(" "), argName, newArgStrSet.reverse.join(" ")
+    end
+
+    def extractFuncPtrName(phrase, serial)
+      argType = phrase.gsub(/[^\*]/, "")
+      name = phrase.tr("*", "")
+      argStr = phrase
+
+      if (name.empty?)
+        argType = phrase.include?("*") ? phrase : ""
+        name = "dummy#{serial}"
+        argStr = argType + name
+      end
+
+      return argType, name, argStr
     end
   end
 
   # Extract argument variables from a typed argument list
   class ArgVariableSet
-    attr_reader :preFuncSet, :postFuncSet, :funcName, :argSetStr, :argTypeStr, :argNameStr
+    attr_reader :preFuncSet, :postFuncSet, :funcName
+    attr_reader :argSetStr, :argSetWithoutDefault, :argTypeStr, :argNameStr
 
     def initialize(line)
       # Allow nil for testing
       return unless line
 
-      argSetStr, @preFuncSet, @postFuncSet, @funcName = splitByArgSet(line)
-      @argSetStr, @argTypeStr, @argNameStr = extractArgSet(argSetStr) if argSetStr
+      replacedLine = replaceNullExpression(line)
+      argSetStr, @preFuncSet, @postFuncSet, @funcName = splitByArgSet(replacedLine)
+      @argSetStr, @argSetWithoutDefault, @argTypeStr, @argNameStr = extractArgSet(argSetStr) if argSetStr
+    end
+
+    def replaceNullExpression(line)
+      result = line.dup
+      Mockgen::Constants::KEYWORD_NULL_EXPR_CLANG_SET.each do |keyword|
+        result.gsub!(keyword, Mockgen::Constants::KEYWORD_NULL_EXPR_CPP)
+      end
+      result
     end
 
     def splitByArgSet(line)
@@ -244,7 +360,7 @@ module Mockgen
       postFuncSet = []
       funcName = ""
 
-      phraseSet = splitByOuterParenthesis(line)
+      phraseSet = StringOfParenthesis.new(line).parse
       phraseSet.reverse.each do |phrase, inParenthesis|
         if inParenthesis
           if argSetStr
@@ -271,117 +387,155 @@ module Mockgen
 
     def extractArgSet(line)
       argSetStr = line.strip
-      return ["", "", ""] if argSetStr.empty? || (argSetStr == "void")
+      return ["", "", "", ""] if argSetStr.empty? || (argSetStr == "void")
 
       serial = 1
-
       argTypeSet = []
       argNameSet = []
       newArgStrSet = []
+      argSetWithoutDefaultSet = []
       argSetStr.split(/,/).each do |argStr|
-        argType, argName, newArgStr = parseArg(argStr.strip, serial)
+        argType, argName, newArgStr = TypedVariable.new(argStr.strip).parseAsArgument(serial)
         argTypeSet << argType
         argNameSet << argName
         newArgStrSet << newArgStr
+
+        poststr = ChompAfterDelimiter.new(newArgStr, "=").str
+        argSetWithoutDefaultSet << poststr
         serial += 1
       end
 
-      return newArgStrSet.join(","), argTypeSet.join(","), argNameSet.join(",")
+      return newArgStrSet.join(","), argSetWithoutDefaultSet.join(","), argTypeSet.join(","), argNameSet.join(",")
+    end
+  end
+
+  # External or class member variable (not extern typename)
+  class VariableStatement < BaseBlock
+    # the className is CV removed and dereferenced
+    attr_reader :varName, :className
+
+    def initialize(line)
+      super
+      @varName = ""
+      # array[4] -> array
+      @varNameNoCardinality = varName
+      @className = ""
+      @typeStr = ""
+      @canTraverse = false
+      parse(line.gsub(/\s*[{;].*$/,"").strip)
     end
 
-    def parseArg(argStr, serial)
-      # Remove default argument
-      newArgStr = argStr.dup
-      pos = argStr.index("=")
-      poststr = pos ? argStr[0..(pos-1)] : argStr
-
-      # Check int array[] and int[] array
-      arrayBlock = nil
-      str = poststr
-      leftpos = poststr.index("[")
-      rightpos = poststr.index("]")
-      if leftpos && rightpos && (leftpos < rightpos)
-        arrayBlock = poststr[leftpos..rightpos]
-        str = poststr.dup
-        str.slice!(leftpos, rightpos - leftpos + 1)
-      end
-
-      # Assume T(f)(args) as a pointer to a function
-      # T(f[])(args) is not supported
-      phraseSet = splitByOuterParenthesis(str)
-      if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
-        return parseFuncPtrArg(phraseSet, serial)
-      end
-
-      wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(" ")
-      if (wordSet.size == 0 || (wordSet.size == 1 && arrayBlock) ||
-          Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_SET.any? { |word| word == wordSet[-1] })
-        argType = wordSet.join(" ")
-        argName = "dummy#{serial}"
-        newArgStr = str + " #{argName}"
-        newArgStr += arrayBlock if arrayBlock
-      else
-        argType = wordSet[0..-2].join(" ")
-        argName = wordSet[-1]
-      end
-
-      argType += arrayBlock if arrayBlock
-      return argType, argName, newArgStr
+    def canTraverse
+      @canTraverse
     end
 
-    def parseFuncPtrArg(phraseSet, serial)
-      phCount = 0
-      argTypeSet = []
-      argName = nil
-      newArgStrSet = []
-
-      phraseSet.reverse.each do |phrase, inParenthesis|
-        if inParenthesis
-          phCount += 1
-          if phCount == 2
-            argType, argName, argStr = extractFuncPtrName(inParenthesis, serial)
-            argTypeSet << "(#{argType})"
-            newArgStrSet << "(#{argStr})"
-          else
-            argTypeSet << phrase
-            newArgStrSet << phrase
-          end
-        else
-          argTypeSet << phrase
-          newArgStrSet << phrase
-        end
-      end
-
-      return argTypeSet.reverse.join(" "), argName, newArgStrSet.reverse.join(" ")
+    def filterByReferences(reference)
+      reference.memberName == @varNameNoCardinality
     end
 
-    def extractFuncPtrName(phrase, serial)
-      argType = phrase.gsub(/[^\*]/, "")
-      name = phrase.tr("*", "")
-      argStr = phrase
-
-      if (name.empty?)
-        argType = phrase.include?("*") ? phrase : ""
-        name = "dummy#{serial}"
-        argStr = argType + name
-      end
-
-      return argType, name, argStr
+    def makeStubDef(className)
+      "#{@typeStr} #{getFullname()};\n"
     end
 
-    # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]]
-    def splitByOuterParenthesis(line)
-      # Recursive regular expresstion to split () (()) () ...
-      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
-      phraseSet = line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+    ## Implementation detail (public for testing)
+    def parse(line)
+      return if line.empty? || line[-1] == ")"
 
-      # Remove spaces between parenthesis
-      spacePattern = Regexp.new('\s*(\(|\))\s*')
-      phraseSet.map do |phrase, captured|
-        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
-        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
-        [left, right]
+      # Exclude member functions and type aliases
+      wordSet = line.split(" ")
+      return if wordSet.nil? || wordSet.empty?
+      return if Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_SET.any? { |word| word == wordSet[0] }
+      return if Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_SET.any? { |word| word == wordSet[-1] }
+
+      newWordSet = wordSet.reject do |word|
+        Mockgen::Constants::MEMVAR_FIRST_WORD_EXCLUDED_SET.any? { |key| key == word }
       end
+      return if newWordSet.size < 2
+
+      className = getNonTypedFullname("")
+      typeName, varName = TypedVariable.new(newWordSet.join(" ")).parseAsMemberVariable
+      return if typeName.empty? || varName.empty?
+
+      @varName = varName
+      @varNameNoCardinality = ChompAfterDelimiter.new(varName, "[").str
+      @className = ChompAfterDelimiter.new(typeName, "[").str.split(/[\*&\s]+/)[-1]
+      @typeStr = typeName
+      @canTraverse = true
+    end
+
+    def getFullname
+      getNonTypedFullname(@varName)
+    end
+  end
+
+  # Extern Variable (not extern typename)
+  class ExternVariableStatement < VariableStatement
+    def initialize(line)
+      super
+    end
+
+    def isNonMemberInstanceOfClass?
+      @canTraverse
+    end
+  end
+
+  # Extern Variable (not extern typename)
+  class MemberVariableStatement < VariableStatement
+    def initialize(line)
+      super
+      # Now use only static (class instance) variables
+      @canTraverse = false unless line =~ /\bstatic\b/
+    end
+  end
+
+  # Remove unrelated trailing sentence
+  class ChompAfterDelimiter
+    attr_reader :str, :tailStr
+
+    def initialize(argStr, delimiter)
+      pos = argStr.index(delimiter)
+      @str = pos ? argStr[0..(pos-1)].rstrip : argStr.dup
+      @tailStr = pos ? argStr[pos..-1] : nil
+    end
+  end
+
+  # Compare argument types between a linker output and a source file
+  class FunctionReferenceSet
+    def initialize(reference, name, argTypeStr, postFunc)
+      @name = name
+      @name ||= ""
+      @argTypeStr = argTypeStr
+      @argTypeStr ||= ""
+      @postFunc = postFunc
+      @postFunc ||= ""
+      @refName = reference.memberName if reference
+      @refName ||= ""
+      @refArgTypeStr = reference.argTypeStr if reference
+      @refArgTypeStr ||= ""
+      @refPostFunc = reference.postFunc if reference
+      @refPostFunc ||= ""
+    end
+
+    def compare
+      # const char * and char const * are equivalent
+      # Distinguish const and non-const functions
+      (@refName == @name) &&
+        (sortArgTypeStr(@argTypeStr) == sortArgTypeStr(@refArgTypeStr)) &&
+        (postFunctionPhrase(@postFunc) == postFunctionPhrase(@refPostFunc))
+    end
+
+    def sortArgTypeStr(argTypeStr)
+      # Remove spaces between * and &
+      str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
+      # Do not sort beyond * and &
+      # Do not mix diffrent types
+      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join("")
+    end
+
+    def postFunctionPhrase(phrase)
+      phrase.split(" ").map do |poststr|
+        Mockgen::Constants::MEMFUNC_WORD_COMPARED_SET.any? { |word| word == poststr } ? poststr : ""
+      end.join("")
     end
   end
 
@@ -390,24 +544,44 @@ module Mockgen
   class ConstructorBlock < BaseBlock
     def initialize(line, className)
       super(line)
-      @valid, @typedArgSet, @callBase = parse(line, className)
+      @className = className
+      @valid, @typedArgSet, @argTypeStr, @callBase = parse(line, className)
     end
 
     def parse(line, className)
-      return [false, "", ""] unless md = line.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
+      phrase = removeInitializerList(line)
+      return [false, "", ""] unless md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
       typedArgSet = md[1]
 
-      argVariableSet = ArgVariableSet.new(line)
+      argVariableSet = ArgVariableSet.new(phrase)
       typedArgSet = argVariableSet.argSetStr
       argSet = argVariableSet.argNameStr
+      argTypeStr = argVariableSet.argTypeStr
 
       # Add a comma to cascade other initializer arguments
       callBase = (argSet.empty?) ? "" : "#{className}(#{argSet}), "
-      [true, typedArgSet, callBase]
+      [true, typedArgSet, argTypeStr, callBase]
+    end
+
+    def removeInitializerList(line)
+      ChompAfterDelimiter.new(line, ":").str
     end
 
     def canTraverse
       @valid
+    end
+
+    def filterByReferences(reference)
+      # Ignore type aliases because linkers know the exact type
+      # after its aliases are solved but the clang front end does not
+      # know the aliases
+      FunctionReferenceSet.new(reference, @className, @argTypeStr, "").compare
+    end
+
+    # Non default constructive base classes are not supported yet
+    def makeStubDef
+      fullname = getNonTypedFullname(@className)
+      "#{fullname}::#{@className}(#{@typedArgSet}) {}\n"
     end
 
     # Empty if call a constructor without arguments
@@ -432,6 +606,31 @@ module Mockgen
     end
   end
 
+  # Remove attribute
+  class LineWithoutAttribute
+    attr_reader :str
+
+    def initialize(line)
+      @str = removeAttribute(line)
+    end
+
+    # Remove attributes and qualifiers
+    def removeAttribute(phrase)
+      newphrase = phrase.dup
+
+      Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.each do |keyword|
+        # Recursive regular expression
+        newphrase.gsub!(/\b#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
+      end
+
+      Mockgen::Constants::KEYWORD_ATTRIBUTE_WITHOUT_ARGS.each do |keyword|
+        newphrase.gsub!(/\b#{keyword}\b/, "")
+      end
+
+      newphrase.strip
+    end
+  end
+
   # Class member function
   # Templates are not supported yet
   class MemberFunctionBlock < BaseBlock
@@ -445,9 +644,11 @@ module Mockgen
       @returnType == ""
       @returnVoid = false
       @decl = ""
+      @argTypeStr = ""
       @argSet = ""
       @funcName = ""
       @typedArgSet = ""
+      @typedArgSetWithoutDefault = ""
       @argSignature = ""
       @postFunc = ""
 
@@ -465,6 +666,13 @@ module Mockgen
       @valid
     end
 
+    def filterByReferences(reference)
+      # Ignore type aliases because linkers know the exact type
+      # after its aliases are solved but the clang front end does not
+      # know the aliases
+      FunctionReferenceSet.new(reference, @funcName, @argTypeStr, @postFunc).compare
+    end
+
     ## Public methods added on the base class
     def override?(block)
       @argSignature == block.argSignature
@@ -473,12 +681,27 @@ module Mockgen
     def makeMockDef(className)
       constStr = (@constMemfunc) ? "_CONST" : ""
 
-      numberOfArgs = @typedArgSet.split(/,/).size
+      numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 
       str = "    MOCK#{constStr}_METHOD#{numberOfArgs}"
-      str += "(#{@funcName},#{@returnType}(#{@typedArgSet}));\n"
+      str += "(#{@funcName},#{@returnType}(#{@typedArgSetWithoutDefault}));\n"
+      str
+    end
+
+    def makeStubDef(className)
+      constStr = (@constMemfunc) ? "const " : ""
+
+      numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
+      # Treat void-only arg empty
+      numberOfArgs = 0 if @argSet.empty?
+
+      str = "#{@returnType} #{className}::#{@funcName}(#{@typedArgSetWithoutDefault}) #{constStr}{\n"
+      # Force to cast enums
+      returnType = @returnType.tr("&","").strip
+      str += "    return" + (@returnVoid ? "" : " static_cast<#{returnType}>(0)") + ";\n"
+      str += "}\n"
       str
     end
 
@@ -522,14 +745,15 @@ module Mockgen
     def parse(line)
       # Split by , and collect variable names ahead ,
       # Note : assuming variable names are not omitted
-      argVariableSet = ArgVariableSet.new(removeAttribute(line))
+      argVariableSet = ArgVariableSet.new(line)
       @typedArgSet = argVariableSet.argSetStr
       return false unless @typedArgSet
+      @typedArgSetWithoutDefault = argVariableSet.argSetWithoutDefault
 
       @preFunc = argVariableSet.preFuncSet
       postFunc = argVariableSet.postFuncSet
       funcName = argVariableSet.funcName
-      argTypeStr = argVariableSet.argTypeStr
+      @argTypeStr = argVariableSet.argTypeStr
       @argSet  = argVariableSet.argNameStr
 
       # Exclude destructors
@@ -537,25 +761,18 @@ module Mockgen
       # Skip pure virtual functions
       return false if isPureVirtual(postFunc)
       # Operators are not supported
-      return false if line.match(/\Woperator\W/)
+      return false if line.match(/\boperator\b/)
 
       @constMemfunc = isConstMemberFunction(postFunc)
       @staticMemfunc, @returnType, @returnVoid = extractReturnType(@preFunc)
       @decl = @returnType + " #{funcName}(" + @typedArgSet + ")"
       @decl = @decl+ " " + postFunc unless postFunc.empty?
 
-      @argSignature = extractArgSignature(funcName, argTypeStr, @constMemfunc)
+      @argSignature = extractArgSignature(funcName, @argTypeStr, @constMemfunc)
 
       @funcName = funcName
       @postFunc = postFunc
       @valid = true
-    end
-
-    # Remove attribute
-    def removeAttribute(phrase)
-      keyword = Mockgen::Constants::KEYWORD_ATTRIBUTE
-      # Recursive regular expression
-      phrase.gsub(/#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
     end
 
     def isPureVirtual(phrase)
@@ -609,6 +826,7 @@ module Mockgen
       @forwarderName = ""
       @typename = "class"  # class or struct
       @pub = false         # Now parsing publicmembers
+      @filtered = false    # Filter undefined functions
 
       # Remove trailing ; and {
       body = line
@@ -626,6 +844,12 @@ module Mockgen
       # One or more constructors
       @constructorSet = []
       @memberFunctionSet = []
+      @memberVariableSet = []
+
+      # Candidates to make stubs
+      @undefinedConstructorSet = []
+      @undefinedFunctionSet = []
+      @undefinedVariableSet = []
 
       # Base classes
       @baseClassNameSet = parseInheritance(body)
@@ -656,11 +880,18 @@ module Mockgen
         if isConstructor(line)
           newBlock = ConstructorBlock.new(line, @name)
           @constructorSet << newBlock if newBlock.canTraverse
+        elsif isPointerToFunction(line)
+          # Not supported yet
         else
-          newBlock = MemberFunctionBlock.new(line)
-          @memberFunctionSet << newBlock if newBlock.canTraverse
+          newBlock = MemberVariableStatement.new(line)
+          if newBlock.canTraverse
+            @memberVariableSet << newBlock
+          else
+            newBlock = MemberFunctionBlock.new(line)
+            @memberFunctionSet << newBlock if newBlock.canTraverse
+          end
         end
-        block = newBlock if newBlock.canTraverse
+        block = newBlock if !newBlock.nil? && newBlock.canTraverse
       end
 
       block
@@ -691,6 +922,36 @@ module Mockgen
 
     def getStringToSourceFile
       @staticMockDef + @mockClassFunc
+    end
+
+    def filterByReferences(referenceSet)
+      constructorBlockSet = []
+      functionBlockSet = []
+      variableBlockSet = []
+      @filtered = false
+
+      return if referenceSet.nil? || !referenceSet.valid
+      referenceSet.refSet.each do |ref|
+        next if ref.classFullname != getFullname
+        @filtered = true
+
+        @constructorSet.each do |block|
+          constructorBlockSet << block if block.filterByReferences(ref)
+        end
+
+        @memberFunctionSet.each do |block|
+          functionBlockSet << block if block.filterByReferences(ref)
+        end
+
+        # Assume instance variables do not appear in referenceSet
+        @memberVariableSet.each do |block|
+          variableBlockSet << block if block.filterByReferences(ref)
+        end
+      end
+
+      @undefinedConstructorSet = constructorBlockSet.uniq
+      @undefinedFunctionSet = functionBlockSet.uniq
+      @undefinedVariableSet = variableBlockSet.uniq
     end
 
     ## Public methods added on the base class
@@ -839,6 +1100,20 @@ module Mockgen
       src += "    if (pForwarder_ && (pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} == this)) "
       src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = 0; }\n}\n\n"
 
+      name = getFullname()
+
+      @undefinedConstructorSet.each do |member|
+        src += member.makeStubDef if member.canTraverse
+      end
+
+      @undefinedFunctionSet.each do |member|
+        src += member.makeStubDef(name) if member.canTraverse
+      end
+
+      @undefinedVariableSet.each do |member|
+        src += member.makeStubDef(name) if member.canTraverse
+      end
+
       return str, src
     end
 
@@ -924,7 +1199,8 @@ module Mockgen
       RootBlock.new("")
     end
 
-    def createBlock(line, parentBlock)
+    def createBlock(argLine, parentBlock)
+      line = LineWithoutAttribute.new(argLine).str
       block = BaseBlock.new(line)
       newBlock = nil
 
@@ -961,12 +1237,119 @@ module Mockgen
     end
   end
 
+  # Class name and its instances
+  class ClassInstance
+    attr_reader :typeSwapperStr, :varSwapperStr, :declStr, :defStr
+
+    def initialize(typeSwapperStr, varSwapperStr, declStr, defStr)
+      @typeSwapperStr = typeSwapperStr
+      @varSwapperStr = varSwapperStr
+      @declStr = declStr
+      @defStr = defStr
+    end
+  end
+
+  # All class names and their instances
+  class ClassInstanceMap
+    def initialize
+      @set = {}
+    end
+
+    def add(className, typeSwapperStr, varSwapperStr, declStr, defStr)
+      if @set.key?(className)
+        entry = @set[className]
+      else
+        entry = Array.new
+        @set[className] = entry
+      end
+
+      entry << ClassInstance.new(typeSwapperStr, varSwapperStr, declStr, defStr)
+    end
+
+    def getInstanceSet(className)
+      @set.key?(className) ? @set[className] : []
+    end
+  end
+
+  # Undefined reference
+  class UndefinedReference
+    attr_reader :fullname, :classFullname, :memberName, :argTypeStr, :postFunc
+
+    def initialize(line)
+      @fullname, @classFullname, @memberName, @argTypeStr, @postFunc = parse(line)
+    end
+
+    def parse(line)
+      fullname = nil
+
+      if md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+\W([^\(]+)[\(']/)
+        symbol = md[1]
+        prefix = (symbol.scan("::").size > 1) ? "::" : ""
+        fullname = prefix + symbol
+
+        classFullname = ""
+        memberName = ""
+        nameSet = symbol.split("::")
+        if (!nameSet.nil? && !nameSet.empty?)
+          classFullname = prefix + nameSet[0..-2].join("::")
+          memberName = nameSet[-1]
+        end
+
+        argTypeStr = nil
+        postFuncSet = []
+        phraseSet = StringOfParenthesis.new(line.tr("`'","")).parse
+        phraseSet.reverse.each do |phrase, inParenthesis|
+          if inParenthesis
+            argTypeStr = inParenthesis
+            break
+          end
+          poststr = phrase.strip
+          # Remove override and final when it compares to references
+          postFuncSet << poststr
+        end
+        postFunc = argTypeStr ? postFuncSet.join("") : ""
+      end
+
+      return fullname, classFullname, memberName, argTypeStr, postFunc
+    end
+  end
+
+  # Undefined reference set
+  class UndefinedReferenceSet
+    attr_reader :valid, :refSet
+
+    def initialize(filename)
+      @valid = false
+      @refSet = []
+      return unless filename
+
+      # Filename may not exist in clean build
+      if File.exist?(filename)
+        File.open(filename, "r") { |file|
+          @refSet = readAllLines(file)
+        }
+      end
+
+      @valid = !@refSet.empty?
+    end
+
+    ## Implementation detail (public for testing)
+    def readAllLines(file)
+      refSet = []
+      while rawLine = file.gets
+        ref = UndefinedReference.new(rawLine.chomp)
+        refSet << ref if ref.fullname
+      end
+      refSet
+    end
+  end
+
   # Parse input file lines and format output strings
   class CppFileParser
     # cppNameSpace : namespace of generated codes
     # originalFilename : a file before processed by clang
     # convertedFilename : a file after processed by clang
-    def initialize(cppNameSpace, originalFilename, convertedFilename)
+    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename)
       abort if cppNameSpace.nil? || cppNameSpace.empty?
       @cppNameSpace = cppNameSpace
       @inputFilename = originalFilename
@@ -974,10 +1357,7 @@ module Mockgen
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
-      @typeAliases = ""
-      @varAliases = ""
-      @varDecls = ""
-      @varDefs = ""
+      @classInstanceMap = ClassInstanceMap.new
 
       # Allow nil for testing
       return unless originalFilename
@@ -987,21 +1367,56 @@ module Mockgen
         readAllLines(file)
       }
 
-      buildClassTree
+      referenceSet = parseLinkLog(linkLogFilename)
+      buildClassTree(referenceSet)
       makeClassSet
     end
 
     # Write generated codes to arg files
-    def writeToFiles(classFilename, typeSwapperFilename, varSwapperFilename, declFilename, defFilename)
+    def writeToFiles(argClassFilename, argTypeSwapperFilename, argVarSwapperFilename, argDeclFilename, argDefFilename)
       beginNamespace = "namespace #{@cppNameSpace} {\n\n"
       endNamespace = "} // namespace #{@cppNameSpace}\n\n"
       usingNamespace = "using namespace #{@cppNameSpace};\n"
 
-      writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace)
-      writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace)
-      writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace)
-      writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace)
-      writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace)
+      classFilenameSet = []
+      typeSwapperFilenameSet = []
+      varSwapperFilenameSet = []
+      declFilenameSet = []
+
+      index = 0
+      serial = 1
+      sizeOfSet = Mockgen::Constants::GENERATED_BLOCKS_PER_SOURCE
+      blockSet = @block.children.select(&:canTraverse).compact
+
+      while(index < blockSet.size)
+        subBlockSet = blockSet.slice(index, sizeOfSet)
+
+        suffix = "_#{serial}."
+        classFilename = argClassFilename.gsub(".", suffix)
+        typeSwapperFilename = argTypeSwapperFilename.gsub(".", suffix)
+        varSwapperFilename = argVarSwapperFilename.gsub(".", suffix)
+        declFilename = argDeclFilename.gsub(".", suffix)
+        defFilename = argDefFilename.gsub(".", suffix)
+
+        writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+
+        classFilenameSet << classFilename
+        typeSwapperFilenameSet << typeSwapperFilename
+        varSwapperFilenameSet << varSwapperFilename
+        declFilenameSet << declFilename
+
+        serial += 1
+        index += sizeOfSet
+      end
+
+      writeAggregatedFiles(argClassFilename, classFilenameSet)
+      writeAggregatedFiles(argTypeSwapperFilename, typeSwapperFilenameSet)
+      writeAggregatedFiles(argVarSwapperFilename, varSwapperFilenameSet)
+      writeAggregatedFiles(argDeclFilename, declFilenameSet)
       0
     end
 
@@ -1041,18 +1456,23 @@ module Mockgen
       parentBlock.disconnect(childBlock) unless childBlock.canTraverse
     end
 
-    def buildClassTree
+    def parseLinkLog(linkLogFilename)
+      UndefinedReferenceSet.new(linkLogFilename)
+    end
+
+    def buildClassTree(referenceSet)
       # classSet : class name => block
-      classSet = collectClasses(@block.children)
+      classSet = collectClasses(@block.children, referenceSet)
       connectClasses(@block.children, classSet)
 
       varSet = collectVariables(@block.children)
-      @typeAliases, @varAliases, @varDecls, @varDefs = makeTypeVarAliases(varSet, classSet)
+      @classInstanceMap = makeTypeVarAliases(varSet, classSet)
     end
 
-    def collectClasses(rootBlockSet)
+    def collectClasses(rootBlockSet, referenceSet)
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
+        block.filterByReferences(referenceSet)
         fullname = block.getFullname
         classSet[fullname] = block unless fullname.empty?
       end
@@ -1073,35 +1493,18 @@ module Mockgen
         varSet << [block.varName, fullname, block.className] unless fullname.empty?
       end
 
-      doForAllBlocks(rootBlockSet, lambdaToBlock, :isClassVariable?)
+      doForAllBlocks(rootBlockSet, lambdaToBlock, :isNonMemberInstanceOfClass?)
       varSet
     end
 
     def makeTypeVarAliases(varSet, classSet)
-      typeSwapperStr = ""
-      varSwapperStr = ""
-      declStr = ""
-      defStr = ""
-
-      typeSwapperStrSet = []
-      varSwapperStrSet = []
-      declStrSet = []
-      defStrSet = []
-
+      classInstanceMap = ClassInstanceMap.new
       varSet.each do |varName, varFullname, className|
-        typeSwapperS, varSwapperS, declS, defS = makeTypeVarAliasElements(classSet, varName, varFullname, className)
-        typeSwapperStrSet << typeSwapperS
-        varSwapperStrSet << varSwapperS
-        declStrSet << declS
-        defStrSet <<  defS
+        elements = makeTypeVarAliasElements(classSet, varName, varFullname, className)
+        classInstanceMap.add(className, *elements)
       end
 
-      # Uniq stable
-      typeSwapperStr = typeSwapperStrSet.uniq.join("")
-      varSwapperStr = varSwapperStrSet.uniq.join("")
-      declStr = declStrSet.uniq.join("")
-      defStr = defStrSet.uniq.join("")
-      return typeSwapperStr, varSwapperStr, declStr, defStr
+      classInstanceMap
     end
 
     def makeTypeVarAliasElements(classSet, varName, varFullname, className)
@@ -1152,7 +1555,28 @@ module Mockgen
       end
     end
 
-    def writeClassFilename(filename, beginNamespace, endNamespace, usingNamespace)
+    def writeFile(filename, labelAttr, preStr, postStr, blockSet)
+      lineDelimiter = "\n"
+
+      strSet = []
+      lambdaToBlock = lambda do |block|
+        @classInstanceMap.getInstanceSet(block.getFullname).each do |instance|
+          lineSet = instance.send(labelAttr)
+          strSet << lineSet
+        end
+      end
+
+      File.open(filename, "w") do |file|
+        file.puts preStr
+        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
+        # Write each definition exactly once
+        file.puts strSet.uniq
+        file.puts ""
+        file.puts postStr
+      end
+    end
+
+    def writeClassFilename(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
       File.open(filename, "w") do |file|
         file.puts getClassFileHeader(@inputFilename, filename)
         file.puts beginNamespace
@@ -1160,55 +1584,55 @@ module Mockgen
           str = block.getStringToClassFile
           file.puts str if str
         end
-        doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
+        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
         file.puts endNamespace
         file.puts getIncludeGuardFooter
       end
     end
 
-    def writeTypeSwapperFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace)
-      File.open(filename, "w") do |file|
-        file.puts getSwapperHeader(classFilename, filename, "Class")
-        file.puts @typeAliases
-        file.puts ""
-        file.puts getIncludeGuardFooter
-      end
+    def writeTypeSwapperFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
+      preStr = getSwapperHeader(classFilename, filename, "Class")
+      postStr = getIncludeGuardFooter
+      writeFile(filename, :typeSwapperStr, preStr, postStr, blockSet)
     end
 
-    def writeVarSwapperFile(filename, declFilename, beginNamespace, endNamespace, usingNamespace)
-      File.open(filename, "w") do |file|
-        file.puts getSwapperHeader(declFilename, filename, "Variable")
-        file.puts @varAliases
-        file.puts ""
-        file.puts getIncludeGuardFooter
-      end
+    def writeVarSwapperFile(filename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
+      preStr = getSwapperHeader(declFilename, filename, "Variable")
+      postStr = getIncludeGuardFooter
+      writeFile(filename, :varSwapperStr, preStr, postStr, blockSet)
     end
 
-    def writeDeclFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace)
-      File.open(filename, "w") do |file|
-        file.puts getDeclHeader(classFilename, filename)
-        file.puts beginNamespace
-        file.puts @varDecls
-        file.puts ""
-        file.puts endNamespace
-        file.puts getIncludeGuardFooter
-      end
+    def writeDeclFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
+      preStr = getDeclHeader(classFilename, filename) + "\n" + beginNamespace
+      postStr = endNamespace + "\n" + getIncludeGuardFooter
+      writeFile(filename, :declStr, preStr, postStr, blockSet)
     end
 
-    def writeDefFilename(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace)
-      File.open(filename, "w") do |file|
-        file.puts getDefHeader(@inputFilename, classFilename, declFilename)
-        file.puts beginNamespace
-        file.puts @varDefs
-        file.puts ""
-        file.puts endNamespace
-        file.puts usingNamespace
+    def writeDefFilename(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
+      preStr = getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
+      postStr = endNamespace + "\n" + usingNamespace
+      writeFile(filename, :defStr, preStr, postStr, blockSet)
 
+      File.open(filename, "a") do |file|
         lambdaToBlock = lambda do |block|
           str = block.getStringToSourceFile
           file.puts str if str
         end
-        doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
+        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
+      end
+    end
+
+    # Write include files to include all
+    def writeAggregatedFiles(filename, includedFilenameSet)
+      File.open(filename, "w") do |file|
+        file.puts "// Include files to all\n"
+        file.puts "// This file is machine generated.\n\n"
+        file.puts getIncludeGuardHeader(filename)
+        includedFilenameSet.each do |includedFilename|
+          file.puts getIncludeDirective(includedFilename)
+        end
+        file.puts ""
+        file.puts getIncludeGuardFooter
       end
     end
 
@@ -1287,10 +1711,11 @@ module Mockgen
   # Parse command line arguments and launcher the parser
   class MockGenLauncher
     def initialize(argv)
-      abort if argv.size < 7
+      abort if argv.size < 8
 
       argSet = argv.dup
       @inputFilename = argSet.shift
+      @inLinkLogFilename = argSet.shift
       @convertedFilename = argSet.shift
       @outClassFilename = argSet.shift
       @outTypeSwapperFilename = argSet.shift
@@ -1308,7 +1733,8 @@ module Mockgen
       # and need to specify a filename for clang to output.
       # It is also useful to know how clang format .hpp files.
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
-      parse(@cppNameSpace, @inputFilename, @convertedFilename)
+
+      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename)
 
       # Value to return as process status code
       0
@@ -1340,8 +1766,8 @@ module Mockgen
       argSet.join(" ")
     end
 
-    def parse(cppNameSpace, inputFilename, convertedFilename)
-      parser = CppFileParser.new(cppNameSpace, inputFilename, convertedFilename)
+    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename)
+      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename)
       args = [@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename]
       args.concat([@outDeclFilename, @outDefFilename])
       parser.writeToFiles(*args)

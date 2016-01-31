@@ -35,6 +35,8 @@ $(OBJ_DIR)/%$(PROCESSED_CPP_SUFFIX): %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -E $<
 
 %.h: ;
+%.hpp: ;
+$(LINK_ERROR_LOG): ;
 
 show:
 	$(foreach v, $(ALL_UPDATED_VARIABLES), $(info $(v) = $($(v))))

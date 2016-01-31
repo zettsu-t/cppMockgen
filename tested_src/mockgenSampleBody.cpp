@@ -21,12 +21,13 @@ int BaseClass::StaticFunc(void) { return 0; }
 
 DerivedClass::DerivedClass(void) {}
 DerivedClass::~DerivedClass(void) {}
-const void* DerivedClass::FuncAdded(long a) const { return nullptr; }
 void DerivedClass::Func(void) {}
 
 ConstructorWithArg::ConstructorWithArg(int value) : value_(value) {}
 ConstructorWithArg::~ConstructorWithArg(void) {}
 int ConstructorWithArg::Get(void) const { return value_; }
+
+void defaultCallback(int a) {}
 
 TopLevelClass::TopLevelClass(void) {}
 TopLevelClass::~TopLevelClass(void) {}
@@ -34,6 +35,8 @@ int TopLevelClass::GetValue(void) { return 0; }
 int TopLevelClass::FuncArrayArgument(int array[]) { return 0; }
 int TopLevelClass::FuncNoVariableName(long) { return 0; }
 int TopLevelClass::FuncPtrArgument(void(*funcptr)(int)) { return 0; }
+int TopLevelClass::FuncDefaultArgument(void* p) { return 0; }
+int TopLevelClass::FuncPtrDefaultArgument(void(*funcptr)(int)) { return 0; }
 
 ClassNotInstanciated ClassNotInstanciated::instance_;
 

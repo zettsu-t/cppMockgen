@@ -5,6 +5,14 @@
 #ifndef MOCKGEN_SAMPLE1_HPP
 #define MOCKGEN_SAMPLE1_HPP
 
+#ifdef TESTING_ATTRIBUTES
+#define PACKED_PREFIX __packed
+#define PACKED_ATTRIBUTE __attribute__((packed))
+#else
+#define PACKED_PREFIX
+#define PACKED_ATTRIBUTE
+#endif
+
 // Nested namespaces
 namespace Sample1 {
     namespace Types {
@@ -32,7 +40,7 @@ namespace Sample1 {
         public:
             DerivedClass(void);
             virtual ~DerivedClass(void);
-            virtual const void* FuncAdded(long a) const;
+            virtual const void* FuncMissing(long a, const char* p) const;
             virtual void Func(void) override;
             inline void FuncInline(void) {}  // Hide the base class definition
         private:
@@ -64,6 +72,9 @@ namespace Sample1 {
     extern int SampleFuncCtorWithArg(void);
 }
 
+// Default argument ass a pointer to a function
+extern void defaultCallback(int a);
+
 // Top-level namespace
 class TopLevelClass {
 public:
@@ -73,17 +84,27 @@ public:
     virtual int FuncArrayArgument(int array[]);
     virtual int FuncNoVariableName(long);
     virtual int FuncPtrArgument(void(*funcptr)(int));
+    virtual int FuncDefaultArgument(void* p=NULL);
+    virtual int FuncPtrDefaultArgument(void(*funcptr)(int)=&defaultCallback);
+    virtual int FuncMissing(int a);
 };
 
+// Testing to ignore operators
 class ClassNotInstanciated {
 public:
-    ClassNotInstanciated(void) = default;
+    ClassNotInstanciated(void);
     virtual ~ClassNotInstanciated(void) = default;
     // These operators are for testing use only. Do not call them
     static void *operator new(std::size_t s) { return &instance_; }
     static void operator delete(void *p) {}
     static ClassNotInstanciated instance_;
+    static void (*f)(int a);
+    static int arrayMissing[4];
 };
+
+// Testing to ignore attributes
+PACKED_ATTRIBUTE struct StructNotInstanciated1 {};
+PACKED_PREFIX struct StructNotInstanciated2 {};
 
 extern TopLevelClass aTopLevelObject;
 extern int TopLevelSampleFunc(void);
