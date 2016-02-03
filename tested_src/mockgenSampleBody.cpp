@@ -20,7 +20,7 @@ int BaseClass::Func(int a, const void** p) { return 0; }
 int BaseClass::StaticFunc(void) { return 0; }
 
 DerivedClass::DerivedClass(void) {}
-DerivedClass::~DerivedClass(void) {}
+/* DerivedClass::~DerivedClass(void) {} automatically generated */
 void DerivedClass::Func(void) {}
 
 ConstructorWithArg::ConstructorWithArg(int value) : value_(value) {}

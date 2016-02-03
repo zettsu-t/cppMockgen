@@ -39,7 +39,7 @@ namespace Sample1 {
         class DerivedClass : public BaseClass, private boost::noncopyable {
         public:
             DerivedClass(void);
-            virtual ~DerivedClass(void);
+            /* virtual ~DerivedClass(void); automatically generated */
             virtual const void* FuncMissing(long a, const char* p) const;
             virtual void Func(void) override;
             inline void FuncInline(void) {}  // Hide the base class definition

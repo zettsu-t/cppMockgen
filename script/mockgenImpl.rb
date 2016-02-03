@@ -606,6 +606,32 @@ module Mockgen
     end
   end
 
+  class DestructorBlock < BaseBlock
+    def initialize(line, className)
+      @className = className
+      @name = "~#{className}"
+      # Create a non-virtual default destructor if arg line is nil
+      parsedLine = line
+      parsedLine ||= "~#{@name} ()"
+
+      super(parsedLine)
+      @valid = (parsedLine =~ /#{@name}\s*\(/) ? true : false
+    end
+
+    def canTraverse
+      @valid
+    end
+
+    def filterByReferences(reference)
+      reference.memberName == @name
+    end
+
+    def makeStubDef
+      fullname = getNonTypedFullname(@className)
+      "#{fullname}::~#{@className}() {}\n"
+    end
+  end
+
   # Remove attribute
   class LineWithoutAttribute
     attr_reader :str
@@ -827,6 +853,7 @@ module Mockgen
       @typename = "class"  # class or struct
       @pub = false         # Now parsing publicmembers
       @filtered = false    # Filter undefined functions
+      @destructor = nil    # None or one instance
 
       # Remove trailing ; and {
       body = line
@@ -842,11 +869,13 @@ module Mockgen
       end
 
       # One or more constructors
+      @destructor = nil
       @constructorSet = []
       @memberFunctionSet = []
       @memberVariableSet = []
 
       # Candidates to make stubs
+      @undefinedDestructor = nil
       @undefinedConstructorSet = []
       @undefinedFunctionSet = []
       @undefinedVariableSet = []
@@ -877,7 +906,11 @@ module Mockgen
       # Disregard private members
       if @pub
         newBlock = nil
-        if isConstructor(line)
+        destructorBlock = DestructorBlock.new(line, @name)
+        if (destructorBlock.canTraverse)
+          newBlock = destructorBlock
+          @destructor = destructorBlock
+        elsif isConstructor(line)
           newBlock = ConstructorBlock.new(line, @name)
           @constructorSet << newBlock if newBlock.canTraverse
         elsif isPointerToFunction(line)
@@ -935,6 +968,10 @@ module Mockgen
         next if ref.classFullname != getFullname
         @filtered = true
 
+        # Create a default destructor if it does not exist
+        @destructor ||= DestructorBlock.new(nil, @name)
+        @undefinedDestructor = @destructor if @destructor.filterByReferences(ref)
+
         @constructorSet.each do |block|
           constructorBlockSet << block if block.filterByReferences(ref)
         end
@@ -979,6 +1016,14 @@ module Mockgen
       @staticMockDef = "#{@mockName}* #{@decoratorName}::#{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
     end
 
+    def makeStubSet
+      @mockClassDef = ""
+      @mockClassFunc = formatStub()
+      @decoratorClassDef = ""
+      @decoratorClassDef = ""
+      @staticMockDef = ""
+    end
+
     ## Implementation detail (public for testing)
     def parseClassName(line)
       ["class", "struct"].each do |typenameStr|
@@ -997,6 +1042,8 @@ module Mockgen
       else
         return false
       end
+
+      return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_SET.any? { |name| name == @name }
 
       @mockName = @name + Mockgen::Constants::CLASS_POSTFIX_MOCK
       @decoratorName = @name + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
@@ -1100,10 +1147,20 @@ module Mockgen
       src += "    if (pForwarder_ && (pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} == this)) "
       src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = 0; }\n}\n\n"
 
+      src += formatStub()
+      return str, src
+    end
+
+    def formatStub
+      src = ""
       name = getFullname()
 
       @undefinedConstructorSet.each do |member|
         src += member.makeStubDef if member.canTraverse
+      end
+
+      if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse
+        src += @undefinedDestructor.makeStubDef
       end
 
       @undefinedFunctionSet.each do |member|
@@ -1114,7 +1171,7 @@ module Mockgen
         src += member.makeStubDef(name) if member.canTraverse
       end
 
-      return str, src
+      src
     end
 
     def formatDecoratorClass(decoratorName, mockClassName, baseName)
@@ -1170,19 +1227,23 @@ module Mockgen
     # modifier as of its base class), call the most subclass definition.
     def collectFunctionDef(derivedSet, methodClass, methodFunc)
       str = ""
-      functionSet = []
 
       @memberFunctionSet.each do |member|
         next unless member.canTraverse
         next if derivedSet.any? { |f| f.override?(member) }
         name = getFullname
         str += member.send(methodFunc, name)
-        functionSet << member
+        derivedSet << member
       end
 
       # Search base classes for functions
       @baseClassBlockSet.each do |block|
-        str += block.send(methodClass, [derivedSet, functionSet].flatten)
+        # Mix functions of sibling base classes assuming
+        # D is derived from B1, B2, B1:f and F2:f are defined
+        # but D:f is not defined.
+        # Though calling D:f is ambiguous in this case,
+        # it is practical to create exactly one Mock(D)::f.
+        str += block.send(methodClass, derivedSet)
       end
 
       str
@@ -1349,11 +1410,12 @@ module Mockgen
     # cppNameSpace : namespace of generated codes
     # originalFilename : a file before processed by clang
     # convertedFilename : a file after processed by clang
-    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename)
+    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename, stubOnly)
       abort if cppNameSpace.nil? || cppNameSpace.empty?
       @cppNameSpace = cppNameSpace
       @inputFilename = originalFilename
       @blockFactory = BlockFactory.new
+      @stubOnly = stubOnly
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
@@ -1398,11 +1460,17 @@ module Mockgen
         declFilename = argDeclFilename.gsub(".", suffix)
         defFilename = argDefFilename.gsub(".", suffix)
 
-        writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
-        writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
-        writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
-        writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
-        writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        argBlockSet = @stubOnly ? [] : subBlockSet
+        writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+        writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+        writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+        writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+
+        if @stubOnly
+          writeStubFilename(defFilename, @inputFilename, subBlockSet)
+        else
+          writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+        end
 
         classFilenameSet << classFilename
         typeSwapperFilenameSet << typeSwapperFilename
@@ -1533,7 +1601,11 @@ module Mockgen
     end
 
     def makeClassSet
-      lambdaToBlock = lambda { |block| block.makeClassSet }
+      if @stubOnly
+        lambdaToBlock = lambda { |block| block.makeStubSet }
+      else
+        lambdaToBlock = lambda { |block| block.makeClassSet }
+      end
       doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
 
       # Cascade another method
@@ -1612,7 +1684,17 @@ module Mockgen
       preStr = getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
       postStr = endNamespace + "\n" + usingNamespace
       writeFile(filename, :defStr, preStr, postStr, blockSet)
+      writeSourceFilename(filename, blockSet)
+    end
 
+    def writeStubFilename(filename, inputFilename, blockSet)
+      File.open(filename, "w") do |file|
+        file.puts getIncludeDirective(inputFilename)
+      end
+      writeSourceFilename(filename, blockSet)
+    end
+
+    def writeSourceFilename(filename, blockSet)
       File.open(filename, "a") do |file|
         lambdaToBlock = lambda do |block|
           str = block.getStringToSourceFile
@@ -1723,6 +1805,7 @@ module Mockgen
       @outDeclFilename = argSet.shift
       @outDefFilename = argSet.shift
       @clangArgs = quotePath(argSet)
+      @stubOnly = false
 
       # Can set later
       @cppNameSpace = Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE
@@ -1734,7 +1817,7 @@ module Mockgen
       # It is also useful to know how clang format .hpp files.
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
 
-      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename)
+      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename, @stubOnly)
 
       # Value to return as process status code
       0
@@ -1766,8 +1849,8 @@ module Mockgen
       argSet.join(" ")
     end
 
-    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename)
-      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename)
+    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly)
+      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly)
       args = [@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename]
       args.concat([@outDeclFilename, @outDefFilename])
       parser.writeToFiles(*args)

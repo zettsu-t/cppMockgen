@@ -9,6 +9,8 @@ module Mockgen
     NAMESPACE_SKIPPED_SET = ["std", "boost", "testing"].map(&:freeze).freeze
     # Reserved for compiler internal use
     NAMESPACE_COMPILER_INTERNAL = "__".freeze
+    # Excluded class names (practically, they should be specified in command line options)
+    CLASS_NAME_EXCLUDED_SET = ["$$$"]
 
     # Keyword attribute
     KEYWORD_ATTRIBUTE_WITH_ARGS = ["__attribute__", "__aligned"].map(&:freeze).freeze

@@ -593,6 +593,41 @@ class TestConstructorBlock < Test::Unit::TestCase
   end
 end
 
+class TestDestructorBlock < Test::Unit::TestCase
+  data(
+    'nil' => nil,
+    'empty' => "~NameD()",
+    'void' => "~NameD(void)",
+    'space' => "~NameD(void)")
+  def test_parseDestructor(data)
+    line = data
+    className = "NameD"
+    block = DestructorBlock.new(line, className)
+    assert_true(block.canTraverse)
+
+    nsBlock = NamespaceBlock.new("namespace A")
+    nsBlock.connect(block)
+    assert_equal("::A::NameD::~NameD() {}\n", block.makeStubDef)
+
+    refClass = Struct.new(:memberName)
+    ref = refClass.new("~NameD")
+    assert_true(block.filterByReferences(ref))
+    ref = refClass.new("NameD")
+    assert_false(block.filterByReferences(ref))
+  end
+
+  data(
+    'constructor' => "NameD()",
+    'constructor arg' => "NameD(int a)",
+    'constructor space' => "NameD (int a)")
+  def test_parseNotDestructor(data)
+    line = data
+    className = "NameD"
+    block = DestructorBlock.new(line, className)
+    assert_false(block.canTraverse)
+  end
+end
+
 class TestLineWithoutAttribute < Test::Unit::TestCase
   data(
     'empty' => "__attribute__(()) int",
@@ -997,6 +1032,10 @@ class TestClassBlock < Test::Unit::TestCase
     assert_not_nil(block.parseChildren(constructorLine))
     assert_not_equal([], block.instance_variable_get(:@constructorSet))
 
+    destructorLine = "~NameC();"
+    assert_not_nil(block.parseChildren(destructorLine))
+    assert_not_nil(block.instance_variable_get(:@destructor))
+
     assert_nil(block.parseChildren("private :"))
     assert_equal(false, block.instance_variable_get(:@pub))
     assert_nil(block.parseChildren(funcLine))
@@ -1107,6 +1146,11 @@ class TestClassBlock < Test::Unit::TestCase
 
     assert_equal(tn, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
+  end
+
+  def test_parseClassNameExcluded
+    block = ClassBlock.new("")
+    assert_false(block.parseClassName("class $$$"))
   end
 
   data(
@@ -1360,7 +1404,10 @@ class TestClassBlock < Test::Unit::TestCase
     'non const' => ["", "void Tested::FuncStub() {\n    return;\n}\n"],
     'const' => ["const", "void Tested::FuncStub() const {\n    return;\n}\n"])
   def test_formatMockClassWithStub(data)
-    postFunc, expectedStub = data
+    postFunc, expected = data
+    expectedFuncStub = "Tested::~Tested() {}\n" + expected
+    expectedVarStub = "int ::BaseClass::varStub;\n"
+    expectedStub = expectedFuncStub + expectedVarStub
 
     baseName = "BaseClass"
     mockName = "Mock"
@@ -1372,11 +1419,13 @@ class TestClassBlock < Test::Unit::TestCase
     refClass = Struct.new(:classFullname, :memberName, :argTypeStr, :postFunc)
     refSetClass = Struct.new(:valid, :refSet)
     refFunc = refClass.new(testedName, "FuncStub", "", postFunc)
+    refDestructor = refClass.new(testedName, "~#{testedName}", "", postFunc)
     refVar = refClass.new(testedName, "varStub", "", "")
-    refSet = refSetClass.new(true, [refFunc, refVar])
+    refSet = refSetClass.new(true, [refFunc, refDestructor, refVar])
     block.filterByReferences(refSet)
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
+    assert_equal(expectedStub, block.formatStub)
 
     # Filter the derived class
     expected =  "class #{decoratorName};\n"
@@ -1409,8 +1458,8 @@ class TestClassBlock < Test::Unit::TestCase
                 "    if (pDecorator_ && (pDecorator_->pMock_ == this)) { pDecorator_->pMock_ = 0; }\n"
     expected += "    if (pDecorator_ && (pDecorator_->pClassMock_ == this)) { pDecorator_->pClassMock_ = 0; }\n"
     expected += "    if (pForwarder_ && (pForwarder_->pMock_ == this)) { pForwarder_->pMock_ = 0; }\n}\n\n"
-    expected += expectedStub
-    expected += "int ::BaseClass::varStub;\n"
+    expected += expectedFuncStub
+    expected += expectedVarStub
     assert_equal(expected, actualDef)
     assert_true(block.canTraverse)
 
@@ -1599,6 +1648,26 @@ class TestClassBlock < Test::Unit::TestCase
     checkCollectDef(:collectForwarderDef, lambdaCheck1, lambdaCheck2)
   end
 
+  def test_collectBaseFunctionDef
+    funcBaseLine = "void FuncBase()"
+    funcBaseA = MemberFunctionBlock.new(funcBaseLine)
+    funcBaseB = MemberFunctionBlock.new(funcBaseLine)
+    blockBaseA = ClassBlock.new("class BaseA")
+    blockBaseB = ClassBlock.new("class BaseB")
+
+    blockBaseA.connect(funcBaseA)
+    blockBaseB.connect(funcBaseB)
+    addMemberFunction(blockBaseA, funcBaseA)
+    addMemberFunction(blockBaseB, funcBaseB)
+
+    block = ClassBlock.new("class BaseD")
+    block.instance_variable_set(:@baseClassBlockSet, [blockBaseA, blockBaseB])
+
+    lambdaCheck = lambda { |n| puts n; true }
+    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck)
+    assert_equal("    MOCK_METHOD0(FuncBase,void());\n", str)
+  end
+
   # Test makeClassSet in testing CppFileParser
 end
 
@@ -1668,6 +1737,8 @@ class TestUndefinedReference < Test::Unit::TestCase
   data(
     'toplevel' => ["undefined reference to `TopLevelClass::GetValue()'",
                    "TopLevelClass::GetValue", "TopLevelClass", "GetValue", ""],
+    'destructor' => ["undefined reference to `TopLevelClass::~TopLevelClass()'",
+                   "TopLevelClass::~TopLevelClass", "TopLevelClass", "~TopLevelClass", ""],
     'namespace' => ["undefined reference to `Sample1::Types::DerivedClass::FuncAdded(long, const T*) const",
                     "::Sample1::Types::DerivedClass::FuncAdded", "::Sample1::Types::DerivedClass", "FuncAdded", "long,const T*"],
     'array' => ["undefined reference to `ClassNotInstanciated::arrayMissing'",
@@ -1682,9 +1753,11 @@ class TestUndefinedReference < Test::Unit::TestCase
   end
 end
 
+CppFileParserNilArgSet = [nil, nil, nil, nil].freeze
+
 class TestCppFileParser < Test::Unit::TestCase
   def test_parseLine
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
 
     originalBlock = parser.instance_variable_get(:@block)
     parser.parseLine("comment")
@@ -1729,7 +1802,7 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(parentBlock, childBlock.parent)
     assert_equal([childBlock], parentBlock.children)
 
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     parser.eliminateUnusedBlock(parentBlock, childBlock)
     assert_nil(childBlock.parent)
     assert_equal([], parentBlock.children)
@@ -1752,7 +1825,7 @@ class TestCppFileParser < Test::Unit::TestCase
       blockB = TestClassMock.new("B", "", [])
       blockC = TestClassMock.new("C", "", [blockB, blockA])
       blockSet = [blockA, blockB, blockC]
-      parser = CppFileParser.new("NameSpace", nil, nil, nil)
+      parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
 
       if (testBuild)
         blockD = TestClassMock.new("D", "", [blockC])
@@ -1771,7 +1844,7 @@ class TestCppFileParser < Test::Unit::TestCase
     block = TestClassMock.new("Base", "A::Base", [])
     blockV = ExternVariableStatement.new("extern Base varB_;")
 
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], nil))
   end
 
@@ -1780,7 +1853,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockD = ClassBlock.new("class Derived : public A::Base {")
     classSet = { "::A::Base" => blockB, "::Derived" => blockD }
 
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     parser.connectClasses([blockB, blockD], classSet)
     assert_equal(["::A::Base"], blockD.instance_variable_get(:@baseClassNameSet))
   end
@@ -1793,7 +1866,7 @@ class TestCppFileParser < Test::Unit::TestCase
     ns.connect(varD)
 
     blockSet = [varB, varD]
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     expected = [["varB_", "::A::varB_", "Base"],["varD_", "::A::varD_", "Derived"]]
     assert_equal(expected, parser.collectVariables(blockSet))
   end
@@ -1811,7 +1884,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockSet = [blockB, blockD]
 
     nsName = "TestNameSpace"
-    parser = CppFileParser.new(nsName, nil, nil, nil)
+    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
 
     varNameB = "varB_"
     varNameC = "varC_"
@@ -1873,7 +1946,7 @@ class TestCppFileParser < Test::Unit::TestCase
     varFullname = useNamespace ? "::A::#{varName}" : "#{varName}"
 
     nsName = "NameSpace"
-    parser = CppFileParser.new(nsName, nil, nil, nil)
+    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
     postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
     tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliasElements(classSet, varName, varFullname, className)
     assert_equal("#define #{className} ::#{nsName}::#{className}#{postfix}\n", tsStr)
@@ -1900,7 +1973,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockE = TestClassMock.new("E", "", [blockD, blockB])
 
     log = ""
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     lambdaToBlock = lambda { |block| log = log + block.name }
     parser.doForAllBlocks([blockE], lambdaToBlock, :isClass?)
     assert_equal("EDBCA", log)
@@ -1910,7 +1983,7 @@ class TestCppFileParser < Test::Unit::TestCase
     inputFilename = "in.hpp"
     outClassFilename = "out.hpp"
     nsName = "MyTest"
-    parser = CppFileParser.new(nsName, nil, nil, nil)
+    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
     actual = parser.getClassFileHeader(inputFilename, outClassFilename)
 
     assert_true(actual.include?("generated"))
@@ -1927,7 +2000,7 @@ class TestCppFileParser < Test::Unit::TestCase
     declFilename = "decl.hpp"
     swapperFilename = "swap.hpp"
     headWord = "Title"
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     actual = parser.getSwapperHeader(declFilename, swapperFilename, headWord)
 
     expected =  "// #{headWord} name swapper definition\n"
@@ -1942,7 +2015,7 @@ class TestCppFileParser < Test::Unit::TestCase
   def test_getDeclHeader
     classFilename = "class.hpp"
     declFilename = "decl.hpp"
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     expected = "// Variable declarations\n// This file is machine generated.\n\n"
     expected += "#ifndef DECL_HPP\n#define DECL_HPP\n\n"
     expected += "#include " + '"' + classFilename + '"' +"\n\n"
@@ -1951,7 +2024,7 @@ class TestCppFileParser < Test::Unit::TestCase
 
   def test_getDefHeader
     filename = "out.hpp"
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     expected = "// Variable definitions\n// This file is machine generated.\n\n"
     expected += "#include " + '"' + filename + '"' +"\n\n"
     assert_equal(expected, parser.getDefHeader("ifilename", "ofilename", filename))
@@ -1962,12 +2035,12 @@ class TestCppFileParser < Test::Unit::TestCase
     'dir'  => ["top/sub/HeaderImpl.hpp", "#ifndef HEADER_IMPL_HPP\n#define HEADER_IMPL_HPP\n\n"])
   def test_getIncludeGuardHeader(data)
     filename, expected = data
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     assert_equal(expected, parser.getIncludeGuardHeader(filename))
   end
 
   def test_getIncludeGuardFooter
-    assert_equal("#endif\n", CppFileParser.new("NameSpace", nil, nil, nil).getIncludeGuardFooter)
+    assert_equal("#endif\n", CppFileParser.new("NameSpace", *CppFileParserNilArgSet).getIncludeGuardFooter)
   end
 
   data(
@@ -1982,7 +2055,7 @@ class TestCppFileParser < Test::Unit::TestCase
     'dir2' => ["top/suB/headerImpl.hpp", "HEADER_IMPL_HPP"])
   def test_getIncludeGuardName(data)
     filename, expected = data
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     assert_equal(expected, parser.getIncludeGuardName(filename))
   end
 
@@ -1994,7 +2067,7 @@ class TestCppFileParser < Test::Unit::TestCase
   def test_getIncludeDirective(data)
     filename = data
     expected = filename.empty? ? "" : "#include \"header.hpp\"\n"
-    parser = CppFileParser.new("NameSpace", nil, nil, nil)
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     assert_equal(expected, parser.getIncludeDirective(filename))
   end
 
