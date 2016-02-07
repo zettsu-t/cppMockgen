@@ -75,6 +75,8 @@ namespace Sample1 {
 // Default argument ass a pointer to a function
 extern void defaultCallback(int a);
 
+typedef int64_t MyInt64;
+
 // Top-level namespace
 class TopLevelClass {
 public:
@@ -86,7 +88,8 @@ public:
     virtual int FuncPtrArgument(void(*funcptr)(int));
     virtual int FuncDefaultArgument(void* p=NULL);
     virtual int FuncPtrDefaultArgument(void(*funcptr)(int)=&defaultCallback);
-    virtual int FuncMissing(int a);
+    virtual int FuncMissingA(int32_t a);
+    virtual int FuncMissingB(MyInt64 a);  // Resolve the typedef to make a stub
 };
 
 // Testing to ignore operators

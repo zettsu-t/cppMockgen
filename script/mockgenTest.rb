@@ -8,6 +8,129 @@ require 'test/unit'
 # Omit the module name in this testing
 include Mockgen
 
+class TestTypeStringWithoutModifier < Test::Unit::TestCase
+  def test_removeReservedWord
+    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
+      name = "ConcreteName"
+      assert_equal([name], TypeStringWithoutModifier.new([key, name]).strSet)
+    end
+  end
+
+  data(
+    'primitive' => ["class T**", ["T", "**"]],
+    'reference' => ["struct S&", ["S", "&"]])
+  def test_removeReservedWordWithModifier(data)
+    arg, expected = data
+    assert_equal(expected, TypeStringWithoutModifier.new([arg]).strSet)
+  end
+end
+
+class TestTypeAliasSet < Test::Unit::TestCase
+  def test_add
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("uint32_t", "unsigned int")
+    expected = {"uint32_t" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.add("UINT", "uint32_t")
+    expected = {"uint32_t" => "unsigned int", "UINT" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.add("puint32_t", "unsigned int*")
+    expected = {"uint32_t" => "unsigned int", "puint32_t" => "unsigned int *", "UINT" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.add("cuint32_t", "const unsigned int")
+    expected = {"cuint32_t" => "const unsigned int", "uint32_t" => "unsigned int",
+                "puint32_t" => "unsigned int *", "UINT" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.add("UINT", "uint64_t")
+    assert_equal(expected, typeAliasSet.aliasSet)
+  end
+
+  def test_resolve
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.resolve("uint32_t", "unsigned int")
+    expected = {"uint32_t" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.resolve("UINT", "uint32_t")
+    expected = {"uint32_t" => "unsigned int", "UINT" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    typeAliasSet.resolve("PUINT", "uint32_t*")
+    expected = {"PUINT" => "unsigned int *", "uint32_t" => "unsigned int", "UINT" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+  end
+
+  def test_merge
+    outerSet = TypeAliasSet.new
+    outerSet.add("uint32_t", "unsigned int")
+    outerSet.add("UINT", "uint64_t")
+    innerSet = TypeAliasSet.new
+    innerSet.add("UINT", "uint32_t")
+
+    innerSet.merge(outerSet)
+    expected = {"UINT" => "uint64_t", "uint32_t" => "unsigned int"}
+    assert_equal(expected, outerSet.aliasSet)
+    expected = {"UINT" => "unsigned int", "uint32_t" => "unsigned int"}
+    assert_equal(expected, innerSet.aliasSet)
+  end
+
+  def test_removeSystemInternalSymbols
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("uint32_t", "unsigned int")
+    typeAliasSet.add("__uint32_t", "unsigned int")
+    expected = {"__uint32_t" => "unsigned int", "uint32_t" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+    typeAliasSet.removeSystemInternalSymbols
+
+    expected = {"uint32_t" => "unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+  end
+
+  data(
+    'primitive' => "__int32_t",
+    'offset' => "_off_t",
+    'system' => "__pthread_t")
+  def test_isSystemInternalSymbolTrue(data)
+    str = data
+    typeAliasSet = TypeAliasSet.new
+    assert_true(typeAliasSet.isSystemInternalSymbol(str))
+  end
+
+  data(
+    'nullptr_t' => "nullptr_t",
+    'nullptr' => "decltype(nullptr)")
+  def test_isSystemInternalSymbolFalse(data)
+    str = data
+    typeAliasSet = TypeAliasSet.new
+    assert_false(typeAliasSet.isSystemInternalSymbol(str))
+  end
+
+  data(
+    'primitive' => ["uint32_t", "unsigned int"],
+    'const' => ["const uint32_t", "const unsigned int"],
+    'pointer' => ["uint32_t *", "unsigned int *"],
+    'reference' => ["uint32_t &", "unsigned int &"],
+    'unknown' => ["int32_t", "int32_t"])
+  def test_resolveIntAlias(data)
+    typeAlias, expected = data
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("uint32_t", "unsigned int")
+    assert_equal(expected, typeAliasSet.resolveAlias(typeAlias))
+  end
+
+  def test_resolveStructIntAlias
+    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
+      typeAliasSet = TypeAliasSet.new
+      typeAliasSet.add("Alias", "Name")
+      assert_equal("Name", typeAliasSet.resolveAlias("Alias"))
+    end
+  end
+end
+
 class TestBaseBlock < Test::Unit::TestCase
   data(
     'word' => "Varname",
@@ -72,8 +195,44 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal([], parentBlock.children)
   end
 
+  def test_attachTypedefBlock
+    block = BaseBlock.new("Parent")
+    typedefBlock = BaseBlock.new("")
+    block.attachTypedefBlock(typedefBlock)
+    assert_equal(typedefBlock, block.instance_variable_get(:@typedefBlock))
+  end
+
+  def test_collectAliases
+    block = BaseBlock.new("")
+    assert_true(block.collectAliases.aliasSet.empty?)
+  end
+
+  def test_resolveAlias
+    block = BaseBlock.new("")
+    name = "uint32_t"
+    assert_equal(name, block.resolveAlias(name))
+  end
+
+  def test_setTypedef
+    BaseBlock.new("").setTypedef("Name")
+  end
+
   def test_canTraverse
     assert_false(BaseBlock.new("").canTraverse)
+  end
+
+  def test_canMock
+    child = BaseBlock.new("")
+    assert_true(child.canMock)
+
+    parent = BaseBlock.new("")
+    parent.connect(child)
+    def parent.canMock
+      false
+    end
+
+    assert_false(parent.canMock)
+    assert_false(child.canMock)
   end
 
   def test_isClass?
@@ -86,6 +245,10 @@ class TestBaseBlock < Test::Unit::TestCase
 
   def test_getNamespace
     assert_equal("", BaseBlock.new("Name").getNamespace)
+  end
+
+  def test_collectAliasesInBlock
+    assert_nil(BaseBlock.new("Name").collectAliasesInBlock(nil))
   end
 
   def test_parseChildren
@@ -159,6 +322,7 @@ class TestNamespaceBlock < Test::Unit::TestCase
   def test_canTraverse(data)
     name = data
     assert_true(NamespaceBlock.new("namespace #{name} {").canTraverse)
+    assert_true(NamespaceBlock.new("namespace #{name} {").canMock)
   end
 
   data(
@@ -170,6 +334,144 @@ class TestNamespaceBlock < Test::Unit::TestCase
   def test_cannotTraverse(data)
     name = data
     assert_false(NamespaceBlock.new("namespace #{name} {").canTraverse)
+    assert_false(NamespaceBlock.new("namespace #{name} {").canMock)
+  end
+
+  def test_canMock
+    Mockgen::Constants::NAMESPACE_SKIPPED_SET.each do |name|
+      block = NamespaceBlock.new("namespace #{name} {")
+      subBlock = NamespaceBlock.new("namespace NameA {")
+      block.connect(subBlock)
+      assert_false(block.canMock)
+      assert_false(subBlock.canMock)
+    end
+  end
+end
+
+class TestExternCBlock < Test::Unit::TestCase
+  def test_externC
+    block = ExternCBlock.new('extern "C" {')
+    assert_true(block.canTraverse)
+    assert_equal("", block.getNamespace())
+  end
+
+  def test_canMock
+    assert_false(ExternCBlock.new("").canMock)
+  end
+end
+
+class TestTypedefBlock < Test::Unit::TestCase
+  def test_initializeTypedefAndDefinition
+    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
+      name = "ConcreteName"
+      line = "typedef #{key} tagName {"
+      block = TypedefBlock.new(line)
+      assert_false(block.canTraverse)
+      block.setAlias(name)
+      assert_true(block.canTraverse)
+
+      typeAliasSet = block.collectAliasesInBlock(TypeAliasSet.new)
+      assert_equal({ name => "tagName" }, typeAliasSet.aliasSet)
+    end
+  end
+
+  def test_initializeDefinitionWithoutAlias
+    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
+      name = "ConcreteName"
+      line = "typedef #{key} #{name} {"
+      block = TypedefBlock.new(line)
+      block.setAlias(name)
+      assert_false(block.canTraverse)
+    end
+  end
+
+  data(
+    'direct typedef' => ["typedef unsigned int UINT32", ["unsigned", "int"], "UINT32"],
+    'indirect typedef' => ["typedef uint32_t UINT32", ["uint32_t"], "UINT32"])
+  def test_initializeTypedef(data)
+    line, expectedTypeSet, expectedAlias = data
+    block = TypedefBlock.new(line + ";")
+    assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeSet))
+    assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
+    assert_true(block.canTraverse)
+  end
+
+  def test_initializeNotTypedef
+    block = TypedefBlock.new("namespace A")
+    assert_false(block.canTraverse)
+  end
+
+  def test_collectAliasesInBlock
+    block = BaseBlock.new("Parent")
+    blockIndirect = TypedefBlock.new("typedef uint32_t UINT32;")
+    blockDirect = TypedefBlock.new("typedef unsigned int uint32_t;")
+
+    typeAliasSet = blockIndirect.collectAliasesInBlock(TypeAliasSet.new)
+    assert_equal("uint32_t", typeAliasSet.aliasSet["UINT32"])
+
+    typeAliasSet = blockDirect.collectAliasesInBlock(TypeAliasSet.new)
+    assert_equal("unsigned int", typeAliasSet.aliasSet["uint32_t"])
+  end
+
+  def test_setTypedefAndResolveAliasChain
+    block = BaseBlock.new("Parent")
+    typedefBlock = BaseBlock.new("")
+
+    aliasName = "Name"
+    typeName = "tagName"
+    block.setTypedef(aliasName)
+
+    typedefBlock = TypedefBlock.new("typedef struct #{typeName} {")
+    block.attachTypedefBlock(typedefBlock)
+    block.setTypedef(aliasName)
+    assert_equal({aliasName => typeName}, block.collectAliasesInBlock(TypeAliasSet.new).aliasSet)
+  end
+
+  def test_collectAliases
+    rootBlock = BlockFactory.new.createRootBlock
+    block = BaseBlock.new("Parent")
+    rootBlock.connect(block)
+    typeName = "tagName"
+
+    typedefBlock = TypedefBlock.new("typedef struct #{typeName} {")
+    block.attachTypedefBlock(typedefBlock)
+
+    blockDirect = TypedefBlock.new("typedef unsigned int uint32_t;")
+    blockIndirect = TypedefBlock.new("typedef uint32_t UINT32;")
+    block.connect(blockDirect)
+    block.connect(blockIndirect)
+
+    aliasName = "Name"
+    block.setTypedef(aliasName)
+    block.collectAliases
+    assert_equal({"UINT32"=>"unsigned int", "uint32_t"=>"unsigned int"}, block.typeAliasSet.aliasSet)
+    rootBlock.collectAliases
+
+    assert_equal("unsigned int", block.resolveAlias("UINT32"))
+    assert_equal("unsigned int", block.resolveAlias("uint32_t"))
+    assert_equal("uint64_t", block.resolveAlias("uint64_t"))
+    assert_equal(typeName, rootBlock.resolveAlias(aliasName))
+  end
+
+  def test_resolveAliasInHierarchy
+    rootBlock = BlockFactory.new.createRootBlock
+    rootTypedefBlockA = TypedefBlock.new("typedef int32 MyInt;")
+    rootTypedefBlockB = TypedefBlock.new("typedef aStruct T;")
+    rootBlock.connect(rootTypedefBlockA)
+    rootBlock.connect(rootTypedefBlockB)
+
+    ecBlock = ExternCBlock.new('extern "C" {')
+    rootBlock.connect(ecBlock)
+    ecTypedefBlock = TypedefBlock.new("typedef int64 MyInt;")
+    ecBlock.connect(ecTypedefBlock)
+
+    rootBlock.collectAliases
+    ecBlock.collectAliases
+    assert_equal("int32", rootBlock.resolveAlias("MyInt"))
+    assert_equal("int64", ecBlock.resolveAlias("MyInt"))
+    assert_equal("aStruct", rootBlock.resolveAlias("T"))
+    assert_equal("aStruct", ecBlock.resolveAlias("T"))
+    assert_equal("U", ecBlock.resolveAlias("U"))
   end
 end
 
@@ -417,6 +719,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
 
   data(
     'class name' => 'class BigInt',
+    'system variable' => 'struct sys __sys',
     'function1' => 'void Func(void);',
     'function2' => 'void Func(void) const;',
     'function3' => 'void Func(void) override;',
@@ -500,7 +803,8 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     refName, refArgTypeStr, refPostFunc, name, argTypeStr, postFunc = data
     referenceClass = Struct.new(:memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refArgTypeStr, refPostFunc)
-    assert_true(FunctionReferenceSet.new(reference, name, argTypeStr, postFunc).compare())
+    block = BaseBlock.new("")
+    assert_true(FunctionReferenceSet.new(block, reference, name, argTypeStr, postFunc).compare())
   end
 
   data(
@@ -513,7 +817,26 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     refName, refArgTypeStr, refPostFunc, name, argTypeStr, postFunc = data
     referenceClass = Struct.new(:memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refArgTypeStr, refPostFunc)
-    assert_false(FunctionReferenceSet.new(reference, name, argTypeStr, postFunc).compare())
+    block = BaseBlock.new("")
+    assert_false(FunctionReferenceSet.new(block, reference, name, argTypeStr, postFunc).compare())
+  end
+
+  data(
+    'not alias' => ["nameA", "int", "int"],
+    'primitive' => ["nameA", "unsigned int", "uint32_t"],
+    'pointer' => ["nameA", "unsigned int*", "puint32_t"])
+  def test_compareTypeAlias(data)
+    refName, refArgTypeStr, argTypeStr = data
+    referenceClass = Struct.new(:memberName, :argTypeStr, :postFunc)
+    reference = referenceClass.new(refName, refArgTypeStr, "")
+    block = BaseBlock.new("")
+
+    typedefBlockI = TypedefBlock.new("typedef unsigned int uint32_t;")
+    typedefBlockP = TypedefBlock.new("typedef unsigned int* puint32_t;")
+    block.connect(typedefBlockI)
+    block.connect(typedefBlockP)
+    block.collectAliases
+    assert_true(FunctionReferenceSet.new(block, reference, refName, argTypeStr, "").compare())
   end
 
   data(
@@ -526,7 +849,8 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     'multiple args' => ["int,const char*&,T const &", "int,charconst*&,Tconst&"])
   def test_sortArgTypeStr(data)
     arg, expected = data
-    assert_equal(expected, FunctionReferenceSet.new(nil, "", "", "").sortArgTypeStr(arg))
+    block = BaseBlock.new("")
+    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "").sortArgTypeStr(arg))
   end
 
   data(
@@ -536,7 +860,8 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     'const override' => ["const override", "const"])
   def test_postFunctionPhrase(data)
     arg, expected = data
-    assert_equal(expected, FunctionReferenceSet.new(nil, "", "", "").postFunctionPhrase(arg))
+    block = BaseBlock.new("")
+    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "").postFunctionPhrase(arg))
   end
 end
 
@@ -1686,13 +2011,23 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "namespace NameSpaceA {"
     assert_equal("NameSpaceA", factory.createBlock(line, rootBlock).getNamespace)
 
+    line = 'extern "C"'
+    assert_equal("", factory.createBlock(line, rootBlock).getNamespace)
+
     line = "class ClassName {"
+    classBlock = factory.createBlock(line, rootBlock)
+    assert_true(classBlock.isClass?)
+
+    line = "struct ClassName {"
     classBlock = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
 
     # Template is not supported yet
     line = "template <typename T> class ClassName {"
     assert_false(factory.createBlock(line, rootBlock).isClass?)
+
+    line = "typedef unsigned int uint32_tj;"
+    assert_true(factory.createBlock(line, rootBlock).canTraverse)
 
     line = "extern const ClassName& obj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse)
@@ -1708,16 +2043,30 @@ class TestBlockFactory < Test::Unit::TestCase
     block = factory.createBlock(line, classBlock)
     assert_not_nil(block)
   end
+
+  data(
+    'struct' => "struct",
+    'class' => "class")
+  def test_createBlockWithTypedef(data)
+    typeStr = data
+    factory = BlockFactory.new
+    rootBlock = factory.createRootBlock
+
+    line = "typedef #{typeStr} tagName {"
+    block = factory.createBlock(line, rootBlock)
+    assert_not_nil(block.instance_variable_get(:@typedefBlock))
+  end
 end
 
 class TestClassMock < Mockgen::BaseBlock
-  attr_reader :name, :getFullname, :children, :visited
+  attr_reader :name, :getFullname, :children, :visited, :typeAliasSet
 
   def initialize(name, getFullname, children)
     @name = name
     @getFullname = getFullname
     @children = children
     @visited = false
+    @typeAliasSet = TypeAliasSet.new
   end
 
   def isClass?
@@ -1795,28 +2144,53 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_not_equal([], classBlock.instance_variable_get(:@memberFunctionSet))
   end
 
+  def test_parseTypedefAndStruct
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+
+    parser.parseLine("typedef class tagName {")
+    block = parser.instance_variable_get(:@block)
+    assert_true(block.isClass?)
+    assert_not_nil(block)
+
+    parser.parseLine("void FuncA();")
+    parser.parseLine("} Name;")
+
+    typedefBlock = block.instance_variable_get(:@typedefBlock)
+    assert_not_nil(typedefBlock)
+    assert_true(typedefBlock.canTraverse)
+  end
+
   def test_eliminateUnusedBlock
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     parentBlock = BaseBlock.new("Parent")
     childBlock = BaseBlock.new("Child")
     parentBlock.connect(childBlock)
     assert_equal(parentBlock, childBlock.parent)
     assert_equal([childBlock], parentBlock.children)
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
-    parser.eliminateUnusedBlock(parentBlock, childBlock)
+    parser.eliminateUnusedBlock(parentBlock)
+    parser.eliminateUnusedBlock(childBlock)
     assert_nil(childBlock.parent)
     assert_equal([], parentBlock.children)
+  end
 
+  def test_eliminateAllUnusedBlock
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parentBlock = BaseBlock.new("Parent")
+    childBlock = BaseBlock.new("Child")
     parentBlock.connect(childBlock)
-    assert_equal(parentBlock, childBlock.parent)
-    assert_equal([childBlock], parentBlock.children)
-    def childBlock.canTraverse
-      true
-    end
 
-    parser.eliminateUnusedBlock(parentBlock, childBlock)
-    assert_equal(parentBlock, childBlock.parent)
-    assert_equal([childBlock], parentBlock.children)
+    parser.eliminateAllUnusedBlock(childBlock)
+    assert_not_nil(childBlock.parent)
+
+    rootBlock = BlockFactory.new.createRootBlock
+    nsBlock = NamespaceBlock.new("namespace std {")
+    rootBlock.connect(nsBlock)
+    nsBlock.connect(parentBlock)
+
+    parser.eliminateAllUnusedBlock(rootBlock)
+    assert_nil(nsBlock.parent)
+    assert_equal([], rootBlock.children)
   end
 
   def test_buildClassTree
@@ -1869,6 +2243,39 @@ class TestCppFileParser < Test::Unit::TestCase
     parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
     expected = [["varB_", "::A::varB_", "Base"],["varD_", "::A::varD_", "Derived"]]
     assert_equal(expected, parser.collectVariables(blockSet))
+  end
+
+  def test_collectTypedefs
+    rootBlock = RootBlock.new("")
+    ns = NamespaceBlock.new("namespace A {")
+    ec = ExternCBlock.new('extern "C" {')
+    rootBlock.connect(ns)
+    rootBlock.connect(ec)
+    subec = ExternCBlock.new('extern "C" {')
+    ec.connect(subec)
+
+    aliasNs = TypedefBlock.new("typedef long Counter;")
+    ns.connect(aliasNs)
+
+    aliasStruct = TypedefBlock.new("typedef struct tagStructName {")
+    aliasStruct.setAlias("StructName")
+    ec.connect(aliasStruct)
+
+    aliasInt = TypedefBlock.new("typedef int INT;")
+    subec.connect(aliasInt)
+
+    aliasSystem = TypedefBlock.new("typedef int __int;")
+    subec.connect(aliasSystem)
+
+    aliasRoots = TypedefBlock.new("typedef long long LongCounter;")
+    rootBlock.connect(aliasRoots)
+
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser.collectTypedefs(rootBlock)
+    assert_equal({"Counter"=>"long"}, ns.typeAliasSet.aliasSet)
+    assert_equal({"StructName"=>"tagStructName"}, ec.typeAliasSet.aliasSet)
+    assert_equal({"INT"=>"int", "__int"=>"int"}, subec.typeAliasSet.aliasSet)
+    assert_equal({"LongCounter"=>"long long", "StructName"=>"tagStructName", "INT"=>"int"}, rootBlock.typeAliasSet.aliasSet)
   end
 
   def test_makeTypeVarAliases

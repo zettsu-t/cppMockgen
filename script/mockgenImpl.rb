@@ -53,15 +53,87 @@ require_relative './mockgenConst.rb'
 require_relative './mockgenCommon.rb'
 
 module Mockgen
+  class TypeStringWithoutModifier
+    attr_reader :strSet
+    def initialize(typeStrSet)
+      strSet = typeStrSet.map { |str| str.split(/([\s\*&]+)/) }.flatten
+      @strSet = strSet.reject do |typeword|
+        Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.any? { |word| word == typeword.strip } ||
+          typeword =~ /^\s*$/
+      end
+    end
+  end
+
+  # Block-scoped typedef set
+  class TypeAliasSet
+    attr_reader :aliasSet
+    def initialize
+      @aliasSet = {}
+    end
+
+    def add(aliasName, actualName)
+      resolve(aliasName, actualName) unless @aliasSet.key?(aliasName)
+    end
+
+    def merge(outerSet)
+      outerSet.aliasSet.each do |aliasName, actualName|
+        @aliasSet[aliasName] = actualName unless @aliasSet.key?(aliasName)
+      end
+
+      @aliasSet.dup.each do |aliasName, actualName|
+        resolve(aliasName, actualName)
+      end
+    end
+
+    def resolve(aliasName, actualName)
+      actualNameStr = actualName.dup
+      actualNameWordSet = TypeStringWithoutModifier.new([actualName]).strSet
+
+      while true
+        previousStr = actualNameStr.dup
+        newTypeSet = actualNameWordSet.map do |word|
+          @aliasSet.key?(word) ? @aliasSet[word] : word
+        end
+
+        actualNameWordSet = newTypeSet
+        actualNameStr = newTypeSet.join(" ")
+        # Transform aliases until no more conversions needed
+        break if actualNameStr == previousStr
+      end
+
+      @aliasSet[aliasName] = actualNameStr
+    end
+
+    # remove system internal definitions such as __uint32_t
+    def removeSystemInternalSymbols
+      @aliasSet.reject! { |key, value| isSystemInternalSymbol(key) || isSystemInternalSymbol(value) }
+    end
+
+    def isSystemInternalSymbol(str)
+      str.include?("__") || (!str.empty? && str[0] == "_")
+    end
+
+    def resolveAlias(typeStr)
+      typeStrSet = TypeStringWithoutModifier.new([typeStr]).strSet
+
+      typeStrSet.map do |typeword|
+        word = typeword.strip
+        @aliasSet.key?(word) ? @aliasSet[word] : word
+      end.join(" ")
+    end
+  end
+
   # Generic Block Structure
   class BaseBlock
-    attr_reader :parent, :children
+    attr_reader :parent, :children, :typeAliasSet
 
     # line : Head of block line (leading and trailing spaces must be removed)
     def initialize(line)
-      @line = line    # Headline of a block
-      @parent = nil   # nil for the root block
-      @children = []  # Children order by addition
+      @line = line      # Headline of a block
+      @parent = nil     # nil for the root block
+      @children = []    # Children order by addition
+      @typedefBlock = nil  # type alias for this block
+      @typeAliasSet = TypeAliasSet.new  # type aliases in this block scope
     end
 
     # Connect parent-child blocks
@@ -77,10 +149,52 @@ module Mockgen
       removeChild(child)
     end
 
+    # Attach an type alias block for "typedef struct tagName {"
+    def attachTypedefBlock(block)
+      @typedefBlock = block if block
+    end
+
+    # Set an alias for "} alias;"
+    def setTypedef(name)
+      @typedefBlock.setAlias(name) if @typedefBlock
+    end
+
+    def collectAliases
+      @children.each do |child|
+        typeAliasSet = child.collectAliasesInBlock(@typeAliasSet)
+      end
+
+      @typeAliasSet = typeAliasSet
+    end
+
+    def resolveAlias(typeStr)
+      result = typeStr.dup
+      block = self
+
+      while(result == typeStr && block)
+        result = block.typeAliasSet.resolveAlias(typeStr)
+        block = block.parent
+      end
+
+      result
+    end
+
     ## Derived classes override methods below
     # Return if need to traverse this block
     def canTraverse
       false
+    end
+
+    # Do not mock structs in extern "C" {}
+    def canMock
+      result = true
+      block = parent
+      while block
+        result &= block.canMock
+        block = block.parent
+      end
+
+      result
     end
 
     def isClass?
@@ -94,6 +208,11 @@ module Mockgen
     # Class and struct names are treated as namespaces
     def getNamespace
       ""
+    end
+
+    def collectAliasesInBlock(typeAliasSet)
+      @typedefBlock.collectAliasesInBlock(typeAliasSet) if @typedefBlock
+      typeAliasSet
     end
 
     # Create a block instance and return it if can
@@ -196,8 +315,77 @@ module Mockgen
       !(Mockgen::Constants::NAMESPACE_SKIPPED_SET.any? { |name| @name =~ /^#{name}/ })
     end
 
+    def canMock
+      canTraverse() && super
+    end
+
     def getNamespace
       @name
+    end
+  end
+
+  # Extern "C" block
+  class ExternCBlock < BaseBlock
+    def initialize(line)
+      super
+    end
+
+    def canTraverse
+      true
+    end
+
+    def canMock
+      false
+    end
+
+    def getNamespace
+      ""
+    end
+  end
+
+  # Simple typedef
+  class TypedefBlock < BaseBlock
+    def initialize(line)
+      super
+
+      @actualTypeSet = []
+      @typeAlias = nil
+      @trailing = false
+      typeStrSet = []
+
+      if line[-1] == "{"
+        wordSet = line.tr("{","").split(" ")
+        # typedef struct tagName {
+        if (wordSet.size >= 2)
+          typeStrSet = wordSet[1..-1]
+          @trailing = true
+        end
+      elsif
+        wordSet = line.tr(";","").split(" ")
+        if (wordSet.size >= 3)
+          # typedef struct Name Alias;
+          typeStrSet = wordSet[1..-2]
+          @typeAlias = wordSet[-1]
+        end
+      end
+
+      @actualTypeSet = TypeStringWithoutModifier.new(typeStrSet).strSet
+    end
+
+    def canTraverse
+      return !@typeAlias.nil?
+    end
+
+    # set an alias after its definition
+    def setAlias(name)
+      @typeAlias = name unless (@actualTypeSet.size >= 1) && (@actualTypeSet[-1] == name)
+    end
+
+    def collectAliasesInBlock(typeAliasSet)
+      return typeAliasSet if @typeAlias.nil?
+      actualTypeStr = @actualTypeSet.join(" ")
+      typeAliasSet.add(@typeAlias, actualTypeStr)
+      typeAliasSet
     end
   end
 
@@ -439,7 +627,7 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def parse(line)
-      return if line.empty? || line[-1] == ")"
+      return if line.empty? || line[-1] == ")" || line.include?("__")
 
       # Exclude member functions and type aliases
       wordSet = line.split(" ")
@@ -501,7 +689,8 @@ module Mockgen
 
   # Compare argument types between a linker output and a source file
   class FunctionReferenceSet
-    def initialize(reference, name, argTypeStr, postFunc)
+    def initialize(block, reference, name, argTypeStr, postFunc)
+      @scopedBlock = block
       @name = name
       @name ||= ""
       @argTypeStr = argTypeStr
@@ -517,10 +706,16 @@ module Mockgen
     end
 
     def compare
+      # Resolve typedefs because linkers know the exact type
+      # after its aliases are solved but the clang front end does not
+      # know the aliases
+      argTypeStr = sortArgTypeStr(@scopedBlock.resolveAlias(@argTypeStr))
+      refArgTypeStr = sortArgTypeStr(@scopedBlock.resolveAlias(@refArgTypeStr))
+
       # const char * and char const * are equivalent
       # Distinguish const and non-const functions
       (@refName == @name) &&
-        (sortArgTypeStr(@argTypeStr) == sortArgTypeStr(@refArgTypeStr)) &&
+        (argTypeStr == refArgTypeStr) &&
         (postFunctionPhrase(@postFunc) == postFunctionPhrase(@refPostFunc))
     end
 
@@ -536,6 +731,19 @@ module Mockgen
       phrase.split(" ").map do |poststr|
         Mockgen::Constants::MEMFUNC_WORD_COMPARED_SET.any? { |word| word == poststr } ? poststr : ""
       end.join("")
+    end
+
+    # Collect type aliases in the scoped block
+    def collectAliases
+      typeAliasSetChain = []
+
+      block = @scopedBlock
+      while block
+        typeAliasSetChain << block.typeAliasSet
+        block = block.parent
+      end
+
+      typeAliasSetChain
     end
   end
 
@@ -572,10 +780,7 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      # Ignore type aliases because linkers know the exact type
-      # after its aliases are solved but the clang front end does not
-      # know the aliases
-      FunctionReferenceSet.new(reference, @className, @argTypeStr, "").compare
+      FunctionReferenceSet.new(self, reference, @className, @argTypeStr, "").compare
     end
 
     # Non default constructive base classes are not supported yet
@@ -693,10 +898,7 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      # Ignore type aliases because linkers know the exact type
-      # after its aliases are solved but the clang front end does not
-      # know the aliases
-      FunctionReferenceSet.new(reference, @funcName, @argTypeStr, @postFunc).compare
+      FunctionReferenceSet.new(self, reference, @funcName, @argTypeStr, @postFunc).compare
     end
 
     ## Public methods added on the base class
@@ -1264,14 +1466,26 @@ module Mockgen
       line = LineWithoutAttribute.new(argLine).str
       block = BaseBlock.new(line)
       newBlock = nil
+      typedefBlock = nil
 
       # Switch by the first keyword of the line
       if md = line.match(/^(.*\S)\s*{/)
         words = line.split(/\s+/)
+        if words[0] == "typedef"
+          typedefBlock = TypedefBlock.new(line)
+          line.gsub!(/^typedef\s+/, "")
+          words.shift
+        end
+
         case words[0]
         when "namespace"
           newBlock = NamespaceBlock.new(line)
+        when "extern"
+          newBlock = ExternCBlock.new(line) if words[1] == '"C"'
         when "class"
+          newBlock = ClassBlock.new(line)
+        # class is a syntactic sugar as private struct
+        when "struct"
           newBlock = ClassBlock.new(line)
         when "template"
           if words.any? { |word| word == "class" }
@@ -1284,6 +1498,8 @@ module Mockgen
         if md = line.match(/^(.*\S)\s*;/)
           words = line.split(/\s+/)
           case words[0]
+          when "typedef"
+            newBlock = TypedefBlock.new(line)
           when "extern"
             newBlock = ExternVariableStatement.new(line)
           end
@@ -1293,7 +1509,10 @@ module Mockgen
       # Delegate to the current class block
       newBlock = parentBlock.parseChildren(line) unless newBlock
 
-      block = newBlock if newBlock
+      if newBlock
+        block = newBlock
+        block.attachTypedefBlock(typedefBlock)
+      end
       block
     end
   end
@@ -1502,14 +1721,17 @@ module Mockgen
     def parseLine(line)
       block = @blockFactory.createBlock(line, @block)
 
-      if (line[0] == "}") && (line[-1] == "{")
       # } else {
+      if (line[0] == "}") && (line[-1] == "{")
+      # End of a block
       elsif (line[0] == "}")
         # End of a block
+        wordSet = line.tr(";", "").split(" ")
+        @block.setTypedef(wordSet[1]) if wordSet.size > 1
+
         childBlock = @block
         parentBlock = @block.parent
         @block = parentBlock
-        eliminateUnusedBlock(parentBlock, childBlock)
       else
         # Connect "... {" and "... ;" lines
         @block.connect(block)
@@ -1520,8 +1742,19 @@ module Mockgen
       end
     end
 
-    def eliminateUnusedBlock(parentBlock, childBlock)
-      parentBlock.disconnect(childBlock) unless childBlock.canTraverse
+    def eliminateUnusedBlock(block)
+      parent = block.parent
+      parent.disconnect(block) if parent
+    end
+
+    def eliminateAllUnusedBlock(argBlock)
+      argBlock.children.each do |child|
+        if child.canTraverse && child.canMock
+          eliminateAllUnusedBlock(child)
+        else
+          eliminateUnusedBlock(child)
+        end
+      end
     end
 
     def parseLinkLog(linkLogFilename)
@@ -1529,12 +1762,16 @@ module Mockgen
     end
 
     def buildClassTree(referenceSet)
+      # Resolve aliases before find undefined references
+      collectTypedefs(@block)
       # classSet : class name => block
       classSet = collectClasses(@block.children, referenceSet)
       connectClasses(@block.children, classSet)
 
       varSet = collectVariables(@block.children)
       @classInstanceMap = makeTypeVarAliases(varSet, classSet)
+
+      eliminateAllUnusedBlock(@block)
     end
 
     def collectClasses(rootBlockSet, referenceSet)
@@ -1563,6 +1800,23 @@ module Mockgen
 
       doForAllBlocks(rootBlockSet, lambdaToBlock, :isNonMemberInstanceOfClass?)
       varSet
+    end
+
+    def collectTypedefs(rootBlock)
+      lambdaToBlock = lambda do |block|
+        block.collectAliases
+      end
+
+      # Construct top-level namespace typedefs
+      rootBlock.collectAliases
+      # Construct block scoped typedefs
+      doForAllBlocks(rootBlock.children, lambdaToBlock, :canTraverse)
+
+      # Construct top-level namespace typedefs including extern "C" {}
+      typedefArray = collectTopLevelTypedefSet(rootBlock).flatten.compact
+      rootTypedef = rootBlock.typeAliasSet
+      typedefArray.each { |typedefSet| rootTypedef.merge(typedefSet) }
+      rootBlock.typeAliasSet.removeSystemInternalSymbols
     end
 
     def makeTypeVarAliases(varSet, classSet)
@@ -1613,8 +1867,8 @@ module Mockgen
     end
 
     # Breadth-first search blocks and apply arg lambdas to them
-    def doForAllBlocks(rootBlockSet, lambdaToBlock, labelToCheck)
-      blockSet = rootBlockSet
+    def doForAllBlocks(argBlockSet, lambdaToBlock, labelToCheck)
+      blockSet = argBlockSet
 
       while(!blockSet.empty?)
         nextBlockSet = []
@@ -1625,6 +1879,16 @@ module Mockgen
 
         blockSet = nextBlockSet
       end
+    end
+
+    def collectTopLevelTypedefSet(argBlock)
+      typeAliasSetArray = []
+      argBlock.children.each do |child|
+        typeAliasSetArray << child.typeAliasSet if child.getNamespace.empty?
+        typeAliasSetArray << collectTopLevelTypedefSet(child) if child.getNamespace.empty?
+      end
+
+      typeAliasSetArray
     end
 
     def writeFile(filename, labelAttr, preStr, postStr, blockSet)

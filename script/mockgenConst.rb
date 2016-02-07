@@ -6,12 +6,13 @@
 module Mockgen
   module Constants
     # Namespaces not parsed
-    NAMESPACE_SKIPPED_SET = ["std", "boost", "testing"].map(&:freeze).freeze
+    NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
     # Reserved for compiler internal use
     NAMESPACE_COMPILER_INTERNAL = "__".freeze
     # Excluded class names (practically, they should be specified in command line options)
     CLASS_NAME_EXCLUDED_SET = ["$$$"]
 
+    KEYWORD_USER_DEFINED_TYPE_SET = ["struct", "class", "enum", "union"].map(&:freeze).freeze
     # Keyword attribute
     KEYWORD_ATTRIBUTE_WITH_ARGS = ["__attribute__", "__aligned"].map(&:freeze).freeze
     # Keyword qualifier
