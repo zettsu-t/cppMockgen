@@ -18,6 +18,7 @@ class TestTypeStringWithoutModifier < Test::Unit::TestCase
 
   data(
     'primitive' => ["class T**", ["T", "**"]],
+    'spaces' => ["class T * ", ["T", "*"]],
     'reference' => ["struct S&", ["S", "&"]])
   def test_removeReservedWordWithModifier(data)
     arg, expected = data
@@ -28,7 +29,10 @@ end
 class TestTypeAliasSet < Test::Unit::TestCase
   def test_add
     typeAliasSet = TypeAliasSet.new
+    assert_true(typeAliasSet.empty?)
+
     typeAliasSet.add("uint32_t", "unsigned int")
+    assert_false(typeAliasSet.empty?)
     expected = {"uint32_t" => "unsigned int"}
     assert_equal(expected, typeAliasSet.aliasSet)
 
@@ -138,6 +142,7 @@ class TestBaseBlock < Test::Unit::TestCase
   def test_initialize(data)
     line = data
     block = BaseBlock.new(line)
+    assert_false(block.skippingParse)
     assert_equal(line, block.instance_variable_get(:@line))
     assert_nil(block.parent)
     assert_equal([], block.children)
@@ -361,33 +366,10 @@ class TestExternCBlock < Test::Unit::TestCase
 end
 
 class TestTypedefBlock < Test::Unit::TestCase
-  def test_initializeTypedefAndDefinition
-    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
-      name = "ConcreteName"
-      line = "typedef #{key} tagName {"
-      block = TypedefBlock.new(line)
-      assert_false(block.canTraverse)
-      block.setAlias(name)
-      assert_true(block.canTraverse)
-
-      typeAliasSet = block.collectAliasesInBlock(TypeAliasSet.new)
-      assert_equal({ name => "tagName" }, typeAliasSet.aliasSet)
-    end
-  end
-
-  def test_initializeDefinitionWithoutAlias
-    Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
-      name = "ConcreteName"
-      line = "typedef #{key} #{name} {"
-      block = TypedefBlock.new(line)
-      block.setAlias(name)
-      assert_false(block.canTraverse)
-    end
-  end
-
   data(
     'direct typedef' => ["typedef unsigned int UINT32", ["unsigned", "int"], "UINT32"],
-    'indirect typedef' => ["typedef uint32_t UINT32", ["uint32_t"], "UINT32"])
+    'indirect typedef' => ["typedef uint32_t UINT32", ["uint32_t"], "UINT32"],
+    'pointer' => ["typedef uint32_t *PUINT32", ["uint32_t", "*"], "PUINT32"])
   def test_initializeTypedef(data)
     line, expectedTypeSet, expectedAlias = data
     block = TypedefBlock.new(line + ";")
@@ -715,6 +697,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
      assert_true(block.isNonMemberInstanceOfClass?)
      assert_equal(type, block.className)
      assert_equal(var, block.getFullname)
+     assert_equal("", block.arrayStr)
   end
 
   data(
@@ -744,16 +727,17 @@ class TestExternVariableStatement < Test::Unit::TestCase
   end
 
   data(
-    'blank' => ['Type a[];', "Type", "a[]"],
-    'num' => ['Type a [ 1 ];', "Type", "a[ 1 ]"],
-    'pointer'  => ['class Type *pA[ size ];',  "Type", "pA[ size ]"])
+    'blank' => ['Type a[];', "Type", "a[]", "[]"],
+    'num' => ['Type a [ 1 ];', "Type", "a[ 1 ]", "[ 1 ]"],
+    'pointer'  => ['class Type *pA[ size ];',  "Type", "pA[ size ]", "[ size ]"])
   def test_parseArray(data)
-     line, type, var = data
+     line, type, var, arrayStr = data
      block = ExternVariableStatement.new("extern #{line}")
      assert_true(block.canTraverse)
      assert_true(block.isNonMemberInstanceOfClass?)
      assert_equal(type, block.className)
      assert_equal(var, block.getFullname)
+     assert_equal(arrayStr, block.arrayStr)
   end
 
   # getFullname() is tested in the base class.
@@ -1334,13 +1318,20 @@ class TestClassBlock < Test::Unit::TestCase
 
   def test_parseChildrenClass
     block = ClassBlock.new("class NameC")
+    assert_true(block.skippingParse)
+
     assert_nil(block.parseChildren("public:"))
     assert_equal(true, block.instance_variable_get(:@pub))
+    assert_false(block.skippingParse)
+
     assert_nil(block.parseChildren("protected:"))
     assert_equal(false, block.instance_variable_get(:@pub))
+    assert_true(block.skippingParse)
+
     assert_nil(block.parseChildren("public :"))
     assert_equal(true, block.instance_variable_get(:@pub))
     assert_equal([], block.instance_variable_get(:@memberFunctionSet))
+    assert_false(block.skippingParse)
 
     nonFuncLine = "typedef Count int;"
     assert_nil(block.parseChildren(nonFuncLine))
@@ -1348,10 +1339,12 @@ class TestClassBlock < Test::Unit::TestCase
     varLine = "static Count count_;"
     assert_not_nil(block.parseChildren(varLine))
     assert_not_equal([], block.instance_variable_get(:@memberVariableSet))
+    assert_false(block.canMock)
 
     funcLine = "void Func();"
     assert_not_nil(block.parseChildren(funcLine))
     assert_not_equal([], block.instance_variable_get(:@memberFunctionSet))
+    assert_true(block.canMock)
 
     constructorLine = "NameC();"
     assert_not_nil(block.parseChildren(constructorLine))
@@ -1373,10 +1366,12 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(false, block.instance_variable_get(:@pub))
     assert_nil(block.parseChildren("public:"))
     assert_equal(true, block.instance_variable_get(:@pub))
+    assert_false(block.canMock)
 
     constructorLine = "NameS();"
     assert_not_nil(block.parseChildren(constructorLine))
     assert_not_equal([], block.instance_variable_get(:@constructorSet))
+    assert_true(block.canMock)
 
     assert_nil(block.parseChildren("private :"))
     assert_equal(false, block.instance_variable_get(:@pub))
@@ -2018,9 +2013,19 @@ class TestBlockFactory < Test::Unit::TestCase
     classBlock = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
 
+    # Define as a private member
+    line = "class InnerClass {"
+    innerClassBlock = factory.createBlock(line, classBlock)
+    assert_false(innerClassBlock.isClass?)
+
     line = "struct ClassName {"
     classBlock = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
+
+    # Define as a public member
+    line = "class InnerClass {"
+    innerClassBlock = factory.createBlock(line, classBlock)
+    assert_true(innerClassBlock.isClass?)
 
     # Template is not supported yet
     line = "template <typename T> class ClassName {"
@@ -2372,6 +2377,38 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal("", defStr)
   end
 
+  data(
+    'topLevel' => false,
+    'in a namespace' => true)
+  def test_makeTypeVarAliasElementsForArray(data)
+    useNamespace = data
+    ns = NamespaceBlock.new("namespace A")
+    className = "NameB"
+    block = ClassBlock.new("class #{className}")
+    ns.connect(block) if useNamespace
+
+    classSet = {className => block }
+    varBase = "aVariable"
+    arratStr = "[32]"
+    varName = varBase + arratStr
+    varFullname = useNamespace ? "::A::#{varName}" : "#{varName}"
+
+    nsName = "NameSpace"
+    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
+    tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliasElements(classSet, varName, varFullname, className)
+    assert_equal("#define #{className} ::#{nsName}::#{className}#{postfix}\n", tsStr)
+
+    postfix = Mockgen::Constants::CLASS_POSTFIX_FORWARDER
+    expected = (useNamespace ? "using ::A::#{varBase};\n" : "")
+    expected += "#define #{varBase} ::#{nsName}::#{varBase}#{postfix}\n"
+    assert_equal(expected, vsStr)
+
+    expected = "extern #{className}#{postfix} #{varBase}#{postfix}#{arratStr};\n"
+    assert_equal(expected, declStr)
+    assert_equal("", defStr)
+  end
+
   def test_doForAllBlocks
     blockA = TestClassMock.new("A", "", [])
     blockB = TestClassMock.new("B", "", [blockA])
@@ -2384,6 +2421,21 @@ class TestCppFileParser < Test::Unit::TestCase
     lambdaToBlock = lambda { |block| log = log + block.name }
     parser.doForAllBlocks([blockE], lambdaToBlock, :isClass?)
     assert_equal("EDBCA", log)
+  end
+
+  def test_collectTopLevelTypedefSet
+    rootBlock = BlockFactory.new.createRootBlock
+    ecBlock1 = ExternCBlock.new('extern "C" {')
+    ecBlock2 = ExternCBlock.new('extern "C" {')
+    rootBlock.connect(ecBlock1)
+    rootBlock.connect(ecBlock2)
+
+    ecTypedefBlock = TypedefBlock.new("typedef int64 MyInt;")
+    ecBlock2.connect(ecTypedefBlock)
+    ecBlock2.collectAliases
+
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    assert_equal(1, parser.collectTopLevelTypedefSet(rootBlock).flatten.size)
   end
 
   def test_getClassFileHeader

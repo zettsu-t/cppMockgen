@@ -60,7 +60,7 @@ module Mockgen
       @strSet = strSet.reject do |typeword|
         Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.any? { |word| word == typeword.strip } ||
           typeword =~ /^\s*$/
-      end
+      end.map { |word| word.strip }
     end
   end
 
@@ -69,6 +69,10 @@ module Mockgen
     attr_reader :aliasSet
     def initialize
       @aliasSet = {}
+    end
+
+    def empty?
+      @aliasSet.empty?
     end
 
     def add(aliasName, actualName)
@@ -134,6 +138,11 @@ module Mockgen
       @children = []    # Children order by addition
       @typedefBlock = nil  # type alias for this block
       @typeAliasSet = TypeAliasSet.new  # type aliases in this block scope
+    end
+
+    # Skip to parse child members
+    def skippingParse
+      false
     end
 
     # Connect parent-child blocks
@@ -353,20 +362,18 @@ module Mockgen
       @trailing = false
       typeStrSet = []
 
-      if line[-1] == "{"
-        wordSet = line.tr("{","").split(" ")
-        # typedef struct tagName {
-        if (wordSet.size >= 2)
-          typeStrSet = wordSet[1..-1]
-          @trailing = true
-        end
-      elsif
-        wordSet = line.tr(";","").split(" ")
-        if (wordSet.size >= 3)
-          # typedef struct Name Alias;
-          typeStrSet = wordSet[1..-2]
-          @typeAlias = wordSet[-1]
-        end
+      # clang splits the idiom which define a struct and its alias simultaniously,
+      # from "typedef struct tagCstyleStruct {} CstyleStruct;"
+      # to "struct tagCstyleStruct {}; and
+      # "typedef struct tagCstyleStruct CstyleStruct;"
+      #
+      # clang writes a typedef to a pointer in the form of
+      # "Type *PTYPE", not "Type* PTYPE"
+      wordSet = TypeStringWithoutModifier.new([line.tr(";","")]).strSet
+      if (wordSet.size >= 3)
+        # typedef struct Name Alias;
+        typeStrSet = wordSet[1..-2]
+        @typeAlias = wordSet[-1]
       end
 
       @actualTypeSet = TypeStringWithoutModifier.new(typeStrSet).strSet
@@ -600,7 +607,7 @@ module Mockgen
   # External or class member variable (not extern typename)
   class VariableStatement < BaseBlock
     # the className is CV removed and dereferenced
-    attr_reader :varName, :className
+    attr_reader :varName, :className, :arrayStr
 
     def initialize(line)
       super
@@ -610,6 +617,7 @@ module Mockgen
       @className = ""
       @typeStr = ""
       @canTraverse = false
+      @arrayStr = ""
       parse(line.gsub(/\s*[{;].*$/,"").strip)
     end
 
@@ -645,7 +653,11 @@ module Mockgen
       return if typeName.empty? || varName.empty?
 
       @varName = varName
-      @varNameNoCardinality = ChompAfterDelimiter.new(varName, "[").str
+      varStr = ChompAfterDelimiter.new(varName, "[")
+      @varNameNoCardinality = varStr.str
+      @arrayStr = varStr.tailStr
+      @arrayStr ||= ""
+
       @className = ChompAfterDelimiter.new(typeName, "[").str.split(/[\*&\s]+/)[-1]
       @typeStr = typeName
       @canTraverse = true
@@ -1087,8 +1099,18 @@ module Mockgen
       @baseClassBlockSet = []
     end
 
+    # Skip to parse child members
+    def skippingParse
+      !@pub
+    end
+
     def canTraverse
       @valid
+    end
+
+    def canMock
+      # exclude PODs
+      @valid && (!@constructorSet.empty? || !@memberFunctionSet.empty?)
     end
 
     def isClass?
@@ -1469,7 +1491,8 @@ module Mockgen
       typedefBlock = nil
 
       # Switch by the first keyword of the line
-      if md = line.match(/^(.*\S)\s*{/)
+      # Should merge this and parse in classBlock to handle inner classes
+      if md = line.match(/^(.*\S)\s*{/) && !parentBlock.skippingParse
         words = line.split(/\s+/)
         if words[0] == "typedef"
           typedefBlock = TypedefBlock.new(line)
@@ -1833,23 +1856,32 @@ module Mockgen
       block = classSet[className]
       return "", "", "", "" unless block
 
+      # should move this to a parse phase...
+      varNameStr = ChompAfterDelimiter.new(varName, "[")
+      varFullnameStr = ChompAfterDelimiter.new(varFullname, "[")
+
       mockName = className + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
       actualClassName = block.decoratorName
-      actualVarName = varName + Mockgen::Constants::CLASS_POSTFIX_FORWARDER
+      actualVarName = varNameStr.str + Mockgen::Constants::CLASS_POSTFIX_FORWARDER
 
       classBasename = block.getNamespace
       usingLine = (classBasename != className) ? "using #{className};\n" : ""
       typeSwapperStr = usingLine
       typeSwapperStr += '#' + "define #{classBasename} ::#{@cppNameSpace}::#{actualClassName}\n"
 
-      usingLine = (varName != varFullname) ? "using #{varFullname};\n" : ""
+      usingLine = (varNameStr.str != varFullnameStr.str) ? "using #{varFullnameStr.str};\n" : ""
       varSwapperStr = usingLine
-      varSwapperStr += '#' + "define #{varName} ::#{@cppNameSpace}::#{actualVarName}\n"
+      varSwapperStr += '#' + "define #{varNameStr.str} ::#{@cppNameSpace}::#{actualVarName}\n"
 
       # Const member variables and templates are not supported yet
       actualClassName = block.forwarderName
-      declStr = "extern #{actualClassName} #{actualVarName};\n"
-      defStr  = "#{actualClassName} #{actualVarName}(#{varFullname});\n"
+
+      arrayStr = varNameStr.tailStr
+      arrayStr ||= ""
+      declStr = "extern #{actualClassName} #{actualVarName}#{arrayStr};\n"
+      # Define arrays in a test case
+      defStr = "#{actualClassName} #{actualVarName}(#{varFullname});\n" unless varFullnameStr.tailStr
+      defStr ||= ""
 
       return typeSwapperStr, varSwapperStr, declStr, defStr
     end
@@ -1884,7 +1916,8 @@ module Mockgen
     def collectTopLevelTypedefSet(argBlock)
       typeAliasSetArray = []
       argBlock.children.each do |child|
-        typeAliasSetArray << child.typeAliasSet if child.getNamespace.empty?
+        typeAliasSet = child.typeAliasSet
+        typeAliasSetArray << typeAliasSet if (child.getNamespace.empty? && !typeAliasSet.empty?)
         typeAliasSetArray << collectTopLevelTypedefSet(child) if child.getNamespace.empty?
       end
 
