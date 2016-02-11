@@ -7,6 +7,9 @@
 # $ mockgen.rb 7-filenames clang-options(one or more)
 #
 # The first seven arguments are in/out filenames.
+# - [in]  stub or mock (specify stub to generate stubs
+#         stub : generate stubs
+#         mock : generate stubs and mocks
 # - [in]  input .hpp file
 # - [out] intermediate .hpp file that clang writes
 # - [out] class definition

@@ -92,6 +92,7 @@ public:
     virtual int FuncPtrDefaultArgument(void(*funcptr)(int)=&defaultCallback);
     virtual int FuncMissingA(int32_t a);
     virtual int FuncMissingB(MyInt64 a);  // Resolve the typedef to make a stub
+    virtual CstyleStruct FuncMissingC(void);
 };
 
 // Testing to ignore operators
@@ -105,6 +106,10 @@ public:
     static ClassNotInstanciated instance_;
     static void (*f)(int a);
     static int arrayMissing[4];
+    static class Inner {
+    public:
+        int Func();
+    } inner_;
 };
 
 // Testing to ignore attributes

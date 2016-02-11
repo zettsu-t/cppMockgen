@@ -188,6 +188,23 @@ module Mockgen
       result
     end
 
+    def findType(typeStr)
+      aliasType = resolveAlias(typeStr)
+      found = (aliasType != typeStr)
+      canInitializeByZero = false
+
+      primitive = aliasType.split(" ").any? do |aliasWord|
+        Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_SET.any? { |word| word == aliasWord }
+      end
+
+      if primitive
+        found = true
+        canInitializeByZero = true
+      end
+
+      return found, canInitializeByZero
+    end
+
     ## Derived classes override methods below
     # Return if need to traverse this block
     def canTraverse
@@ -428,9 +445,9 @@ module Mockgen
       newArgStr = @line.dup
 
       splitter = ChompAfterDelimiter.new(@line, "=")
-      poststr = splitter.str
+      mainBlock = splitter.str
       defaultValueBlock = splitter.tailStr
-      str, arrayBlock = splitArrayBlock(poststr)
+      str, arrayBlock = splitArrayBlock(mainBlock)
 
       # Assume T(f)(args) as a pointer to a function
       # T(f[])(args) is not supported
@@ -448,7 +465,9 @@ module Mockgen
         newArgStr += arrayBlock if arrayBlock
       else
         argType = wordSet[0..-2].join(" ")
-        argName = wordSet[-1]
+        # Copy a namespace of the type to the arg
+        argName = addNamespaceToDefaultVariable(argType, wordSet[-1])
+        newArgStr = addNamespaceToDefaultVariable(argType, newArgStr)
       end
 
       argType += arrayBlock if arrayBlock
@@ -524,6 +543,12 @@ module Mockgen
       end
 
       return argType, name, argStr
+    end
+
+    def addNamespaceToDefaultVariable(namespaceStr, varName)
+      return varName unless namespaceStr && namespaceStr.include?("::")
+      prefix = namespaceStr.split(/(:+)/)[0..-2].join("")
+      varName.gsub(/(=\s*)/, '\1' + prefix)
     end
   end
 
@@ -626,11 +651,20 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      reference.memberName == @varNameNoCardinality
+      !reference.memberName.nil? && (reference.memberName == @varNameNoCardinality)
     end
 
+    # Need to improve to handle class-local typedefs
     def makeStubDef(className)
-      "#{@typeStr} #{getFullname()};\n"
+      prefix = ""
+      fullname = getFullname()
+      varname = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
+
+      found, canInitializeByZero = findType(@typeStr)
+      unless found
+        prefix = className.empty? ? "" : "#{className}::"
+      end
+      "#{prefix}#{@typeStr} #{varname};\n"
     end
 
     ## Implementation detail (public for testing)
@@ -721,8 +755,8 @@ module Mockgen
       # Resolve typedefs because linkers know the exact type
       # after its aliases are solved but the clang front end does not
       # know the aliases
-      argTypeStr = sortArgTypeStr(@scopedBlock.resolveAlias(@argTypeStr))
-      refArgTypeStr = sortArgTypeStr(@scopedBlock.resolveAlias(@refArgTypeStr))
+      argTypeStr = sortArgTypeSetStr(@argTypeStr)
+      refArgTypeStr = sortArgTypeSetStr(@refArgTypeStr)
 
       # const char * and char const * are equivalent
       # Distinguish const and non-const functions
@@ -731,12 +765,19 @@ module Mockgen
         (postFunctionPhrase(@postFunc) == postFunctionPhrase(@refPostFunc))
     end
 
+    def sortArgTypeSetStr(argTypeSetStr)
+      originalTypeStr = argTypeSetStr.split(",").map do |argTypeStr|
+        @scopedBlock.resolveAlias(argTypeStr)
+      end.join(",")
+      sortArgTypeStr(originalTypeStr)
+    end
+
     def sortArgTypeStr(argTypeStr)
       # Remove spaces between * and &
       str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
       # Do not sort beyond * and &
       # Do not mix diffrent types
-      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join("")
+      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
     end
 
     def postFunctionPhrase(phrase)
@@ -765,22 +806,32 @@ module Mockgen
     def initialize(line, className)
       super(line)
       @className = className
-      @valid, @typedArgSet, @argTypeStr, @callBase = parse(line, className)
+      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @callBase = parse(line, className)
     end
 
     def parse(line, className)
       phrase = removeInitializerList(line)
-      return [false, "", ""] unless md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
-      typedArgSet = md[1]
+      valid = false
+      typedArgSet = ""
+      typedArgSetWithoutDefault = ""
+      argTypeStr = ""
+      callBase = ""
 
-      argVariableSet = ArgVariableSet.new(phrase)
-      typedArgSet = argVariableSet.argSetStr
-      argSet = argVariableSet.argNameStr
-      argTypeStr = argVariableSet.argTypeStr
+      if md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
+        typedArgSet = md[1]
 
-      # Add a comma to cascade other initializer arguments
-      callBase = (argSet.empty?) ? "" : "#{className}(#{argSet}), "
-      [true, typedArgSet, argTypeStr, callBase]
+        argVariableSet = ArgVariableSet.new(phrase)
+        typedArgSet = argVariableSet.argSetStr
+        typedArgSetWithoutDefault = argVariableSet.argSetWithoutDefault
+        argSet = argVariableSet.argNameStr
+        argTypeStr = argVariableSet.argTypeStr
+
+        # Add a comma to cascade other initializer arguments
+        callBase = (argSet.empty?) ? "" : "#{className}(#{argSet}), "
+        valid = true
+      end
+
+      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase]
     end
 
     def removeInitializerList(line)
@@ -796,16 +847,22 @@ module Mockgen
     end
 
     # Non default constructive base classes are not supported yet
-    def makeStubDef
+    def makeStubDef(className)
       fullname = getNonTypedFullname(@className)
       "#{fullname}::#{@className}(#{@typedArgSet}) {}\n"
     end
 
     # Empty if call a constructor without arguments
-    # Add a comma to cascade other arguments
+    # Default values included
     def getTypedArgsForBaseClass
       # Add a comma to cascade other initializer arguments
       @typedArgSet.empty? ? "" : ", #{@typedArgSet}"
+    end
+
+    # Get args without default values
+    def getTypedArgsWithoutValue
+      # Add a comma to cascade other initializer arguments
+      @typedArgSetWithoutDefault.empty? ? "" : ", #{@typedArgSetWithoutDefault}"
     end
 
     def getCallForBaseClassInitializer
@@ -840,10 +897,10 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      reference.memberName == @name
+      !reference.memberName.nil? && reference.memberName == @name
     end
 
-    def makeStubDef
+    def makeStubDef(className)
       fullname = getNonTypedFullname(@className)
       "#{fullname}::~#{@className}() {}\n"
     end
@@ -938,9 +995,17 @@ module Mockgen
       numberOfArgs = 0 if @argSet.empty?
 
       str = "#{@returnType} #{className}::#{@funcName}(#{@typedArgSetWithoutDefault}) #{constStr}{\n"
-      # Force to cast enums
       returnType = @returnType.tr("&","").strip
-      str += "    return" + (@returnVoid ? "" : " static_cast<#{returnType}>(0)") + ";\n"
+      # Support to return a struct instance
+      if @returnVoid
+        str += "    return;\n"
+      else
+        found, canInitializeByZero = findType(returnType)
+        canInit = @returnType.include?("*") || canInitializeByZero
+        init = canInit ? " = 0" : ""
+        str += "    #{returnType} result#{init};\n"
+        str += "    return result;\n"
+      end
       str += "}\n"
       str
     end
@@ -1064,6 +1129,7 @@ module Mockgen
       @mockName = ""
       @decoratorName = ""
       @forwarderName = ""
+      @uniqueName = @name  # Unique name for inner class name
       @typename = "class"  # class or struct
       @pub = false         # Now parsing publicmembers
       @filtered = false    # Filter undefined functions
@@ -1087,6 +1153,10 @@ module Mockgen
       @constructorSet = []
       @memberFunctionSet = []
       @memberVariableSet = []
+      # Including protected and private members
+      @allConstructorSet = []
+      @allMemberFunctionSet = []
+      @allMemberVariableSet = []
 
       # Candidates to make stubs
       @undefinedDestructor = nil
@@ -1097,6 +1167,22 @@ module Mockgen
       # Base classes
       @baseClassNameSet = parseInheritance(body)
       @baseClassBlockSet = []
+    end
+
+    # Name an inner class
+    def connect(child)
+      super
+      child.setUniqueName if child.isClass?
+    end
+
+    def setUniqueName
+      fullname = getNonTypedFullname(@name)
+      # Remove head ::
+      name = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
+      @uniqueName = name.gsub("::", "_inner_")
+
+      # Update generated class names
+      setClassNameSet
     end
 
     # Skip to parse child members
@@ -1110,7 +1196,7 @@ module Mockgen
 
     def canMock
       # exclude PODs
-      @valid && (!@constructorSet.empty? || !@memberFunctionSet.empty?)
+      @valid && (!@allConstructorSet.empty? || !@allMemberFunctionSet.empty?)
     end
 
     def isClass?
@@ -1127,30 +1213,37 @@ module Mockgen
       return nil if parseAccess(line)
       block = nil
 
-      # Disregard private members
-      if @pub
-        newBlock = nil
-        destructorBlock = DestructorBlock.new(line, @name)
-        if (destructorBlock.canTraverse)
-          newBlock = destructorBlock
-          @destructor = destructorBlock
-        elsif isConstructor(line)
-          newBlock = ConstructorBlock.new(line, @name)
+      # Disregard private members (need to change in considering the NVI idiom)
+      newBlock = nil
+      destructorBlock = DestructorBlock.new(line, @name)
+      if (destructorBlock.canTraverse)
+        newBlock = destructorBlock
+        @destructor = destructorBlock
+      elsif isConstructor(line)
+        newBlock = ConstructorBlock.new(line, @name)
+        if @pub
           @constructorSet << newBlock if newBlock.canTraverse
-        elsif isPointerToFunction(line)
-          # Not supported yet
-        else
-          newBlock = MemberVariableStatement.new(line)
-          if newBlock.canTraverse
+        end
+        @allConstructorSet << newBlock if newBlock.canTraverse
+      elsif isPointerToFunction(line)
+      # Not supported yet
+      else
+        newBlock = MemberVariableStatement.new(line)
+        if newBlock.canTraverse
+          if @pub
             @memberVariableSet << newBlock
-          else
-            newBlock = MemberFunctionBlock.new(line)
+          end
+          @allMemberVariableSet << newBlock
+        else
+          newBlock = MemberFunctionBlock.new(line)
+          if @pub
             @memberFunctionSet << newBlock if newBlock.canTraverse
           end
+          @allMemberFunctionSet << newBlock if newBlock.canTraverse
         end
-        block = newBlock if !newBlock.nil? && newBlock.canTraverse
       end
 
+      block = newBlock if !newBlock.nil? && newBlock.canTraverse
       block
     end
 
@@ -1193,19 +1286,19 @@ module Mockgen
         @filtered = true
 
         # Create a default destructor if it does not exist
-        @destructor ||= DestructorBlock.new(nil, @name)
+        @destructor ||= DestructorBlock.new(nil, @uniqueName)
         @undefinedDestructor = @destructor if @destructor.filterByReferences(ref)
 
-        @constructorSet.each do |block|
+        @allConstructorSet.each do |block|
           constructorBlockSet << block if block.filterByReferences(ref)
         end
 
-        @memberFunctionSet.each do |block|
+        @allMemberFunctionSet.each do |block|
           functionBlockSet << block if block.filterByReferences(ref)
         end
 
         # Assume instance variables do not appear in referenceSet
-        @memberVariableSet.each do |block|
+        @allMemberVariableSet.each do |block|
           variableBlockSet << block if block.filterByReferences(ref)
         end
       end
@@ -1217,6 +1310,11 @@ module Mockgen
 
     ## Public methods added on the base class
     # Get class name with its namespaces
+    def needStub?
+      @valid && (!@undefinedDestructor.nil? || !@undefinedConstructorSet.empty? ||
+                 !@undefinedFunctionSet.empty? || !@undefinedVariableSet.empty?)
+    end
+
     def getFullname
       fullname = getNonTypedFullname(@name)
       @templateHeader.empty? ? fullname : "#{@templateHeader} #{fullname}"
@@ -1266,16 +1364,21 @@ module Mockgen
       else
         return false
       end
-
+      # uniqueName is a alias of name until changed
+      @uniqueName = @name
       return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_SET.any? { |name| name == @name }
-
-      @mockName = @name + Mockgen::Constants::CLASS_POSTFIX_MOCK
-      @decoratorName = @name + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
-      @forwarderName = @name + Mockgen::Constants::CLASS_POSTFIX_FORWARDER
+      # Set generated class names
+      setClassNameSet
 
       @typename = typenameStr
       @pub = (typenameStr == "struct")
       true
+    end
+
+    def setClassNameSet
+      @mockName = @uniqueName + Mockgen::Constants::CLASS_POSTFIX_MOCK
+      @decoratorName = @uniqueName + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
+      @forwarderName = @uniqueName + Mockgen::Constants::CLASS_POSTFIX_FORWARDER
     end
 
     def parseInheritance(line)
@@ -1330,8 +1433,9 @@ module Mockgen
       str += "public:\n"
 
       typedArgsArray = @constructorSet.empty? ? [""] : @constructorSet.map(&:getTypedArgsForBaseClass)
+      typedArgsArrayWithoutDefault = @constructorSet.empty? ? [""] : @constructorSet.map(&:getTypedArgsWithoutValue)
       callBaseArray = @constructorSet.empty? ? [""] : @constructorSet.map(&:getCallForBaseClassInitializer)
-      ctorSet = typedArgsArray.zip(callBaseArray)
+      ctorSet = typedArgsArrayWithoutDefault.zip(callBaseArray)
 
       typedArgsArray.each do |argSet|
         str += "    #{className}(#{decoratorName}* pDecorator#{argSet});\n"
@@ -1380,11 +1484,11 @@ module Mockgen
       name = getFullname()
 
       @undefinedConstructorSet.each do |member|
-        src += member.makeStubDef if member.canTraverse
+        src += member.makeStubDef(name) if member.canTraverse
       end
 
       if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse
-        src += @undefinedDestructor.makeStubDef
+        src += @undefinedDestructor.makeStubDef(name)
       end
 
       @undefinedFunctionSet.each do |member|
@@ -1640,7 +1744,7 @@ module Mockgen
     def readAllLines(file)
       refSet = []
       while rawLine = file.gets
-        ref = UndefinedReference.new(rawLine.chomp)
+        ref = UndefinedReference.new(rawLine.encode("UTF-8").chomp)
         refSet << ref if ref.fullname
       end
       refSet
@@ -1733,7 +1837,7 @@ module Mockgen
     ## Implementation detail (public for testing)
     def readAllLines(file)
       while rawLine = file.gets
-        line = Mockgen::Common::LineWithoutCRLF.new(rawLine).line.strip
+        line = Mockgen::Common::LineWithoutCRLF.new(rawLine.encode("UTF-8")).line.strip
         next if line.empty?
         parseLine(line.strip)
       end
@@ -1772,10 +1876,18 @@ module Mockgen
 
     def eliminateAllUnusedBlock(argBlock)
       argBlock.children.each do |child|
-        if child.canTraverse && child.canMock
-          eliminateAllUnusedBlock(child)
+        if @stubOnly && child.isClass?
+          if child.canTraverse && child.needStub?
+            eliminateAllUnusedBlock(child)
+          else
+            eliminateUnusedBlock(child)
+          end
         else
-          eliminateUnusedBlock(child)
+          if child.canTraverse && child.canMock
+            eliminateAllUnusedBlock(child)
+          else
+            eliminateUnusedBlock(child)
+          end
         end
       end
     end
@@ -2090,9 +2202,12 @@ module Mockgen
   # Parse command line arguments and launcher the parser
   class MockGenLauncher
     def initialize(argv)
-      abort if argv.size < 8
+      abort if argv.size < 9
 
       argSet = argv.dup
+      mode = argSet.shift
+      @stubOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_STUB)
+
       @inputFilename = argSet.shift
       @inLinkLogFilename = argSet.shift
       @convertedFilename = argSet.shift
@@ -2101,9 +2216,8 @@ module Mockgen
       @outVarSwapperFilename = argSet.shift
       @outDeclFilename = argSet.shift
       @outDefFilename = argSet.shift
-      @clangArgs = quotePath(argSet)
-      @stubOnly = false
 
+      @clangArgs = quotePath(argSet)
       # Can set later
       @cppNameSpace = Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE
     end

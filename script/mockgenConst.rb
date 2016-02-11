@@ -5,6 +5,10 @@
 
 module Mockgen
   module Constants
+    # Argument to specify mode
+    ARGUMENT_MODE_STUB = "stub".freeze
+    ARGUMENT_MODE_MOCK = "mock".freeze
+
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
     # Reserved for compiler internal use

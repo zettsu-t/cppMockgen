@@ -37,7 +37,8 @@ namespace Sample1 {
 
 int TopLevelSampleFunc(void) {
     return ClassNotInstanciated::arrayMissing[0]
-        + aTopLevelObject.GetValue() + localTopLevelObject.GetValue();
+        + aTopLevelObject.GetValue() + localTopLevelObject.GetValue()
+        + ClassNotInstanciated::inner_.Func();
 }
 
 /*
