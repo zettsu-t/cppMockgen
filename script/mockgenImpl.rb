@@ -212,15 +212,23 @@ module Mockgen
     end
 
     # Do not mock structs in extern "C" {}
-    def canMock
+    def canMock?
       result = true
       block = parent
       while block
-        result &= block.canMock
+        result &= block.canMock?
         block = block.parent
       end
 
       result
+    end
+
+    def isNamespace?
+      false
+    end
+
+    def isFreeFunction?
+      false
     end
 
     def isClass?
@@ -341,8 +349,12 @@ module Mockgen
       !(Mockgen::Constants::NAMESPACE_SKIPPED_SET.any? { |name| @name =~ /^#{name}/ })
     end
 
-    def canMock
+    def canMock?
       canTraverse() && super
+    end
+
+    def isNamespace?
+      true
     end
 
     def getNamespace
@@ -360,8 +372,12 @@ module Mockgen
       true
     end
 
-    def canMock
+    def canMock?
       false
+    end
+
+    def isNamespace?
+      true
     end
 
     def getNamespace
@@ -735,34 +751,48 @@ module Mockgen
 
   # Compare argument types between a linker output and a source file
   class FunctionReferenceSet
-    def initialize(block, reference, name, argTypeStr, postFunc)
+    def initialize(block, reference, fullname, name, argTypeStr, postFunc)
       @scopedBlock = block
+      @fullname = fullname
+      @fullname ||= ""
       @name = name
       @name ||= ""
       @argTypeStr = argTypeStr
       @argTypeStr ||= ""
       @postFunc = postFunc
       @postFunc ||= ""
+
+      @refFullname = reference.fullname if reference
+      @refFullname ||= ""
       @refName = reference.memberName if reference
       @refName ||= ""
-      @refArgTypeStr = reference.argTypeStr if reference
-      @refArgTypeStr ||= ""
+      @refArgTypeStr = reference.argTypeStr if reference  # nullable
       @refPostFunc = reference.postFunc if reference
       @refPostFunc ||= ""
     end
 
     def compare
-      # Resolve typedefs because linkers know the exact type
-      # after its aliases are solved but the clang front end does not
-      # know the aliases
-      argTypeStr = sortArgTypeSetStr(@argTypeStr)
-      refArgTypeStr = sortArgTypeSetStr(@refArgTypeStr)
+      result = false
+      if @refArgTypeStr
+        # Resolve typedefs because linkers know the exact type
+        # after its aliases are solved but the clang front end does not
+        # know the aliases
+        argTypeStr = sortArgTypeSetStr(@argTypeStr)
+        refArgTypeStr = sortArgTypeSetStr(@refArgTypeStr)
 
-      # const char * and char const * are equivalent
-      # Distinguish const and non-const functions
-      (@refName == @name) &&
-        (argTypeStr == refArgTypeStr) &&
-        (postFunctionPhrase(@postFunc) == postFunctionPhrase(@refPostFunc))
+        # const char * and char const * are equivalent
+        # Distinguish const and non-const functions
+        result = (@refName == @name) &&
+                 (argTypeStr == refArgTypeStr) &&
+                 (postFunctionPhrase(@postFunc) == postFunctionPhrase(@refPostFunc))
+      else
+        # "extern C" discards argument types
+        refFullname = (@refFullname[0..1] == "::") ? @refFullname[2..-1] : @refFullname
+        fullname = (@fullname[0..1] == "::") ? @fullname[2..-1] : @fullname
+        result = (refFullname == fullname)
+      end
+
+      result
     end
 
     def sortArgTypeSetStr(argTypeSetStr)
@@ -843,7 +873,8 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      FunctionReferenceSet.new(self, reference, @className, @argTypeStr, "").compare
+      fullname = getNonTypedFullname(@className)
+      FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
     end
 
     # Non default constructive base classes are not supported yet
@@ -869,14 +900,22 @@ module Mockgen
       @callBase
     end
 
-    def makeDecoratorDef(decoratorName)
-      "    #{decoratorName}(#{@typedArgSet}) : " +
-      "#{@callBase}#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
+    # initMember must not be empty
+    def makeDef(className, arg, initMember)
+      if arg.empty?
+        argStr = @typedArgSet.empty? ? "void" : @typedArgSet
+      else
+        # Attach arguments to base classes to allow default variables
+        argStr = @typedArgSet.empty? ? arg : "#{arg},#{@typedArgSet}"
+      end
+
+      "    #{className}(#{argStr}) : #{@callBase}#{initMember} {}\n"
     end
 
-    def makeDefaultConstructor(decoratorName)
-      "    #{decoratorName}(void) : " +
-      "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
+    # initMember must not be empty
+    def makeDefWithDefaultBaseConstructor(className, arg, initMember)
+      argStr = arg.empty? ? "void" : arg
+      "    #{className}(#{argStr}) : #{initMember} {}\n"
     end
   end
 
@@ -931,15 +970,13 @@ module Mockgen
     end
   end
 
-  # Class member function
-  # Templates are not supported yet
-  class MemberFunctionBlock < BaseBlock
+  # Class member and non-member (free) function
+  class FunctionBlock < BaseBlock
     attr_reader :valid, :argSignature
-
     def initialize(line)
       super
       @valid = false
-      @constMemfunc = false
+      @constMemfunc = false  # Free functions never be const
       @staticMemfunc = false
       @returnType == ""
       @returnVoid = false
@@ -967,12 +1004,8 @@ module Mockgen
     end
 
     def filterByReferences(reference)
-      FunctionReferenceSet.new(self, reference, @funcName, @argTypeStr, @postFunc).compare
-    end
-
-    ## Public methods added on the base class
-    def override?(block)
-      @argSignature == block.argSignature
+      fullname = getNonTypedFullname(@funcName)
+      FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc).compare
     end
 
     def makeMockDef(className)
@@ -987,14 +1020,16 @@ module Mockgen
       str
     end
 
-    def makeStubDef(className)
+    # outerName is a class name or a namespace
+    def makeStubDef(outerName)
       constStr = (@constMemfunc) ? "const " : ""
 
       numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 
-      str = "#{@returnType} #{className}::#{@funcName}(#{@typedArgSetWithoutDefault}) #{constStr}{\n"
+      prefix = outerName.empty? ? "" : "#{outerName}::"
+      str = "#{@returnType} #{prefix}#{@funcName}(#{@typedArgSetWithoutDefault}) #{constStr}{\n"
       returnType = @returnType.tr("&","").strip
       # Support to return a struct instance
       if @returnVoid
@@ -1007,42 +1042,6 @@ module Mockgen
         str += "    return result;\n"
       end
       str += "}\n"
-      str
-    end
-
-    def makeDecoratorDef(className)
-      mockVarname = @staticMemfunc ? Mockgen::Constants::VARNAME_CLASS_MOCK : Mockgen::Constants::VARNAME_INSTANCE_MOCK
-      decl = @staticMemfunc ? "static #{@decl}" : @decl
-      str = "    #{decl} { if (#{mockVarname}) { "
-
-      if (@returnVoid)
-        str += "#{mockVarname}->#{@funcName}(#{@argSet}); return; } "
-        str += "#{className}::#{@funcName}(#{@argSet});"
-      else
-        str += "return #{mockVarname}->#{@funcName}(#{@argSet}); } "
-        str += "return #{className}::#{@funcName}(#{@argSet});"
-      end
-
-      str += " }\n"
-      str
-    end
-
-    def makeForwarderDef(className)
-      decl = @decl.dup
-      if (@decl =~ /\s+override$/) || (@decl =~ /\s+override\s/)
-        decl = @decl.gsub(/\s+override(\s?)/, '\1')
-      end
-      str = "    #{decl} { if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}) { "
-
-      if (@returnVoid)
-        str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); return; } "
-        str += "static_cast<#{className}*>(pActual_)->#{@funcName}(#{@argSet});"
-      else
-        str += "return #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); } "
-        str += "return static_cast<#{className}*>(pActual_)->#{@funcName}(#{@argSet});"
-      end
-
-      str += " }\n"
       str
     end
 
@@ -1115,6 +1114,193 @@ module Mockgen
 
     def splitByReferenceMarks(phrase)
       phrase.gsub(/([\*&])/, ' \1 ').split(/\s+/).reject { |w| w =~ /^\s*$/ }
+    end
+
+    protected
+    def makeForwarderDefImpl(forwardingTarget)
+      decl = @decl.dup
+      if (@decl =~ /\s+override$/) || (@decl =~ /\s+override\s/)
+        decl = @decl.gsub(/\s+override(\s?)/, '\1')
+      end
+      str = "    #{decl} { if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}) { "
+
+      if (@returnVoid)
+        str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); return; } "
+        str += "#{forwardingTarget}#{@funcName}(#{@argSet});"
+      else
+        str += "return #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); } "
+        str += "return #{forwardingTarget}#{@funcName}(#{@argSet});"
+      end
+
+      str += " }\n"
+      str
+    end
+  end
+
+  # Class member function
+  # Templates are not supported yet
+  class MemberFunctionBlock < FunctionBlock
+    def initialize(line)
+      super
+    end
+
+    ## Public methods added on the base class
+    def override?(block)
+      @argSignature == block.argSignature
+    end
+
+    def makeDecoratorDef(className)
+      mockVarname = @staticMemfunc ? Mockgen::Constants::VARNAME_CLASS_MOCK : Mockgen::Constants::VARNAME_INSTANCE_MOCK
+      decl = @staticMemfunc ? "static #{@decl}" : @decl
+      str = "    #{decl} { if (#{mockVarname}) { "
+
+      if (@returnVoid)
+        str += "#{mockVarname}->#{@funcName}(#{@argSet}); return; } "
+        str += "#{className}::#{@funcName}(#{@argSet});"
+      else
+        str += "return #{mockVarname}->#{@funcName}(#{@argSet}); } "
+        str += "return #{className}::#{@funcName}(#{@argSet});"
+      end
+
+      str += " }\n"
+      str
+    end
+
+    def makeForwarderDef(className)
+      makeForwarderDefImpl("static_cast<#{className}*>(pActual_)->")
+    end
+
+    ## Implementation detail (public for testing)
+  end
+
+  # Templates are not supported yet
+  class FreeFunctionBlock < FunctionBlock
+    def initialize(line)
+      body = line
+      if md = line.match(/^extern\s+(.*)/)
+        body = md[1]
+      end
+
+      super(body)
+
+      # Exclude standard header
+      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_PATTERN}/)
+      @needStub = false
+    end
+
+    def filterByReferences(reference)
+      result = super
+      @needStub |= result
+      result
+    end
+
+    def isFreeFunction?
+      @valid
+    end
+
+    def makeForwarderDef(className)
+      makeForwarderDefImpl(getNonTypedFullname(className))
+    end
+  end
+
+  class FreeFunctionSet < BaseBlock
+    def initialize(namespaceBlock)
+      @block = namespaceBlock
+      @funcSet = []
+      @undefinedFunctionSet = []
+    end
+
+    def filterByReferences(referenceSet)
+      @funcSet.each do |func|
+        referenceSet.refSet.each do |ref|
+          if func.filterByReferences(ref)
+            @undefinedFunctionSet << func
+            break
+          end
+        end
+      end
+    end
+
+    def getStringToClassFile
+      @mockClassDef + @forwarderClassDef
+    end
+
+    def getStringToSourceFile
+      @mockClassFunc
+    end
+
+    def needStub?
+      !@undefinedFunctionSet.empty?
+    end
+
+    # Generate class definition texts
+    def makeClassSet
+      prefix = Mockgen::Constants::CLASS_FREE_FUNCTION_SET
+      className = prefix + @block.getNonTypedFullname("").gsub("::", "_")
+      mockName = (className + Mockgen::Constants::CLASS_POSTFIX_MOCK).gsub(/_+/, "_")
+      forwarderName= (className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER).gsub(/_+/, "_")
+
+      @mockClassDef, @mockClassFunc = formatMockClass(mockName, forwarderName)
+      @forwarderClassDef = formatForwarderClass(forwarderName, mockName)
+    end
+
+    def makeStubSet
+      @mockClassDef = ""
+      @mockClassFunc = formatStub()
+      @forwarderClassDef = ""
+    end
+
+    def add(func)
+      @funcSet << func
+    end
+
+    def formatMockClass(mockClassName, forwarderName)
+      str = ""
+      unless @funcSet.empty?
+        str =  "class #{mockClassName} {\n"
+        str += "public:\n"
+
+        str += @funcSet.map do |func|
+          func.valid ? func.makeMockDef(mockClassName) : ""
+        end.join("")
+
+        str += "};\n\n"
+      end
+
+      src = formatStub()
+      return str, src
+    end
+
+    def formatStub
+      str = ""
+      unless @undefinedFunctionSet.empty?
+        nameSpaceSet = @block.getNonTypedFullname(@block.getNamespace).split("::").reject { |name| name.empty? }
+        str += nameSpaceSet.map { |name| "namespace #{name} {\n" }.join("") unless nameSpaceSet.empty?
+        str += @undefinedFunctionSet.map do |func|
+          func.valid ? (func.makeStubDef("") + "\n") : ""
+        end.join("")
+        str += "}\n" * nameSpaceSet.size unless nameSpaceSet.empty?
+      end
+
+      str
+    end
+
+    def formatForwarderClass(forwarderName, mockClassName)
+      return "" if @funcSet.empty?
+
+      str =  "class #{mockClassName};\n"
+      str += "class #{forwarderName} {\n"
+      str += "public:\n"
+      str += "    #{forwarderName}::#{forwarderName}(void) : "
+      str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
+
+      str += @funcSet.map do |func|
+        func.makeForwarderDef("")
+      end.join("")
+
+      str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
+      str += "};\n\n"
+      str
     end
   end
 
@@ -1194,9 +1380,9 @@ module Mockgen
       @valid
     end
 
-    def canMock
+    def canMock?
       # exclude PODs
-      @valid && (!@allConstructorSet.empty? || !@allMemberFunctionSet.empty?)
+      @valid && (!@allConstructorSet.empty? || !@allMemberFunctionSet.empty?) || needStub?
     end
 
     def isClass?
@@ -1327,6 +1513,17 @@ module Mockgen
         block = fullNameToBlock[name]
         @baseClassBlockSet << block if block
       end
+    end
+
+    # Return arity of this class to make constructor
+    def getConstructorArity
+      return 0 if @constructorSet.empty?
+
+      set = @constructorSet.map do |block|
+        str = block.getTypedArgsForBaseClass
+        (str.empty? || str == "void") ? 0 : str.count(",")
+      end
+      set.min
     end
 
     # Generate class definition texts
@@ -1507,14 +1704,8 @@ module Mockgen
       str =  "#{header}#{@typename} #{decoratorName} : public #{baseName} {\n"
       str += "public:\n"
 
-      if @constructorSet.empty?
-        str += ConstructorBlock.new("", baseName).makeDefaultConstructor(decoratorName)
-      else
-        @constructorSet.each do |constructor|
-          str += constructor.makeDecoratorDef(decoratorName)
-        end
-      end
-
+      initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
+      str += formatConstrutorSet(baseName, decoratorName, "", initMember)
       str += "    virtual ~#{decoratorName}(void) {}\n"
       str += collectDecoratorDef([])
       str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
@@ -1524,18 +1715,34 @@ module Mockgen
     end
 
     def formatForwarderClass(forwarderName, mockClassName, baseName)
+      # Inherit a base class to refer class-local enums of the class
       header = @templateHeader.empty? ? "" : (@templateHeader + " ")
-      str =  "#{header}#{@typename} #{forwarderName} {\n"
+      str =  "#{header}#{@typename} #{forwarderName} : public #{baseName} {\n"
       str += "public:\n"
-      str += "    #{forwarderName}(#{baseName}* pActual) : pActual_(pActual), "
-      str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
-      str += "    #{forwarderName}(#{baseName}& actual) : pActual_(&actual), "
-      str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
+      [["#{baseName}* pActual", "pActual_(pActual)"],
+       ["#{baseName}& actual",  "pActual_(&actual)"]].each do |arg, initMember|
+        initMember += ", #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
+        str += formatConstrutorSet(baseName, forwarderName, arg, initMember)
+      end
+
       str += "    virtual ~#{forwarderName}(void) {}\n"
       str += collectForwarderDef([])
       str += "    #{baseName}* pActual_;\n"
       str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "};\n\n"
+      str
+    end
+
+    def formatConstrutorSet(baseName, className, arg, initMember)
+      str = ""
+      if @constructorSet.empty?
+        str += ConstructorBlock.new("", baseName).makeDefWithDefaultBaseConstructor(className, arg, initMember)
+      else
+        @constructorSet.each do |constructor|
+          str += constructor.makeDef(className, arg, initMember)
+        end
+      end
+
       str
     end
 
@@ -1623,12 +1830,16 @@ module Mockgen
 
       unless newBlock
         if md = line.match(/^(.*\S)\s*;/)
-          words = line.split(/\s+/)
+          words = md[1].split(" ")
           case words[0]
           when "typedef"
             newBlock = TypedefBlock.new(line)
           when "extern"
-            newBlock = ExternVariableStatement.new(line)
+            if (words.size >= 3 && words[-1][-1] == ")")
+              newBlock = FreeFunctionBlock.new(line)
+            else
+              newBlock = ExternVariableStatement.new(line)
+            end
           end
         end
       end
@@ -1654,6 +1865,11 @@ module Mockgen
       @declStr = declStr
       @defStr = defStr
     end
+
+    # Check whether this instance has something to write to files
+    def empty?
+      [@typeSwapperStr, @varSwapperStr, @declStr, @defStr].all?(:empty?)
+    end
   end
 
   # All class names and their instances
@@ -1673,6 +1889,11 @@ module Mockgen
       entry << ClassInstance.new(typeSwapperStr, varSwapperStr, declStr, defStr)
     end
 
+    # Remove instances that have nothing to write to files
+    def cleanUp
+      @set.reject! { |key, value| value.empty? }
+    end
+
     def getInstanceSet(className)
       @set.key?(className) ? @set[className] : []
     end
@@ -1680,10 +1901,10 @@ module Mockgen
 
   # Undefined reference
   class UndefinedReference
-    attr_reader :fullname, :classFullname, :memberName, :argTypeStr, :postFunc
+    attr_reader :classFullname, :fullname, :memberName, :argTypeStr, :postFunc
 
     def initialize(line)
-      @fullname, @classFullname, @memberName, @argTypeStr, @postFunc = parse(line)
+      @classFullname, @fullname, @memberName, @argTypeStr, @postFunc = parse(line)
     end
 
     def parse(line)
@@ -1717,7 +1938,7 @@ module Mockgen
         postFunc = argTypeStr ? postFuncSet.join("") : ""
       end
 
-      return fullname, classFullname, memberName, argTypeStr, postFunc
+      return classFullname, fullname, memberName, argTypeStr, postFunc
     end
   end
 
@@ -1776,8 +1997,12 @@ module Mockgen
       }
 
       referenceSet = parseLinkLog(linkLogFilename)
+      @functionSetArray = buildFreeFunctionSet(referenceSet)
+      makeFreeFunctionSet(@functionSetArray)
+
       buildClassTree(referenceSet)
       makeClassSet
+      @classInstanceMap.cleanUp
     end
 
     # Write generated codes to arg files
@@ -1794,28 +2019,42 @@ module Mockgen
       index = 0
       serial = 1
       sizeOfSet = Mockgen::Constants::GENERATED_BLOCKS_PER_SOURCE
-      blockSet = @block.children.select(&:canTraverse).compact
+      blockSet = collectClassesToWrite(@block.children).flatten.compact
 
-      while(index < blockSet.size)
-        subBlockSet = blockSet.slice(index, sizeOfSet)
-
+      while(index < @functionSetArray.size)
+        argBlockSet = @functionSetArray.slice(index, sizeOfSet)
         suffix = "_#{serial}."
+
+        classFilename = argClassFilename.gsub(".", suffix)
+        defFilename = argDefFilename.gsub(".", suffix)
+        writeFreeFunctionDeclFile(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+        writeStubFilename(defFilename, @inputFilename, argBlockSet)
+
+        classFilenameSet << classFilename
+        serial += 1
+        index += sizeOfSet
+      end
+
+      index = 0
+      while(index < blockSet.size)
+        argBlockSet = blockSet.slice(index, sizeOfSet)
+        suffix = "_#{serial}."
+
         classFilename = argClassFilename.gsub(".", suffix)
         typeSwapperFilename = argTypeSwapperFilename.gsub(".", suffix)
         varSwapperFilename = argVarSwapperFilename.gsub(".", suffix)
         declFilename = argDeclFilename.gsub(".", suffix)
         defFilename = argDefFilename.gsub(".", suffix)
 
-        argBlockSet = @stubOnly ? [] : subBlockSet
         writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
 
         if @stubOnly
-          writeStubFilename(defFilename, @inputFilename, subBlockSet)
+          writeStubFilename(defFilename, @inputFilename, argBlockSet)
         else
-          writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, subBlockSet)
+          writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         end
 
         classFilenameSet << classFilename
@@ -1883,7 +2122,7 @@ module Mockgen
             eliminateUnusedBlock(child)
           end
         else
-          if child.canTraverse && child.canMock
+          if child.canTraverse && child.canMock?
             eliminateAllUnusedBlock(child)
           else
             eliminateUnusedBlock(child)
@@ -1896,6 +2135,16 @@ module Mockgen
       UndefinedReferenceSet.new(linkLogFilename)
     end
 
+    def buildFreeFunctionSet(referenceSet)
+      rootFreeFunctionSet = FreeFunctionSet.new(@block)
+      freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block)
+
+      freeFunctionSetArray.each do |funcSet|
+        funcSet.filterByReferences(referenceSet)
+      end
+      freeFunctionSetArray
+    end
+
     def buildClassTree(referenceSet)
       # Resolve aliases before find undefined references
       collectTypedefs(@block)
@@ -1905,7 +2154,7 @@ module Mockgen
 
       varSet = collectVariables(@block.children)
       @classInstanceMap = makeTypeVarAliases(varSet, classSet)
-
+      # Leave free functions
       eliminateAllUnusedBlock(@block)
     end
 
@@ -1991,11 +2240,39 @@ module Mockgen
       arrayStr = varNameStr.tailStr
       arrayStr ||= ""
       declStr = "extern #{actualClassName} #{actualVarName}#{arrayStr};\n"
+
+      # A variable declaration does not tell its constructor's arguments.
+      # To prevent from searching its definition, this script assume that
+      # a constructor that have least arity (may be a default constructor)
+      # is used and it receives 0's.
+      arity = block.getConstructorArity
+      argStr = varFullname + ",0" * arity
+
       # Define arrays in a test case
-      defStr = "#{actualClassName} #{actualVarName}(#{varFullname});\n" unless varFullnameStr.tailStr
+      defStr = "#{actualClassName} #{actualVarName}(#{argStr});\n" unless varFullnameStr.tailStr
       defStr ||= ""
 
       return typeSwapperStr, varSwapperStr, declStr, defStr
+    end
+
+    def makeFreeFunctionSet(functionSetArray)
+      functionSetArray.map do |functionSet|
+        if @stubOnly
+          functionSet.makeStubSet
+        else
+          functionSet.makeClassSet
+        end
+      end
+
+      classDecl = functionSetArray.map do |functionSet|
+        functionSet.getStringToClassFile
+      end.join("")
+
+      classDef = functionSetArray.map do |functionSet|
+        functionSet.getStringToSourceFile
+      end.join("")
+
+      return classDecl, classDef
     end
 
     def makeClassSet
@@ -2025,6 +2302,13 @@ module Mockgen
       end
     end
 
+    # No recursive finding blocks
+    def doForBlockSet(blockSet, lambdaToBlock)
+      blockSet.each do |block|
+        lambdaToBlock.call(block)
+      end
+    end
+
     def collectTopLevelTypedefSet(argBlock)
       typeAliasSetArray = []
       argBlock.children.each do |child|
@@ -2034,6 +2318,38 @@ module Mockgen
       end
 
       typeAliasSetArray
+    end
+
+    def collectClassesToWrite(blockSet)
+      # Depth-first search
+      result = []
+      blockSet.each do |block|
+        next unless block.canTraverse
+        result << block if block.isClass?
+        # Calls should flatten result
+        result << collectClassesToWrite(block.children)
+      end
+      result
+    end
+
+    def collectFreeFunctions(freeFunctionSet, argBlock)
+      newSetArray = []
+      currentSet = freeFunctionSet
+
+      argBlock.children.each do |block|
+        next unless block.canTraverse
+
+        if block.isFreeFunction? && block.valid
+          currentSet.add(block)
+        elsif block.isNamespace?
+          # Depth first
+          currentSet = FreeFunctionSet.new(block)
+          newSetArray << currentSet
+          newSetArray.concat(collectFreeFunctions(currentSet, block))
+        end
+      end
+
+      newSetArray
     end
 
     def writeFile(filename, labelAttr, preStr, postStr, blockSet)
@@ -2049,11 +2365,27 @@ module Mockgen
 
       File.open(filename, "w") do |file|
         file.puts preStr
-        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
+        doForBlockSet(blockSet, lambdaToBlock)
         # Write each definition exactly once
         file.puts strSet.uniq
         file.puts ""
         file.puts postStr
+      end
+    end
+
+    def writeFreeFunctionDeclFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
+      File.open(filename, "w") do |file|
+        file.puts getClassFileHeader(@inputFilename, filename)
+        file.puts "#if 0  // Need to merge mocks for each namespace and extern C"
+        file.puts beginNamespace
+        lambdaToBlock = lambda do |block|
+          str = block.getStringToClassFile
+          file.puts str if str && !str.empty?
+        end
+        doForBlockSet(blockSet, lambdaToBlock)
+        file.puts endNamespace
+        file.puts getIncludeGuardFooter
+        file.puts "#endif"
       end
     end
 
@@ -2063,9 +2395,9 @@ module Mockgen
         file.puts beginNamespace
         lambdaToBlock = lambda do |block|
           str = block.getStringToClassFile
-          file.puts str if str
+          file.puts str if str && !str.empty?
         end
-        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
+        doForBlockSet(blockSet, lambdaToBlock)
         file.puts endNamespace
         file.puts getIncludeGuardFooter
       end
@@ -2107,9 +2439,9 @@ module Mockgen
       File.open(filename, "a") do |file|
         lambdaToBlock = lambda do |block|
           str = block.getStringToSourceFile
-          file.puts str if str
+          file.puts str if str && !str.empty?
         end
-        doForAllBlocks(blockSet, lambdaToBlock, :isClass?)
+        doForBlockSet(blockSet, lambdaToBlock)
       end
     end
 
