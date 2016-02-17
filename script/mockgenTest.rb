@@ -291,6 +291,10 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal("", BaseBlock.new("Name").getNamespace)
   end
 
+  def test_getFullNamespace
+    assert_equal("", BaseBlock.new("Name").getFullNamespace)
+  end
+
   def test_collectAliasesInBlock
     assert_nil(BaseBlock.new("Name").collectAliasesInBlock(nil))
   end
@@ -348,16 +352,17 @@ end
 
 class TestNamespaceBlock < Test::Unit::TestCase
   data(
-    'not namespace' => ["name {", ""],
-    'unnamed namespace' => ["namespace {", ""],
-    'simple namespace' => ["namespace A {", "A"],
-    'nested namespace' => ["namespace A::B {", "A::B"],
-    'more nested namespace' => ["namespace Ab::Cd::e {", "Ab::Cd::e"])
+    'not namespace' => ["name {", "", ""],
+    'unnamed namespace' => ["namespace {", "", ""],
+    'simple namespace' => ["namespace A {", "A", "A"],
+    'nested namespace' => ["namespace A::B {", "A::B", "::A::B"],
+    'more nested namespace' => ["namespace Ab::Cd::e {", "Ab::Cd::e", "::Ab::Cd::e"])
   def test_initializeAndGetNamespace(data)
-    line, expected = data
+    line, expected, expectedFull = data
     block = NamespaceBlock.new(line)
     assert_true(block.isNamespace?)
     assert_equal(expected, block.getNamespace)
+    assert_equal(expectedFull, block.getFullNamespace)
   end
 
   data(
@@ -1183,7 +1188,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(rv, block.instance_variable_get(:@returnVoid))
       assert_equal(decl, block.instance_variable_get(:@decl))
       assert_equal(aset, block.instance_variable_get(:@argSet))
-      assert_equal(fn, block.instance_variable_get(:@funcName))
+      assert_equal(fn, block.funcName)
       assert_equal(taset, block.instance_variable_get(:@typedArgSet))
       assert_equal(sig, block.instance_variable_get(:@argSignature))
       assert_equal(pf, block.instance_variable_get(:@postFunc))
@@ -1488,6 +1493,8 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
   def test_filterByReferences
     block = FreeFunctionBlock.new("extern int Func(int a);")
     assert_true(block.isFreeFunction?)
+    assert_equal("Func", block.funcName)
+    assert_equal("Func(int)", block.argSignature)
 
     prefix = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE + " "
     ref = UndefinedReference.new(prefix + "`Func(int)'")
@@ -1520,11 +1527,41 @@ class TestFreeFunctionSet < Test::Unit::TestCase
 
     funcSet.makeStubSet
     assert_equal("", funcSet.getStringToClassFile)
-    assert_equal("", funcSet.getStringToSourceFile)
+    assert_equal("", funcSet.getStringToDeclFile)
+    assert_equal("", funcSet.getStringToSwapperFile)
+    assert_equal("", funcSet.getStringOfStub)
+    assert_equal("", funcSet.getStringOfVariableDefinition)
 
     funcSet.makeClassSet
     assert_equal("", funcSet.getStringToClassFile)
-    assert_equal("", funcSet.getStringToSourceFile)
+    assert_equal("", funcSet.getStringToDeclFile)
+    assert_equal("", funcSet.getStringToSwapperFile)
+    assert_equal("", funcSet.getStringOfStub)
+    assert_equal("", funcSet.getStringOfVariableDefinition)
+  end
+
+  def test_getFullNamespace
+    block = RootBlock.new("")
+    funcSet = FreeFunctionSet.new(block)
+    assert_equal("", funcSet.getFullNamespace)
+
+    def block.getFullNamespace
+      "::A::B"
+    end
+    assert_equal("::A::B", funcSet.getFullNamespace)
+  end
+
+  def test_merge
+    block = RootBlock.new("")
+    funcSetA = FreeFunctionSet.new(block)
+    funcSetB = FreeFunctionSet.new(block)
+
+    funcSetB.instance_variable_set(:@funcSet, [1,2])
+    funcSetB.instance_variable_set(:@undefinedFunctionSet, [3])
+
+    funcSetA.merge(funcSetB)
+    assert_equal(2, funcSetA.funcSet.size)
+    assert_equal(1, funcSetA.undefinedFunctionSet.size)
   end
 
   def test_noStubs
@@ -1541,7 +1578,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
 
     funcSet.makeStubSet
     assert_equal("", funcSet.getStringToClassFile)
-    assert_equal("", funcSet.getStringToSourceFile)
+    assert_equal("", funcSet.getStringOfStub)
 
     funcSet.makeClassSet
     expected =  "class All_Mock {\n"
@@ -1552,13 +1589,13 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "class All_Mock;\n"
     expected += "class All_Forwarder {\n"
     expected += "public:\n"
-    expected += "    All_Forwarder::All_Forwarder(void) : pMock_(0) {}\n"
+    expected += "    All_Forwarder(void) : pMock_(0) {}\n"
     expected += "    void FuncA() { if (pMock_) { pMock_->FuncA(); return; } FuncA(); }\n"
     expected += "    int FuncB(int a) { if (pMock_) { return pMock_->FuncB(a); } return FuncB(a); }\n"
     expected += "    All_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
-    assert_equal("", funcSet.getStringToSourceFile)
+    assert_equal("All_Forwarder all_Forwarder;\n", funcSet.getStringOfVariableDefinition)
   end
 
   def test_inNamespace
@@ -1569,19 +1606,22 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.add(func)
 
     funcSet.makeClassSet
-    expected =  "class All_Mock {\n"
+    expected =  "class All_A_Mock {\n"
     expected += "public:\n"
     expected += "    MOCK_METHOD0(Func,void());\n"
     expected += "};\n\n"
-    expected += "class All_Mock;\n"
-    expected += "class All_Forwarder {\n"
+    expected += "class All_A_Mock;\n"
+    expected += "class All_A_Forwarder {\n"
     expected += "public:\n"
-    expected += "    All_Forwarder::All_Forwarder(void) : pMock_(0) {}\n"
+    expected += "    All_A_Forwarder(void) : pMock_(0) {}\n"
     expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } ::A::Func(); }\n"
-    expected += "    All_Mock* pMock_;\n"
+    expected += "    All_A_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
-    assert_equal("", funcSet.getStringToSourceFile)
+
+    expected = "All_A_Forwarder all_A_Forwarder;\n"
+    assert_equal("extern " + expected, funcSet.getStringToDeclFile)
+    assert_equal(expected, funcSet.getStringOfVariableDefinition)
   end
 
   def test_makeStubAtTopLevel
@@ -1606,14 +1646,16 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.filterByReferences(refSet)
     assert_true(funcSet.needStub?)
 
-    expected =  "void FuncA(int a) {\n    return;\n}\n\n"
-    expected += "int FuncB(int a) {\n    int result = 0;\n    return result;\n}\n\n"
-    expected += "int FuncB(int a,long B) {\n    int result = 0;\n    return result;\n}\n\n"
+    expectedStub =  "void FuncA(int a) {\n    return;\n}\n\n"
+    expectedStub += "int FuncB(int a) {\n    int result = 0;\n    return result;\n}\n\n"
+    expectedStub += "int FuncB(int a,long B) {\n    int result = 0;\n    return result;\n}\n\n"
 
     funcSet.makeStubSet
-    assert_equal(expected, funcSet.getStringToSourceFile)
+    assert_equal(expectedStub, funcSet.getStringOfStub)
+
+    expected = "All_Forwarder all_Forwarder;\n"
     funcSet.makeClassSet
-    assert_equal(expected, funcSet.getStringToSourceFile)
+    assert_equal(expected, funcSet.getStringOfVariableDefinition)
   end
 
   def test_makeStubInNamespace
@@ -1637,11 +1679,13 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.filterByReferences(refSet)
     assert_true(funcSet.needStub?)
 
-    expected = "namespace A {\nnamespace B {\nvoid Func() {\n    return;\n}\n\n}\n}\n"
+    expectedStub = "namespace A {\nnamespace B {\nvoid Func() {\n    return;\n}\n\n}\n}\n"
     funcSet.makeStubSet
-    assert_equal(expected, funcSet.getStringToSourceFile)
+    assert_equal(expectedStub, funcSet.getStringOfStub)
+
+    expected = "All_A_B_Forwarder all_A_B_Forwarder;\n"
     funcSet.makeClassSet
-    assert_equal(expected, funcSet.getStringToSourceFile)
+    assert_equal(expected, funcSet.getStringOfVariableDefinition)
   end
 end
 
@@ -2628,20 +2672,27 @@ end
 class TestUndefinedReference < Test::Unit::TestCase
   data(
     'toplevel' => ["undefined reference to `TopLevelClass::GetValue()'",
-                   "TopLevelClass::GetValue", "TopLevelClass", "GetValue", ""],
+                   "TopLevelClass::GetValue", "TopLevelClass", "GetValue", "", ""],
     'destructor' => ["undefined reference to `TopLevelClass::~TopLevelClass()'",
-                   "TopLevelClass::~TopLevelClass", "TopLevelClass", "~TopLevelClass", ""],
+                   "TopLevelClass::~TopLevelClass", "TopLevelClass", "~TopLevelClass", "", ""],
     'namespace' => ["undefined reference to `Sample1::Types::DerivedClass::FuncAdded(long, const T*) const",
-                    "::Sample1::Types::DerivedClass::FuncAdded", "::Sample1::Types::DerivedClass", "FuncAdded", "long,const T*"],
+                    "::Sample1::Types::DerivedClass::FuncAdded", "::Sample1::Types::DerivedClass",
+                    "FuncAdded", "long, const T*", "const"],
+    'C symbol' => ["undefined reference to `sym'", "sym", "", "sym", nil, ""],
     'array' => ["undefined reference to `ClassNotInstanciated::arrayMissing'",
-                "ClassNotInstanciated::arrayMissing", "ClassNotInstanciated", "arrayMissing", nil])
+                "ClassNotInstanciated::arrayMissing", "ClassNotInstanciated", "arrayMissing", nil, ""],
+    'full sentence' => ["obj/file.o:file2.cpp:(.rdataSym+0x40): undefined reference to `funcMissing(long) const'",
+                        "funcMissing", "", "funcMissing", "long", "const"]
+  )
   def test_parseUndefinedReference(data)
-    line, expectedFullname, expectedClassFullname, expectedMemberName, expectedArgTypeSet = data
+    line, expectedFullname, expectedClassFullname, expectedMN, expectedATS, expectedPF = data
     ref = UndefinedReference.new(line)
     assert_not_nil(ref.fullname)
     assert_equal(expectedFullname, ref.fullname)
     assert_equal(expectedClassFullname, ref.classFullname)
-    assert_equal(expectedMemberName, ref.memberName)
+    assert_equal(expectedMN, ref.memberName)
+    assert_equal(expectedATS, ref.argTypeStr)
+    assert_equal(expectedPF, ref.postFunc)
   end
 end
 
@@ -2734,6 +2785,38 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.eliminateAllUnusedBlock(rootBlock)
     assert_nil(nsBlock.parent)
     assert_equal([], rootBlock.children)
+  end
+
+  def test_mergeFreeFunctionSetArray
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+
+    rootBlock = RootBlock.new("")
+    ns1 = NamespaceBlock.new("namespace A {")
+    ns2 = NamespaceBlock.new("namespace A {")
+    ec1 = ExternCBlock.new('extern "C" {')
+    ec2 = ExternCBlock.new('extern "C" {')
+    rootBlock.connect(ns1)
+    rootBlock.connect(ns2)
+    rootBlock.connect(ec1)
+    ec1.connect(ec2)
+
+    freeFunctionSetArray = [FreeFunctionSet.new(rootBlock),
+                            FreeFunctionSet.new(ns1),
+                            FreeFunctionSet.new(ec1),
+                            FreeFunctionSet.new(ec2),
+                            FreeFunctionSet.new(ns2)]
+
+    serial = 1
+    freeFunctionSetArray.each do |set|
+      set.instance_variable_set(:@funcSet, [serial])
+      set.instance_variable_set(:@undefinedFunctionSet, [serial])
+      serial += 1
+    end
+
+    actual = parser.mergeFreeFunctionSetArray(freeFunctionSetArray)
+    assert_equal(2, actual.size)
+    assert_equal([1,3,4], actual[0].instance_variable_get(:@funcSet))
+    assert_equal([2,5], actual[1].instance_variable_get(:@funcSet))
   end
 
   def test_buildClassTree

@@ -213,14 +213,7 @@ module Mockgen
 
     # Do not mock structs in extern "C" {}
     def canMock?
-      result = true
-      block = parent
-      while block
-        result &= block.canMock?
-        block = block.parent
-      end
-
-      result
+      allOfParents?(:canMock?)
     end
 
     def isNamespace?
@@ -244,6 +237,10 @@ module Mockgen
       ""
     end
 
+    def getFullNamespace
+      getNonTypedFullname(getNamespace)
+    end
+
     def collectAliasesInBlock(typeAliasSet)
       @typedefBlock.collectAliasesInBlock(typeAliasSet) if @typedefBlock
       typeAliasSet
@@ -258,7 +255,19 @@ module Mockgen
       nil
     end
 
+    def getStringToDeclFile
+      nil
+    end
+
     def getStringToSwapperFile
+      nil
+    end
+
+    def getStringOfStub
+      nil
+    end
+
+    def getStringOfVariableDefinition
       nil
     end
 
@@ -319,6 +328,17 @@ module Mockgen
 
     def removeChild(block)
       @children = @children.reject { |child| child.equal?(block) }
+    end
+
+    def allOfParents?(labelToCheck)
+      result = true
+      block = parent
+      while block
+        result &= block.send(labelToCheck)
+        block = block.parent
+      end
+
+      result
     end
   end
 
@@ -972,7 +992,7 @@ module Mockgen
 
   # Class member and non-member (free) function
   class FunctionBlock < BaseBlock
-    attr_reader :valid, :argSignature
+    attr_reader :valid, :funcName, :argSignature
     def initialize(line)
       super
       @valid = false
@@ -1175,6 +1195,8 @@ module Mockgen
 
   # Templates are not supported yet
   class FreeFunctionBlock < FunctionBlock
+    attr_reader :valid
+
     def initialize(line)
       body = line
       if md = line.match(/^extern\s+(.*)/)
@@ -1185,6 +1207,7 @@ module Mockgen
 
       # Exclude standard header
       @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_PATTERN}/)
+      @valid = false if Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_WORD_SET.any? { |word| line.include?(word) }
       @needStub = false
     end
 
@@ -1204,10 +1227,16 @@ module Mockgen
   end
 
   class FreeFunctionSet < BaseBlock
+    attr_reader :funcSet, :undefinedFunctionSet
+
     def initialize(namespaceBlock)
       @block = namespaceBlock
       @funcSet = []
       @undefinedFunctionSet = []
+    end
+
+    def getFullNamespace
+      @block.getFullNamespace
     end
 
     def filterByReferences(referenceSet)
@@ -1225,33 +1254,55 @@ module Mockgen
       @mockClassDef + @forwarderClassDef
     end
 
-    def getStringToSourceFile
+    def getStringToDeclFile
+      @funcDecl
+    end
+
+    def getStringToSwapperFile
+      @funcSwapDef
+    end
+
+    def getStringOfStub
       @mockClassFunc
+    end
+
+    def getStringOfVariableDefinition
+      @forwarderVarDef
     end
 
     def needStub?
       !@undefinedFunctionSet.empty?
     end
 
+    def merge(otherSet)
+      @funcSet.concat(otherSet.funcSet)
+      @undefinedFunctionSet.concat(otherSet.undefinedFunctionSet)
+    end
+
     # Generate class definition texts
     def makeClassSet
       prefix = Mockgen::Constants::CLASS_FREE_FUNCTION_SET
-      className = prefix + @block.getNonTypedFullname("").gsub("::", "_")
-      mockName = (className + Mockgen::Constants::CLASS_POSTFIX_MOCK).gsub(/_+/, "_")
-      forwarderName= (className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER).gsub(/_+/, "_")
+      nameSpaceStr = @block.getFullNamespace
+      nameSpaceStr = (!nameSpaceStr.empty? && nameSpaceStr[0] != ":") ? "::#{nameSpaceStr}" : nameSpaceStr
+      className = surpressUnderscores(prefix + nameSpaceStr.gsub("::", "_"))
+      mockName = surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_MOCK)
+      forwarderName= surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER)
 
       @mockClassDef, @mockClassFunc = formatMockClass(mockName, forwarderName)
-      @forwarderClassDef = formatForwarderClass(forwarderName, mockName)
+      @forwarderClassDef, @funcDecl, @funcSwapDef, @forwarderVarDef = formatForwarderClass(forwarderName, mockName)
     end
 
     def makeStubSet
       @mockClassDef = ""
       @mockClassFunc = formatStub()
       @forwarderClassDef = ""
+      @funcDecl = ""
+      @funcSwapDef = ""
+      @forwarderVarDef = ""
     end
 
     def add(func)
-      @funcSet << func
+      @funcSet << func if func.valid
     end
 
     def formatMockClass(mockClassName, forwarderName)
@@ -1286,12 +1337,12 @@ module Mockgen
     end
 
     def formatForwarderClass(forwarderName, mockClassName)
-      return "" if @funcSet.empty?
+      return "", "", "", "" if @funcSet.empty?
 
       str =  "class #{mockClassName};\n"
       str += "class #{forwarderName} {\n"
       str += "public:\n"
-      str += "    #{forwarderName}::#{forwarderName}(void) : "
+      str += "    #{forwarderName}(void) : "
       str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
 
       str += @funcSet.map do |func|
@@ -1300,7 +1351,25 @@ module Mockgen
 
       str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "};\n\n"
-      str
+
+      # Class name should begin with a upper case
+      varName = forwarderName[0].downcase + forwarderName[1..-1]
+      varline = "#{forwarderName} #{varName};\n"
+      varDecl = "extern " + varline
+      varSwap = @funcSet.map { |func| getSwapperDef(varName, func) }.join("")
+
+      src = varline
+      return str, varDecl, varSwap, src
+    end
+
+    def surpressUnderscores(str)
+      str.gsub(/_+/, "_")
+    end
+
+    def getSwapperDef(varName, func)
+      return "" unless func.valid
+      funcName = func.funcName
+      "#define #{funcName} #{varName}.#{funcName}\n"
     end
   end
 
@@ -1803,7 +1872,7 @@ module Mockgen
 
       # Switch by the first keyword of the line
       # Should merge this and parse in classBlock to handle inner classes
-      if md = line.match(/^(.*\S)\s*{/) && !parentBlock.skippingParse
+      if md = line.match(/^(.*\S)\s*{/) && (parentBlock.nil? || !parentBlock.skippingParse)
         words = line.split(/\s+/)
         if words[0] == "typedef"
           typedefBlock = TypedefBlock.new(line)
@@ -1925,7 +1994,10 @@ module Mockgen
 
         argTypeStr = nil
         postFuncSet = []
-        phraseSet = StringOfParenthesis.new(line.tr("`'","")).parse
+        md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+([^\']+)/)
+        body = md[1]
+
+        phraseSet = StringOfParenthesis.new(body.tr("`'","")).parse
         phraseSet.reverse.each do |phrase, inParenthesis|
           if inParenthesis
             argTypeStr = inParenthesis
@@ -2019,22 +2091,35 @@ module Mockgen
       index = 0
       serial = 1
       sizeOfSet = Mockgen::Constants::GENERATED_BLOCKS_PER_SOURCE
-      blockSet = collectClassesToWrite(@block.children).flatten.compact
 
       while(index < @functionSetArray.size)
         argBlockSet = @functionSetArray.slice(index, sizeOfSet)
         suffix = "_#{serial}."
 
         classFilename = argClassFilename.gsub(".", suffix)
+        varSwapperFilename = argVarSwapperFilename.gsub(".", suffix)
+        declFilename = argDeclFilename.gsub(".", suffix)
         defFilename = argDefFilename.gsub(".", suffix)
-        writeFreeFunctionDeclFile(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
-        writeStubFilename(defFilename, @inputFilename, argBlockSet)
+
+        writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
+                              argBlockSet, :getStringToClassFile, nil)
+        writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
+                              argBlockSet, :getStringToDeclFile, nil)
+        writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
+                              argBlockSet, :getStringToSwapperFile, nil)
+        writeFreeFunctionFile(defFilename, declFilename, nil, nil, nil,
+                              argBlockSet, :getStringOfStub, nil)
+        unless @stubOnly
+          writeFreeFunctionFile(defFilename, declFilename, beginNamespace, endNamespace, nil,
+                                argBlockSet, :getStringOfVariableDefinition, "a")
+        end
 
         classFilenameSet << classFilename
         serial += 1
         index += sizeOfSet
       end
 
+      blockSet = collectClassesToWrite(@block.children).flatten.compact
       index = 0
       while(index < blockSet.size)
         argBlockSet = blockSet.slice(index, sizeOfSet)
@@ -2085,8 +2170,6 @@ module Mockgen
     # line : leading and trailing spaces and CRLF must be removed
     # Parse and discard inline function definitions
     def parseLine(line)
-      block = @blockFactory.createBlock(line, @block)
-
       # } else {
       if (line[0] == "}") && (line[-1] == "{")
       # End of a block
@@ -2099,6 +2182,7 @@ module Mockgen
         parentBlock = @block.parent
         @block = parentBlock
       else
+        block = @blockFactory.createBlock(line, @block)
         # Connect "... {" and "... ;" lines
         @block.connect(block)
         # Beginning of a block
@@ -2142,7 +2226,27 @@ module Mockgen
       freeFunctionSetArray.each do |funcSet|
         funcSet.filterByReferences(referenceSet)
       end
-      freeFunctionSetArray
+
+      mergeFreeFunctionSetArray(freeFunctionSetArray)
+    end
+
+    # Merge scattered definitions in a namespace or in the top-level namespace
+    def mergeFreeFunctionSetArray(freeFunctionSetArray)
+      nameSet = {}
+      allSet = []
+
+      freeFunctionSetArray.each do |freeFunctionSet|
+        name = freeFunctionSet.getFullNamespace()
+        if nameSet.key?(name)
+          # Merge same namespaces including extern "C"
+          nameSet[name].merge(freeFunctionSet)
+        else
+          nameSet[name] = freeFunctionSet
+          allSet << freeFunctionSet
+        end
+      end
+
+      allSet
     end
 
     def buildClassTree(referenceSet)
@@ -2263,16 +2367,6 @@ module Mockgen
           functionSet.makeClassSet
         end
       end
-
-      classDecl = functionSetArray.map do |functionSet|
-        functionSet.getStringToClassFile
-      end.join("")
-
-      classDef = functionSetArray.map do |functionSet|
-        functionSet.getStringToSourceFile
-      end.join("")
-
-      return classDecl, classDef
     end
 
     def makeClassSet
@@ -2333,8 +2427,9 @@ module Mockgen
     end
 
     def collectFreeFunctions(freeFunctionSet, argBlock)
-      newSetArray = []
       currentSet = freeFunctionSet
+      newSetArray = [currentSet]
+      previousSet = nil
 
       argBlock.children.each do |block|
         next unless block.canTraverse
@@ -2343,9 +2438,8 @@ module Mockgen
           currentSet.add(block)
         elsif block.isNamespace?
           # Depth first
-          currentSet = FreeFunctionSet.new(block)
-          newSetArray << currentSet
-          newSetArray.concat(collectFreeFunctions(currentSet, block))
+          innerSet = FreeFunctionSet.new(block)
+          newSetArray.concat(collectFreeFunctions(innerSet, block))
         end
       end
 
@@ -2373,19 +2467,20 @@ module Mockgen
       end
     end
 
-    def writeFreeFunctionDeclFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
-      File.open(filename, "w") do |file|
-        file.puts getClassFileHeader(@inputFilename, filename)
-        file.puts "#if 0  // Need to merge mocks for each namespace and extern C"
-        file.puts beginNamespace
+    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode)
+      filemode = mode
+      filemode ||= "w"
+      File.open(filename, filemode) do |file|
+        file.puts getClassFileHeader(includeFilename, filename)
+        file.puts beginNamespace if beginNamespace
+        file.puts usingNamespace if usingNamespace
         lambdaToBlock = lambda do |block|
-          str = block.getStringToClassFile
+          str = block.send(labelGetStr)
           file.puts str if str && !str.empty?
         end
         doForBlockSet(blockSet, lambdaToBlock)
-        file.puts endNamespace
+        file.puts endNamespace if endNamespace
         file.puts getIncludeGuardFooter
-        file.puts "#endif"
       end
     end
 

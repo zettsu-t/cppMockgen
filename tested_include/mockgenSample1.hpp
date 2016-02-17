@@ -75,6 +75,7 @@ namespace Sample1 {
     extern int SampleFunc(void);
     extern int SampleFuncArray(void);
     extern int SampleFuncCtorWithArg(void);
+    extern int MissingFuncInNamespace(void);
 }
 
 // Default argument ass a pointer to a function

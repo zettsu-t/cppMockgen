@@ -29,6 +29,8 @@ module Mockgen
 
     # Pattern to exclude free function mocks and stubs
     FREE_FUNCTION_FILTER_OUT_PATTERN = "^[\da-z_]+$"
+    # Tentative workaround for MinGW pthread
+    FREE_FUNCTION_FILTER_OUT_WORD_SET = ["_pthread_key_dest"]
 
     # Keywords which are excluded to make mocks in class member functions
     MEMFUNC_WORD_SKIPPED_SET = ["virtual", "inline", "explicit", "static"].map(&:freeze).freeze
