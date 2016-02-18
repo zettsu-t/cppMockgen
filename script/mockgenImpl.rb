@@ -1281,6 +1281,7 @@ module Mockgen
 
     # Generate class definition texts
     def makeClassSet
+      uniqFunctions
       prefix = Mockgen::Constants::CLASS_FREE_FUNCTION_SET
       nameSpaceStr = @block.getFullNamespace
       nameSpaceStr = (!nameSpaceStr.empty? && nameSpaceStr[0] != ":") ? "::#{nameSpaceStr}" : nameSpaceStr
@@ -1293,6 +1294,7 @@ module Mockgen
     end
 
     def makeStubSet
+      uniqFunctions
       @mockClassDef = ""
       @mockClassFunc = formatStub()
       @forwarderClassDef = ""
@@ -1303,6 +1305,12 @@ module Mockgen
 
     def add(func)
       @funcSet << func if func.valid
+    end
+
+    # Unify same functions that occurs in different include directives
+    def uniqFunctions
+      @funcSet.uniq! { |func| func.argSignature }
+      @undefinedFunctionSet.uniq! { |func| func.argSignature }
     end
 
     def formatMockClass(mockClassName, forwarderName)

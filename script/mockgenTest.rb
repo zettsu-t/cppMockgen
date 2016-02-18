@@ -1687,6 +1687,31 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.makeClassSet
     assert_equal(expected, funcSet.getStringOfVariableDefinition)
   end
+
+  def test_uniqFunctions
+    block = NamespaceBlock.new("namespace B")
+    funcSet = FreeFunctionSet.new(block)
+
+    ["extern int Func(int a);",
+     "extern int Func(int b);"].each do |line|
+      func = FreeFunctionBlock.new(line)
+      def func.filterByReferences(ref)
+        true
+      end
+      block.connect(func)
+      funcSet.add(func)
+    end
+
+    refSetClass = Struct.new(:valid, :refSet)
+    refSet = refSetClass.new(true, [1])
+    funcSet.filterByReferences(refSet)
+
+    assert_equal(2, funcSet.funcSet.size)
+    assert_equal(2, funcSet.undefinedFunctionSet.size)
+    funcSet.uniqFunctions
+    assert_equal(1, funcSet.funcSet.size)
+    assert_equal(1, funcSet.undefinedFunctionSet.size)
+  end
 end
 
 class TestClassBlock < Test::Unit::TestCase
