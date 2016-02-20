@@ -307,8 +307,20 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_nil(BaseBlock.new("").getStringToClassFile)
   end
 
+  def test_getStringToDeclFile
+    assert_nil(BaseBlock.new("").getStringToDeclFile)
+  end
+
   def test_getStringToSwapperFile
     assert_nil(BaseBlock.new("").getStringToSwapperFile)
+  end
+
+  def test_getStringOfStub
+    assert_nil(BaseBlock.new("").getStringOfStub)
+  end
+
+  def test_getStringOfVariableDefinition
+    assert_nil(BaseBlock.new("").getStringOfVariableDefinition)
   end
 
   def filterByReferences(referenceSet)
@@ -341,6 +353,30 @@ class TestBaseBlock < Test::Unit::TestCase
     nsBlockA.connect(nsBlockE)
     nsBlockE.connect(nsBlockB)
     assert_equal("::R::A::B::#{name}", block.getNonTypedFullname(name))
+  end
+
+  data(
+    'empty' => [[], true],
+    'all' => [[true, true], true],
+    'none' => [[false, false], false],
+    'not all' => [[true, false, true], false])
+  def test_allOfParents?(data)
+    valueSet, expected = data
+    block = NamespaceBlock.new("")
+
+    child = block
+    valueSet.each do |value|
+      parent = NamespaceBlock.new("")
+      parent.instance_variable_set(:@value, value)
+      def parent.check
+        @value
+      end
+
+      parent.connect(child)
+      child = parent
+    end
+
+    assert_equal(expected, block.allOfParents?(:check))
   end
 end
 
@@ -1176,22 +1212,23 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      "Func(T &)const",
      true, false, "T & *", false, "a", "Func", "T& a", "const"])
   def test_initializeAndParse(data)
-    line, decl, sig, cmf, smf, rt, rv, aset, fn, taset, pf = data
+    line, decl, sig, constMF, staticMF,
+    returnType, returnVoid, argSet, funcName, typedArgSet, postFunc = data
 
     ["", "{", " {", ";", " ;"].each do |suffix|
       block = MemberFunctionBlock.new(line + suffix)
       assert_true(block.valid)
       assert_true(block.canTraverse)
-      assert_equal(cmf, block.instance_variable_get(:@constMemfunc))
-      assert_equal(smf, block.instance_variable_get(:@staticMemfunc))
-      assert_equal(rt, block.instance_variable_get(:@returnType))
-      assert_equal(rv, block.instance_variable_get(:@returnVoid))
+      assert_equal(constMF, block.instance_variable_get(:@constMemfunc))
+      assert_equal(staticMF, block.instance_variable_get(:@staticMemfunc))
+      assert_equal(returnType, block.instance_variable_get(:@returnType))
+      assert_equal(returnVoid, block.instance_variable_get(:@returnVoid))
       assert_equal(decl, block.instance_variable_get(:@decl))
-      assert_equal(aset, block.instance_variable_get(:@argSet))
-      assert_equal(fn, block.funcName)
-      assert_equal(taset, block.instance_variable_get(:@typedArgSet))
-      assert_equal(sig, block.instance_variable_get(:@argSignature))
-      assert_equal(pf, block.instance_variable_get(:@postFunc))
+      assert_equal(argSet, block.instance_variable_get(:@argSet))
+      assert_equal(funcName, block.funcName)
+      assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
+      assert_equal(sig, block.argSignature)
+      assert_equal(postFunc, block.instance_variable_get(:@postFunc))
     end
   end
 
@@ -1507,6 +1544,24 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     assert_false(block.filterByReferences(ref))
   end
 
+  data(
+    'empty' => [[], true],
+    'exact' => [['FuncA'], true],
+    'word' => [['\bFuncA\b'], true],
+    'sentence' => [['^FuncA$'], true],
+    'regex' => [['Func.'], true],
+    'any' => [['.*'], true],
+    'not exact' => [['FuncB'], false],
+    'wrong regex' => [['Func..'], false],
+    'wrong space' => [[' FuncA'], false])
+  def test_filter(data)
+    filterSet, expected = data
+    func = FreeFunctionBlock.new("extern void FuncA();")
+    assert_true(func.valid)
+    assert_equal(expected, func.filter(filterSet))
+    assert_equal(expected, func.valid)
+  end
+
   def test_makeForwarderDef
     block = FreeFunctionBlock.new("extern int Func(int a);")
     expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return Func(a); }\n"
@@ -1516,6 +1571,18 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     nsBlock.connect(block)
     expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return ::A::Func(a); }\n"
     assert_equal(expected, block.makeForwarderDef(""))
+  end
+end
+
+class TestMockFreeFunction
+  attr_reader :valid
+  def initialize(num)
+    @valid = true
+    @num = num
+  end
+
+  def filter(filterSet)
+    @valid = filterSet.any? { |f| f.call(@num) }
   end
 end
 
@@ -1564,6 +1631,22 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     assert_equal(1, funcSetA.undefinedFunctionSet.size)
   end
 
+  def test_filter
+    block = RootBlock.new("")
+
+    funcSetBlock = FreeFunctionSet.new(block)
+    makeArray = lambda { |n| 1.upto(n).map { |i| TestMockFreeFunction.new(i) } }
+    funcSetBlock.instance_variable_set(:@funcSet, makeArray.call(12))
+    funcSetBlock.instance_variable_set(:@undefinedFunctionSet, makeArray.call(24))
+
+    expr2 = lambda { |arg| arg.even? }
+    expr3 = lambda { |arg| arg % 3 == 0 }
+    funcSetBlock.filter([expr2, expr3])
+    # filter numbers of 0,2,3,4 + 6N
+    assert_equal(8, funcSetBlock.instance_variable_get(:@funcSet).size)
+    assert_equal(16, funcSetBlock.instance_variable_get(:@undefinedFunctionSet).size)
+  end
+
   def test_noStubs
     block = RootBlock.new("")
     funcSet = FreeFunctionSet.new(block)
@@ -1595,6 +1678,10 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "    All_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
+
+    expectedSwapper =  "#define FuncA all_Forwarder.FuncA\n"
+    expectedSwapper += "#define FuncB all_Forwarder.FuncB\n"
+    assert_equal(expectedSwapper, funcSet.getStringToSwapperFile)
     assert_equal("All_Forwarder all_Forwarder;\n", funcSet.getStringOfVariableDefinition)
   end
 
@@ -1621,6 +1708,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
 
     expected = "All_A_Forwarder all_A_Forwarder;\n"
     assert_equal("extern " + expected, funcSet.getStringToDeclFile)
+    assert_equal("#define Func all_A_Forwarder.Func\n", funcSet.getStringToSwapperFile)
     assert_equal(expected, funcSet.getStringOfVariableDefinition)
   end
 
@@ -1711,6 +1799,28 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.uniqFunctions
     assert_equal(1, funcSet.funcSet.size)
     assert_equal(1, funcSet.undefinedFunctionSet.size)
+  end
+
+  data(
+    'none' => ["ClassName", "ClassName"],
+    'one' => ["Class_Name", "Class_Name"],
+    'multi' => ["Class__Name", "Class_Name"])
+  def test_surpressUnderscores(data)
+    str, expected = data
+    block = NamespaceBlock.new("namespace B")
+    funcSet = FreeFunctionSet.new(block)
+    assert_equal(expected, funcSet.surpressUnderscores(str))
+  end
+
+  data(
+    'invalid' => ["", ""],
+    'valid' => ["extern int Func();", "#define Func var.Func\n"])
+  def test_getSwapperDef(data)
+    line, expected = data
+    block = NamespaceBlock.new("namespace B")
+    funcSet = FreeFunctionSet.new(block)
+    func = FreeFunctionBlock.new(line)
+    assert_equal(expected, funcSet.getSwapperDef("var", func))
   end
 end
 
@@ -2721,7 +2831,7 @@ class TestUndefinedReference < Test::Unit::TestCase
   end
 end
 
-CppFileParserNilArgSet = [nil, nil, nil, nil].freeze
+CppFileParserNilArgSet = [nil, nil, nil, false, []].freeze
 
 class TestCppFileParser < Test::Unit::TestCase
   def test_parseLine
@@ -2842,6 +2952,45 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(2, actual.size)
     assert_equal([1,3,4], actual[0].instance_variable_get(:@funcSet))
     assert_equal([2,5], actual[1].instance_variable_get(:@funcSet))
+  end
+
+  data(
+    'empty' => [[], 3],
+    'non number' => [['Sample', 'Other'], 2],
+    'number' => [['Func\\d'], 1])
+  def test_collectFreeFunctions(data)
+    filterSet, expected = data
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    rootBlock = RootBlock.new("")
+    nsBlock = NamespaceBlock.new("namespace A {")
+    ecBlock = ExternCBlock.new('extern "C" {')
+    rootBlock.connect(nsBlock)
+    rootBlock.connect(ecBlock)
+
+    funcSetRoot = FreeFunctionSet.new(rootBlock)
+    funcSetNamespace = FreeFunctionSet.new(nsBlock)
+    nsBlock.connect(funcSetNamespace)
+    funcSetC = FreeFunctionSet.new(ecBlock)
+    ecBlock.connect(funcSetC)
+
+    funcRootA = FreeFunctionBlock.new("extern int FuncSampleA(int a);")
+    funcRootB = FreeFunctionBlock.new("extern int FuncOtherB(int a);")
+    funcRoot1 = FreeFunctionBlock.new("extern int Func1(int a);")
+    rootBlock.connect(funcRootA)
+    rootBlock.connect(funcRootB)
+    rootBlock.connect(funcRoot1)
+
+    funcRootC = FreeFunctionBlock.new("extern int FuncSampleC(int a);")
+    funcRootD = FreeFunctionBlock.new("extern int FuncOtherD(int a);")
+    funcRoot2 = FreeFunctionBlock.new("extern int Func2(int a);")
+    nsBlock.connect(funcRootC)
+    nsBlock.connect(funcRootD)
+    nsBlock.connect(funcRoot2)
+
+    actual = parser.collectFreeFunctions(funcSetRoot, rootBlock, filterSet)
+    assert_equal(3, actual.size)
+    assert_equal(expected, actual[0].instance_variable_get(:@funcSet).size)
+    assert_equal(expected, actual[1].instance_variable_get(:@funcSet).size)
   end
 
   def test_buildClassTree
@@ -3239,10 +3388,9 @@ class TestMockGenLauncher < Test::Unit::TestCase
 
   def test_quotePathPath
     commonArgs = [Mockgen::Constants::ARGUMENT_MODE_STUB,
-                  "input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp"]
-    commonArgs.concat(["varSwapper.hpp", "swapper.hpp", "swapper.hpp"])
-    commonArgs.concat(["-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"])
-
+                  "input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
+                  "varSwapper.hpp", "swapper.hpp", "swapper.hpp",
+                  "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"]
     cygwinPath = ["/usr/include", "/usr/include/w32api", "/usr/lib/gcc/x86_64-pc-cygwin/4.9.3/include"]
     expectedCommon = "-cc1 -ast-print -fblocks -fgnu-keywords -x c++ ".freeze
 
@@ -3266,6 +3414,22 @@ class TestMockGenLauncher < Test::Unit::TestCase
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++" '
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++/x86_64-w64-mingw32"'
     assert_equal(expected.tr("/", "\\"), target.instance_variable_get(:@clangArgs))
+  end
+
+  def test_parseFilter
+    filterSet = ["Utility", '"Utility"', "write_.*"]
+    0.upto(filterSet.size) do |i|
+      expected = ((i > 0) ? filterSet[0..(i-1)] : []).map { |word| word.tr('"','') }
+      filterArgs = expected.map { |filter| [Mockgen::Constants::ARGUMENT_FUNCTION_NAME_FILTER, filter] }.flatten
+
+      args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
+      args.concat(filterArgs)
+      args.concat(["input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
+                   "varSwapper.hpp", "swapper.hpp", "swapper.hpp",
+                   "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"])
+      target = MockGenLauncher.new(args)
+      assert_equal(expected, target.instance_variable_get(:@functionNameFilterSet))
+    end
   end
 
   # Test the generate and parse methods with .cpp files

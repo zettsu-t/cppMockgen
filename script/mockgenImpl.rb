@@ -316,6 +316,17 @@ module Mockgen
       addTopNamespace(fullname)
     end
 
+    def allOfParents?(labelToCheck)
+      result = true
+      block = parent
+      while block
+        result &= block.send(labelToCheck)
+        block = block.parent
+      end
+
+      result
+    end
+
     protected
     def setParent(block)
       @parent = block
@@ -328,17 +339,6 @@ module Mockgen
 
     def removeChild(block)
       @children = @children.reject { |child| child.equal?(block) }
-    end
-
-    def allOfParents?(labelToCheck)
-      result = true
-      block = parent
-      while block
-        result &= block.send(labelToCheck)
-        block = block.parent
-      end
-
-      result
     end
   end
 
@@ -1221,12 +1221,22 @@ module Mockgen
       @valid
     end
 
+    def filter(filterSet)
+      return @valid if filterSet.empty?
+
+      @valid &= filterSet.any? do |funcFilter|
+        !funcName.match(/#{funcFilter}/).nil?
+      end
+      @valid
+    end
+
     def makeForwarderDef(className)
       makeForwarderDefImpl(getNonTypedFullname(className))
     end
   end
 
   class FreeFunctionSet < BaseBlock
+    # Be public to merge
     attr_reader :funcSet, :undefinedFunctionSet
 
     def initialize(namespaceBlock)
@@ -1277,6 +1287,11 @@ module Mockgen
     def merge(otherSet)
       @funcSet.concat(otherSet.funcSet)
       @undefinedFunctionSet.concat(otherSet.undefinedFunctionSet)
+    end
+
+    def filter(filterSet)
+      @funcSet.reject! { |f| !f.filter(filterSet) }
+      @undefinedFunctionSet.reject! { |f| !f.filter(filterSet) }
     end
 
     # Generate class definition texts
@@ -2057,7 +2072,7 @@ module Mockgen
     # cppNameSpace : namespace of generated codes
     # originalFilename : a file before processed by clang
     # convertedFilename : a file after processed by clang
-    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename, stubOnly)
+    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename, stubOnly, filterSet)
       abort if cppNameSpace.nil? || cppNameSpace.empty?
       @cppNameSpace = cppNameSpace
       @inputFilename = originalFilename
@@ -2077,7 +2092,7 @@ module Mockgen
       }
 
       referenceSet = parseLinkLog(linkLogFilename)
-      @functionSetArray = buildFreeFunctionSet(referenceSet)
+      @functionSetArray = buildFreeFunctionSet(referenceSet, filterSet)
       makeFreeFunctionSet(@functionSetArray)
 
       buildClassTree(referenceSet)
@@ -2227,9 +2242,9 @@ module Mockgen
       UndefinedReferenceSet.new(linkLogFilename)
     end
 
-    def buildFreeFunctionSet(referenceSet)
+    def buildFreeFunctionSet(referenceSet, filterSet)
       rootFreeFunctionSet = FreeFunctionSet.new(@block)
-      freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block)
+      freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block, filterSet)
 
       freeFunctionSetArray.each do |funcSet|
         funcSet.filterByReferences(referenceSet)
@@ -2434,7 +2449,13 @@ module Mockgen
       result
     end
 
-    def collectFreeFunctions(freeFunctionSet, argBlock)
+    def collectFreeFunctions(freeFunctionSet, argBlock, filterSet)
+      newSetArray = collectFreeFunctionArray(freeFunctionSet, argBlock, filterSet)
+      newSetArray.each { |set| set.filter(filterSet) }
+      newSetArray
+    end
+
+    def collectFreeFunctionArray(freeFunctionSet, argBlock, filterSet)
       currentSet = freeFunctionSet
       newSetArray = [currentSet]
       previousSet = nil
@@ -2442,12 +2463,12 @@ module Mockgen
       argBlock.children.each do |block|
         next unless block.canTraverse
 
-        if block.isFreeFunction? && block.valid
-          currentSet.add(block)
+        if block.isFreeFunction?
+          currentSet.add(block) if block.valid
         elsif block.isNamespace?
           # Depth first
           innerSet = FreeFunctionSet.new(block)
-          newSetArray.concat(collectFreeFunctions(innerSet, block))
+          newSetArray.concat(collectFreeFunctionArray(innerSet, block, filterSet))
         end
       end
 
@@ -2642,6 +2663,15 @@ module Mockgen
       argSet = argv.dup
       mode = argSet.shift
       @stubOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_STUB)
+      @functionNameFilterSet = []
+
+      while(!argSet.empty?)
+        break if argSet[0] != Mockgen::Constants::ARGUMENT_FUNCTION_NAME_FILTER
+        break if argSet.size < 2
+        argSet.shift
+        filter = argSet.shift
+        @functionNameFilterSet << filter.tr('"','')
+      end
 
       @inputFilename = argSet.shift
       @inLinkLogFilename = argSet.shift
@@ -2663,8 +2693,8 @@ module Mockgen
       # It is also useful to know how clang format .hpp files.
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
 
-      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename, @stubOnly)
-
+      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
+                  @stubOnly, @functionNameFilterSet)
       # Value to return as process status code
       0
     end
@@ -2695,8 +2725,9 @@ module Mockgen
       argSet.join(" ")
     end
 
-    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly)
-      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly)
+    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly, filterSet)
+      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
+                                 stubOnly, filterSet)
       args = [@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename]
       args.concat([@outDeclFilename, @outDefFilename])
       parser.writeToFiles(*args)

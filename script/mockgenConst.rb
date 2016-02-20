@@ -8,6 +8,7 @@ module Mockgen
     # Argument to specify mode
     ARGUMENT_MODE_STUB = "stub".freeze
     ARGUMENT_MODE_MOCK = "mock".freeze
+    ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
 
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze

@@ -13,11 +13,6 @@
 #define PACKED_ATTRIBUTE
 #endif
 
-extern int TopLevelMissingFuncCpp(void);
-extern "C" {
-    extern int TopLevelMissingFuncC(void);
-}
-
 // Nested namespaces
 namespace Sample1 {
     namespace Types {
@@ -117,6 +112,11 @@ public:
         int Func();
     } inner_;
 };
+
+extern int TopLevelMissingFuncCpp(void);
+extern "C" {
+    extern int TopLevelMissingFuncC(void);
+}
 
 // Testing to ignore attributes
 PACKED_ATTRIBUTE struct StructNotInstanciated1 {};
