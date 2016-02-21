@@ -8,6 +8,27 @@ require 'test/unit'
 # Omit the module name in this testing
 include Mockgen
 
+class TestConstants < Test::Unit::TestCase
+  def test_constants
+    assert_equal(Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.size,
+                 Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_MAP.size)
+    assert_equal(Mockgen::Constants::CLASS_NAME_EXCLUDED_MAP.size,
+                 Mockgen::Constants::CLASS_NAME_EXCLUDED_SET.size)
+    assert_equal(Mockgen::Constants::MEMFUNC_WORD_SKIPPED_SET.size,
+                 Mockgen::Constants::MEMFUNC_WORD_SKIPPED_MAP.size)
+    assert_equal(Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_SET.size,
+                 Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_MAP.size)
+    assert_equal(Mockgen::Constants::MEMFUNC_WORD_COMPARED_SET.size,
+                 Mockgen::Constants::MEMFUNC_WORD_COMPARED_MAP.size)
+    assert_equal(Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_SET.size,
+                 Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_MAP.size)
+    assert_equal(Mockgen::Constants::MEMVAR_FIRST_WORD_EXCLUDED_SET.size,
+                 Mockgen::Constants::MEMVAR_FIRST_WORD_EXCLUDED_MAP.size)
+    assert_equal(Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_SET.size,
+                 Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_MAP.size)
+  end
+end
+
 class TestTypeStringWithoutModifier < Test::Unit::TestCase
   def test_removeReservedWord
     Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
@@ -17,6 +38,7 @@ class TestTypeStringWithoutModifier < Test::Unit::TestCase
   end
 
   data(
+    'space' => ["  ", []],
     'primitive' => ["class T**", ["T", "**"]],
     'spaces' => ["class T * ", ["T", "*"]],
     'reference' => ["struct S&", ["S", "&"]])
@@ -53,6 +75,20 @@ class TestTypeAliasSet < Test::Unit::TestCase
     assert_equal(expected, typeAliasSet.aliasSet)
   end
 
+  def test_merge
+    outerSet = TypeAliasSet.new
+    outerSet.add("uint32_t", "unsigned int")
+    outerSet.add("UINT", "uint64_t")
+    innerSet = TypeAliasSet.new
+    innerSet.add("UINT", "uint32_t")
+
+    innerSet.merge(outerSet)
+    expected = {"UINT" => "uint64_t", "uint32_t" => "unsigned int"}
+    assert_equal(expected, outerSet.aliasSet)
+    expected = {"UINT" => "unsigned int", "uint32_t" => "unsigned int"}
+    assert_equal(expected, innerSet.aliasSet)
+  end
+
   def test_resolve
     typeAliasSet = TypeAliasSet.new
     typeAliasSet.resolve("uint32_t", "unsigned int")
@@ -66,20 +102,6 @@ class TestTypeAliasSet < Test::Unit::TestCase
     typeAliasSet.resolve("PUINT", "uint32_t*")
     expected = {"PUINT" => "unsigned int *", "uint32_t" => "unsigned int", "UINT" => "unsigned int"}
     assert_equal(expected, typeAliasSet.aliasSet)
-  end
-
-  def test_merge
-    outerSet = TypeAliasSet.new
-    outerSet.add("uint32_t", "unsigned int")
-    outerSet.add("UINT", "uint64_t")
-    innerSet = TypeAliasSet.new
-    innerSet.add("UINT", "uint32_t")
-
-    innerSet.merge(outerSet)
-    expected = {"UINT" => "uint64_t", "uint32_t" => "unsigned int"}
-    assert_equal(expected, outerSet.aliasSet)
-    expected = {"UINT" => "unsigned int", "uint32_t" => "unsigned int"}
-    assert_equal(expected, innerSet.aliasSet)
   end
 
   def test_removeSystemInternalSymbols
@@ -101,7 +123,7 @@ class TestTypeAliasSet < Test::Unit::TestCase
   def test_isSystemInternalSymbolTrue(data)
     str = data
     typeAliasSet = TypeAliasSet.new
-    assert_true(typeAliasSet.isSystemInternalSymbol(str))
+    assert_true(typeAliasSet.isSystemInternalSymbol?(str))
   end
 
   data(
@@ -110,7 +132,7 @@ class TestTypeAliasSet < Test::Unit::TestCase
   def test_isSystemInternalSymbolFalse(data)
     str = data
     typeAliasSet = TypeAliasSet.new
-    assert_false(typeAliasSet.isSystemInternalSymbol(str))
+    assert_false(typeAliasSet.isSystemInternalSymbol?(str))
   end
 
   data(
@@ -253,8 +275,8 @@ class TestBaseBlock < Test::Unit::TestCase
     BaseBlock.new("").setTypedef("Name")
   end
 
-  def test_canTraverse
-    assert_false(BaseBlock.new("").canTraverse)
+  def test_canTraverse?
+    assert_false(BaseBlock.new("").canTraverse?)
   end
 
   def test_canMock?
@@ -323,7 +345,7 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_nil(BaseBlock.new("").getStringOfVariableDefinition)
   end
 
-  def filterByReferences(referenceSet)
+  def test_filterByReferences(referenceSet)
     assert_true(BaseBlock.new("").filterByReferences(nil))
   end
 
@@ -381,8 +403,8 @@ class TestBaseBlock < Test::Unit::TestCase
 end
 
 class TestRootBlock < Test::Unit::TestCase
-  def test_canTraverse
-    assert_true(RootBlock.new("").canTraverse)
+  def test_canTraverse?
+    assert_true(RootBlock.new("").canTraverse?)
   end
 end
 
@@ -405,10 +427,11 @@ class TestNamespaceBlock < Test::Unit::TestCase
     'unnamed namespace' => "",
     'simple namespace' => "A",
     'nested namespace' => "A::B")
-  def test_canTraverse(data)
+  def test_canTraverse?(data)
     name = data
-    assert_true(NamespaceBlock.new("namespace #{name} {").canTraverse)
+    assert_true(NamespaceBlock.new("namespace #{name} {").canTraverse?)
     assert_true(NamespaceBlock.new("namespace #{name} {").canMock?)
+    assert_true(NamespaceBlock.new("namespace #{name} {").isValid?(name))
   end
 
   data(
@@ -419,8 +442,9 @@ class TestNamespaceBlock < Test::Unit::TestCase
     'C++ internal 2' => "_CPP__")
   def test_cannotTraverse(data)
     name = data
-    assert_false(NamespaceBlock.new("namespace #{name} {").canTraverse)
+    assert_false(NamespaceBlock.new("namespace #{name} {").canTraverse?)
     assert_false(NamespaceBlock.new("namespace #{name} {").canMock?)
+    assert_false(NamespaceBlock.new("namespace #{name} {").isValid?(name))
   end
 
   def test_canMock?
@@ -437,7 +461,7 @@ end
 class TestExternCBlock < Test::Unit::TestCase
   def test_externC
     block = ExternCBlock.new('extern "C" {')
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
     assert_true(block.isNamespace?)
     assert_equal("", block.getNamespace())
   end
@@ -457,12 +481,12 @@ class TestTypedefBlock < Test::Unit::TestCase
     block = TypedefBlock.new(line + ";")
     assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeSet))
     assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
   end
 
   def test_initializeNotTypedef
     block = TypedefBlock.new("namespace A")
-    assert_false(block.canTraverse)
+    assert_false(block.canTraverse?)
   end
 
   def test_collectAliasesInBlock
@@ -640,6 +664,18 @@ class TestTypedVariable < Test::Unit::TestCase
   end
 
   data(
+    'empty' => ["", "", nil],
+    'primitive' => ["a", "a", nil],
+    'array' => ["a[]", "a", "[]"],
+    'array size' => ["a[1]", "a", "[1]"])
+  def test_splitArrayBlock(data)
+    line, expectedName, expectedArrayBlock = data
+    name, arrayBlock = TypedVariable.new(line).splitArrayBlock(line)
+    assert_equal(expectedName, name)
+    assert_equal(expectedArrayBlock, arrayBlock)
+  end
+
+  data(
     'empty' => ["int()()", "int () ()", "dummy1", "int (dummy1) ()"],
     'no varname' => ["int(*)()", "int (*) ()", "dummy1", "int (*dummy1) ()"],
     'varname' => ["int(f)()", "int () ()", "f", "int (f) ()"],
@@ -785,9 +821,6 @@ class TestArgVariableSet < Test::Unit::TestCase
 end
 
 class TestExternVariableStatement < Test::Unit::TestCase
-  def setup
-  end
-
   data(
     'primitive' => ['Type a;', "Type", "a"],
     'pointer1'  => ['class Type *pA;',  "Type", "pA"],
@@ -795,14 +828,15 @@ class TestExternVariableStatement < Test::Unit::TestCase
     'reference1' => ['static Type &a;',  "Type", "a"],
     'reference2' => ['const Type & a;', "Type", "a"],
     'decltype' => ['decltype(A) a;', "decltype(A)", "a"])
-  def test_canTraverse(data)
+  def test_canTraverse?(data)
      line, type, var = data
      block = ExternVariableStatement.new("extern #{line}")
-     assert_true(block.canTraverse)
-     assert_true(block.isNonMemberInstanceOfClass?)
+     assert_equal(var, block.varName)
      assert_equal(type, block.className)
-     assert_equal(var, block.getFullname)
      assert_equal("", block.arrayStr)
+     assert_true(block.canTraverse?)
+     assert_true(block.isNonMemberInstanceOfClass?)
+     assert_equal(var, block.getFullname)
   end
 
   data(
@@ -817,7 +851,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
   def test_cannotTraverseNonVariable(data)
     line = data
     block = ExternVariableStatement.new("extern #{line}")
-    assert_false(block.canTraverse)
+    assert_false(block.canTraverse?)
     assert_false(block.isNonMemberInstanceOfClass?)
   end
 
@@ -827,8 +861,23 @@ class TestExternVariableStatement < Test::Unit::TestCase
   def test_cannotTraverseTypeAlias(data)
     line = data
     block = ExternVariableStatement.new("#{line}")
-    assert_false(block.canTraverse)
+    assert_false(block.canTraverse?)
     assert_false(block.isNonMemberInstanceOfClass?)
+  end
+
+  def test_filterByReferences
+    varBlockA = ExternVariableStatement.new("extern int a;")
+    varBlockB = ExternVariableStatement.new("extern int b;")
+    arrayBlock = ExternVariableStatement.new("extern int a[10];")
+
+    referenceClass = Struct.new(:memberName)
+    reference = referenceClass.new("a")
+    nilReference = referenceClass.new(nil)
+
+    assert_true(varBlockA.filterByReferences(reference))
+    assert_true(arrayBlock.filterByReferences(reference))
+    assert_false(varBlockA.filterByReferences(nilReference))
+    assert_false(varBlockB.filterByReferences(reference))
   end
 
   def test_makeStubDef
@@ -849,7 +898,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
   def test_parseArray(data)
      line, type, var, arrayStr = data
      block = ExternVariableStatement.new("extern #{line}")
-     assert_true(block.canTraverse)
+     assert_true(block.canTraverse?)
      assert_true(block.isNonMemberInstanceOfClass?)
      assert_equal(type, block.className)
      assert_equal(var, block.getFullname)
@@ -860,31 +909,21 @@ class TestExternVariableStatement < Test::Unit::TestCase
 end
 
 class TestMemberVariableStatement < Test::Unit::TestCase
-  def setup
-  end
-
   data(
     'primitive' => ['static Type a;', "Type", "a"])
-  def test_canTraverse(data)
+  def test_canTraverse?(data)
      line, type, var = data
      block = MemberVariableStatement.new("#{line}")
-     assert_true(block.canTraverse)
+     assert_true(block.canTraverse?)
      assert_false(block.isNonMemberInstanceOfClass?)
      assert_equal(type, block.className)
      assert_equal(var, block.getFullname)
-
-     # !!! test later
-#    assert_equal("Name::Type Name::a;\n", block.makeStubDef("Name"))
-
-     nsBlock = NamespaceBlock.new("namespace A")
-     nsBlock.connect(block)
-#    assert_equal("Name::Type Name::A::a;\n", block.makeStubDef("Name"))
   end
 end
 
 class TestChompAfterDelimiter < Test::Unit::TestCase
   data(
-    'not replaced' => ["Func()", ":", "Func()", nil],
+    'not split' => ["Func()", ":", "Func()", nil],
     'constructor' => ["Derived() : Base()", ":", "Derived()", ": Base()"],
     'assignment' => ["int a = 1", "=", "int a", "= 1"],
     'mixed' => ["int a = (int)1", "=", "int a", "= (int)1"])
@@ -1003,6 +1042,23 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     block = BaseBlock.new("")
     assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "").postFunctionPhrase(arg))
   end
+
+  def test_collectAliases
+    blockParent = NamespaceBlock.new("A")
+    blockChild = NamespaceBlock.new("B")
+    blockParent.connect(blockChild)
+
+    def blockParent.typeAliasSet
+      1
+    end
+
+    def blockChild.typeAliasSet
+      2
+    end
+
+    set = FunctionReferenceSet.new(blockChild, nil, "", "", "", "")
+    assert_equal([2, 1], set.collectAliases)
+  end
 end
 
 class TestConstructorBlock < Test::Unit::TestCase
@@ -1023,6 +1079,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     block = ConstructorBlock.new(line, name)
     valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase = block.parse(line, name)
     assert_true(valid)
+    assert_true(block.canTraverse?)
     assert_equal(expectedTASet, typedArgSet)
     assert_equal(expectedTASet, typedArgSetWithoutDefault)
     assert_equal(expectedATStr, argTypeStr)
@@ -1058,23 +1115,24 @@ class TestConstructorBlock < Test::Unit::TestCase
      ", long a = 0,const void* p = void",
      ", long a,const void* p", "NameC(a,p), "])
   def test_initializeWithDefaultValue(data)
-    line, expectedTASet, expectedASWD, expectedATStr, expectedArgsBC, expectedArgsBCWD, expectedCallBase = data
-    name = "NameC"
+    line, expectedTypedArgSet, expectedTypedArgSetWithoutDefault, expectedArgTypeStr,
+    expectedTypedArgsForBaseClass, expectedTypedArgsWithoutValue, expectedCallBase = data
 
+    name = "NameC"
     block = ConstructorBlock.new(line, name)
     valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase = block.parse(line, name)
     assert_true(valid)
-    assert_equal(expectedTASet, typedArgSet)
-    assert_equal(expectedASWD, typedArgSetWithoutDefault)
-    assert_equal(expectedATStr, argTypeStr)
+    assert_equal(expectedTypedArgSet, typedArgSet)
+    assert_equal(expectedTypedArgSetWithoutDefault, typedArgSetWithoutDefault)
+    assert_equal(expectedArgTypeStr, argTypeStr)
     assert_equal(expectedCallBase, callBase)
-    assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
-    assert_equal(expectedArgsBCWD, block.getTypedArgsWithoutValue)
+    assert_equal(expectedTypedArgsForBaseClass, block.getTypedArgsForBaseClass)
+    assert_equal(expectedTypedArgsWithoutValue, block.getTypedArgsWithoutValue)
     assert_equal(expectedCallBase, block.getCallForBaseClassInitializer)
 
     decoratorName = "Dereived"
     initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
-    expected = "    #{decoratorName}(#{expectedTASet}) : " +
+    expected = "    #{decoratorName}(#{expectedTypedArgSet}) : " +
                "#{expectedCallBase}#{initMember} {}\n"
     assert_equal(expected, block.makeDef(decoratorName, "", initMember))
   end
@@ -1086,6 +1144,20 @@ class TestConstructorBlock < Test::Unit::TestCase
     line = data
     block = ConstructorBlock.new("", "NameC")
     assert_equal("NameC(int a)", block.removeInitializerList(line))
+  end
+
+  def test_filterByReferences
+    line = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE
+    line += " `NameC::NameC(int)'"
+    reference = UndefinedReference.new(line)
+
+    className = "NameC"
+    block = ConstructorBlock.new("NameC(int);", className)
+    assert_true(block.filterByReferences(reference))
+    block = ConstructorBlock.new("NameC();", className)
+    assert_false(block.filterByReferences(reference))
+    block = ConstructorBlock.new("~NameC();", className)
+    assert_false(block.filterByReferences(reference))
   end
 
   def test_makeStubDef
@@ -1113,12 +1185,12 @@ class TestDestructorBlock < Test::Unit::TestCase
     line = data
     className = "NameD"
     block = DestructorBlock.new(line, className)
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
+  end
 
-    nsBlock = NamespaceBlock.new("namespace A")
-    nsBlock.connect(block)
-    assert_equal("::A::NameD::~NameD() {}\n", block.makeStubDef(className))
-
+  def test_filterByReferences
+    className = "NameD"
+    block = DestructorBlock.new("NameD::~NameD();", className)
     refClass = Struct.new(:memberName)
     ref = refClass.new("~NameD")
     assert_true(block.filterByReferences(ref))
@@ -1131,6 +1203,14 @@ class TestDestructorBlock < Test::Unit::TestCase
     assert_false(block.filterByReferences(ref))
   end
 
+  def test_makeStubDef
+    className = "NameD"
+    block = DestructorBlock.new("NameD::~NameD();", className)
+    nsBlock = NamespaceBlock.new("namespace A")
+    nsBlock.connect(block)
+    assert_equal("::A::NameD::~NameD() {}\n", block.makeStubDef(className))
+  end
+
   data(
     'constructor' => "NameD()",
     'constructor arg' => "NameD(int a)",
@@ -1139,7 +1219,7 @@ class TestDestructorBlock < Test::Unit::TestCase
     line = data
     className = "NameD"
     block = DestructorBlock.new(line, className)
-    assert_false(block.canTraverse)
+    assert_false(block.canTraverse?)
   end
 end
 
@@ -1212,22 +1292,22 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      "Func(T &)const",
      true, false, "T & *", false, "a", "Func", "T& a", "const"])
   def test_initializeAndParse(data)
-    line, decl, sig, constMF, staticMF,
+    line, decl, argSignature, constMemfunc, staticMemfunc,
     returnType, returnVoid, argSet, funcName, typedArgSet, postFunc = data
 
     ["", "{", " {", ";", " ;"].each do |suffix|
       block = MemberFunctionBlock.new(line + suffix)
       assert_true(block.valid)
-      assert_true(block.canTraverse)
-      assert_equal(constMF, block.instance_variable_get(:@constMemfunc))
-      assert_equal(staticMF, block.instance_variable_get(:@staticMemfunc))
+      assert_true(block.canTraverse?)
+      assert_equal(constMemfunc, block.instance_variable_get(:@constMemfunc))
+      assert_equal(staticMemfunc, block.instance_variable_get(:@staticMemfunc))
       assert_equal(returnType, block.instance_variable_get(:@returnType))
       assert_equal(returnVoid, block.instance_variable_get(:@returnVoid))
       assert_equal(decl, block.instance_variable_get(:@decl))
       assert_equal(argSet, block.instance_variable_get(:@argSet))
       assert_equal(funcName, block.funcName)
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
-      assert_equal(sig, block.argSignature)
+      assert_equal(argSignature, block.argSignature)
       assert_equal(postFunc, block.instance_variable_get(:@postFunc))
     end
   end
@@ -1243,7 +1323,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     ["", "{", " {", ";", " ;"].each do |suffix|
       block = MemberFunctionBlock.new(line + suffix)
       assert_false(block.valid)
-      assert_false(block.canTraverse)
+      assert_false(block.canTraverse?)
     end
   end
 
@@ -1431,12 +1511,12 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'empty' => "",
     'const' => "const",
     'override' => "const override")
-  def test_isPureVirtual(data)
+  def test_isPureVirtual?(data)
     phrase = data
     block = MemberFunctionBlock.new("")
-    assert_false(block.isPureVirtual(phrase))
+    assert_false(block.isPureVirtual?(phrase))
     ["=0", "= 0", " = 0"].each do |suffix|
-      assert_true(block.isPureVirtual("#{phrase}#{suffix}"))
+      assert_true(block.isPureVirtual?("#{phrase}#{suffix}"))
     end
   end
 
@@ -1445,12 +1525,12 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'pure virtual' => "=0",
     'override' => "override",
     'final' => "final")
-  def test_isConstMemberFunction(data)
+  def test_isConstMemberFunction?(data)
     phrase = data
     block = MemberFunctionBlock.new("")
-    assert_false(block.isConstMemberFunction(phrase))
-    assert_true(block.isConstMemberFunction("const " + phrase))
-    assert_true(block.isConstMemberFunction("const #{phrase} {"))
+    assert_false(block.isConstMemberFunction?(phrase))
+    assert_true(block.isConstMemberFunction?("const " + phrase))
+    assert_true(block.isConstMemberFunction?("const #{phrase} {"))
   end
 
   data(
@@ -1830,14 +1910,14 @@ class TestClassBlock < Test::Unit::TestCase
     'derived class' => ["class NameC : public Base", "", "NameC", "class", false, ["Base"]],
     'derived struct' => ["struct NameS : Base", "", "NameS", "struct", true, ["Base"]])
   def test_initializeAndParse(data)
-    line, th, name, tn, pub, bnSet = data
+    line, templateHeader, name, typeName, pub, baseClassNameSet = data
     block = ClassBlock.new(line + " {")
     assert_true(block.instance_variable_get(:@valid))
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
     assert_true(block.isClass?)
 
     assert_equal(name, block.getNamespace)
-    assert_equal(th, block.instance_variable_get(:@templateHeader))
+    assert_equal(templateHeader, block.instance_variable_get(:@templateHeader))
     assert_equal(name, block.instance_variable_get(:@name))
     assert_equal(name, block.instance_variable_get(:@uniqueName))
 
@@ -1845,9 +1925,9 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", block.decoratorName)
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}", block.forwarderName)
 
-    assert_equal(tn, block.instance_variable_get(:@typename))
+    assert_equal(typeName, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
-    assert_equal(bnSet, block.instance_variable_get(:@baseClassNameSet))
+    assert_equal(baseClassNameSet, block.instance_variable_get(:@baseClassNameSet))
   end
 
   def test_initializeInnerClass
@@ -1874,10 +1954,23 @@ class TestClassBlock < Test::Unit::TestCase
       "template <typename T, typename S> struct StructName : private B, protected C, public D, E",
       "template <typename T, typename S>", "StructName", "struct", true, ["D", "E"]])
   def test_initializeAndParseTemplate(data)
-    line, th, name, tn, pub, bnSet = data
+    line, templateHeader, name, typeName, pub, baseClassNameSet = data
     block = ClassBlock.new(line + " {")
-    assert_false(block.canTraverse)
+    assert_false(block.canTraverse?)
     assert_false(block.isClass?)
+  end
+
+  def test_setUniqueName
+    block = ClassBlock.new("class Name {")
+    assert_equal("Name", block.setUniqueName)
+
+    blockA = ClassBlock.new("class A {")
+    blockA.connect(block)
+    assert_equal("A_inner_Name", block.setUniqueName)
+
+    blockB = ClassBlock.new("class B {")
+    blockB.connect(blockA)
+    assert_equal("B_inner_A_inner_Name", block.setUniqueName)
   end
 
   def test_parseChildrenClass
@@ -2012,7 +2105,7 @@ class TestClassBlock < Test::Unit::TestCase
     block.filterByReferences(refSet)
     assert_equal([childBlockU], block.instance_variable_get(:@undefinedFunctionSet))
     assert_equal(2, block.instance_variable_get(:@memberFunctionSet).size)
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
     assert_true(block.needStub?)
   end
 
@@ -2149,10 +2242,10 @@ class TestClassBlock < Test::Unit::TestCase
     'void3' => " NameC ( void ) = default",
     'one' => "NameC(int a)",
     'two' => " NameC ( int a, const void* p )")
-  def test_isConstructor(data)
+  def test_isConstructor?(data)
     line = data
     block = ClassBlock.new("class NameC")
-    assert_true(block.isConstructor(line))
+    assert_true(block.isConstructor?(line))
   end
 
   data(
@@ -2162,7 +2255,7 @@ class TestClassBlock < Test::Unit::TestCase
   def test_isNotConstructor(data)
     line = data
     block = ClassBlock.new("class NameC")
-    assert_false(block.isConstructor(line))
+    assert_false(block.isConstructor?(line))
   end
 
   data(
@@ -2170,10 +2263,10 @@ class TestClassBlock < Test::Unit::TestCase
     'args' => 'int (*f)(int a, int b);',
     'nested args' => 'int (*f)(decltype(A) a, int b)',
     'decltype result' => '(decltype X)(*f)(decltype(A) a, int b)')
-  def test_isPointerToFunction(data)
+  def test_isPointerToFunction?(data)
     line = data
     block = ClassBlock.new("class NameC")
-    assert_true(block.isPointerToFunction(line))
+    assert_true(block.isPointerToFunction?(line))
   end
 
   data(
@@ -2182,7 +2275,7 @@ class TestClassBlock < Test::Unit::TestCase
   def test_isNotPointerToFunction(data)
     line = data
     block = ClassBlock.new("class NameC")
-    assert_false(block.isPointerToFunction(line))
+    assert_false(block.isPointerToFunction?(line))
   end
 
   data(
@@ -2457,7 +2550,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += expectedFuncStub
     expected += expectedVarStub
     assert_equal(expected, actualDef)
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
 
     # Do not filter the base class
     blockBase.filterByReferences(refSet)
@@ -2466,7 +2559,7 @@ class TestClassBlock < Test::Unit::TestCase
     assert_true(actualDecl.include?("FuncOther"))
     assert_false(actualDef.include?("FuncStub"))
     assert_false(actualDef.include?("FuncOther"))
-    assert_true(blockBase.canTraverse)
+    assert_true(blockBase.canTraverse?)
   end
 
   def test_formatMockClassWithDefault
@@ -2496,7 +2589,7 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
 
     block, blockBase = getClassBlockWithStub(testedName, baseName)
-    assert_true(block.canTraverse)
+    assert_true(block.canTraverse?)
 
     ["FuncStub", "FuncOther"].each do |funcname|
       refClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
@@ -2507,8 +2600,8 @@ class TestClassBlock < Test::Unit::TestCase
     end
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
-    assert_true(block.canTraverse)
-    assert_true(blockBase.canTraverse)
+    assert_true(block.canTraverse?)
+    assert_true(blockBase.canTraverse?)
   end
 
   def test_formatDecoratorClass
@@ -2709,11 +2802,8 @@ class TestClassBlock < Test::Unit::TestCase
 end
 
 class TestBlockFactory < Test::Unit::TestCase
-  def setup
-  end
-
   def test_createRootBlock
-    assert_true(BlockFactory.new.createRootBlock.canTraverse)
+    assert_true(BlockFactory.new.createRootBlock.canTraverse?)
   end
 
   def test_createBlock
@@ -2749,13 +2839,13 @@ class TestBlockFactory < Test::Unit::TestCase
     assert_false(factory.createBlock(line, rootBlock).isClass?)
 
     line = "typedef unsigned int uint32_tj;"
-    assert_true(factory.createBlock(line, rootBlock).canTraverse)
+    assert_true(factory.createBlock(line, rootBlock).canTraverse?)
 
     line = "extern const ClassName& obj;"
-    assert_true(factory.createBlock(line, rootBlock).canTraverse)
+    assert_true(factory.createBlock(line, rootBlock).canTraverse?)
 
     line = "extern void Func() {"
-    assert_false(factory.createBlock(line, rootBlock).canTraverse)
+    assert_false(factory.createBlock(line, rootBlock).canTraverse?)
 
     line = "public:"
     block = factory.createBlock(line, classBlock)
@@ -2804,6 +2894,35 @@ class TestClassMock < Mockgen::BaseBlock
   end
 end
 
+class TestClassInstance < Test::Unit::TestCase
+  def test_initialize
+    setAll = ClassInstance.new("typeSwap", "varSwap", "decl", "def")
+    assert_false(setAll.empty?)
+
+    setPartial = ClassInstance.new("", "varSwap", "decl", "def")
+    assert_false(setPartial.empty?)
+
+    setNone = ClassInstance.new("", "", "", "")
+    assert_true(setNone.empty?)
+  end
+end
+
+class TestClassInstanceMap < Test::Unit::TestCase
+  def test_initialize
+    instanceMap = ClassInstanceMap.new
+    instanceMap.add("NameA", "", "", "decl", "")
+    instanceMap.add("NameA", "", "", "", "def")
+    instanceMap.add("NameB", "", "", "", "")
+
+    assert_equal(2, instanceMap.getInstanceSet("NameA").size)
+    assert_equal(1, instanceMap.getInstanceSet("NameB").size)
+    assert_equal(0, instanceMap.getInstanceSet("NameC").size)
+
+    instanceMap.cleanUp
+    assert_equal(0, instanceMap.getInstanceSet("NameB").size)
+  end
+end
+
 class TestUndefinedReference < Test::Unit::TestCase
   data(
     'toplevel' => ["undefined reference to `TopLevelClass::GetValue()'",
@@ -2820,14 +2939,16 @@ class TestUndefinedReference < Test::Unit::TestCase
                         "funcMissing", "", "funcMissing", "long", "const"]
   )
   def test_parseUndefinedReference(data)
-    line, expectedFullname, expectedClassFullname, expectedMN, expectedATS, expectedPF = data
+    line, expectedFullname, expectedClassFullname,
+    expectedMemberName, expectedArgTypeStr, expectedPostFunc = data
+
     ref = UndefinedReference.new(line)
     assert_not_nil(ref.fullname)
     assert_equal(expectedFullname, ref.fullname)
     assert_equal(expectedClassFullname, ref.classFullname)
-    assert_equal(expectedMN, ref.memberName)
-    assert_equal(expectedATS, ref.argTypeStr)
-    assert_equal(expectedPF, ref.postFunc)
+    assert_equal(expectedMemberName, ref.memberName)
+    assert_equal(expectedArgTypeStr, ref.argTypeStr)
+    assert_equal(expectedPostFunc, ref.postFunc)
   end
 end
 
@@ -2886,7 +3007,7 @@ class TestCppFileParser < Test::Unit::TestCase
 
     typedefBlock = block.instance_variable_get(:@typedefBlock)
     assert_not_nil(typedefBlock)
-    assert_true(typedefBlock.canTraverse)
+    assert_true(typedefBlock.canTraverse?)
   end
 
   def test_eliminateUnusedBlock
@@ -3261,7 +3382,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_collectClassesToWrite
-    mockClass = Struct.new(:canTraverse, :isClass?, :children, :name)
+    mockClass = Struct.new(:canTraverse?, :isClass?, :children, :name)
     # [A[c, D[*G, *H]], B[e[I, J], *F] : * = class, lower case = cannot traverse
     blockJ = mockClass.new(false, true, [], "J")
     blockI = mockClass.new(false, true, [], "I")

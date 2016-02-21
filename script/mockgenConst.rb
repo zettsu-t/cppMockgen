@@ -12,12 +12,17 @@ module Mockgen
 
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
+    NAMESPACE_SKIPPED_MAP = Hash[*(NAMESPACE_SKIPPED_SET.map{ |word| [word, true] }.flatten)].freeze
+
     # Reserved for compiler internal use
     NAMESPACE_COMPILER_INTERNAL = "__".freeze
     # Excluded class names (practically, they should be specified in command line options)
     CLASS_NAME_EXCLUDED_SET = ["$$$"]
+    CLASS_NAME_EXCLUDED_MAP = Hash[*(CLASS_NAME_EXCLUDED_SET.map{ |word| [word, true] }.flatten)].freeze
 
     KEYWORD_USER_DEFINED_TYPE_SET = ["struct", "class", "enum", "union"].map(&:freeze).freeze
+    KEYWORD_USER_DEFINED_TYPE_MAP = Hash[*(KEYWORD_USER_DEFINED_TYPE_SET.map{ |word| [word, true] }.flatten)].freeze
+
     # Keyword attribute
     KEYWORD_ATTRIBUTE_WITH_ARGS = ["__attribute__", "__aligned"].map(&:freeze).freeze
     # Keyword qualifier
@@ -41,13 +46,23 @@ module Mockgen
       "unsigned", "size_t", "ssize_t", "uintptr_t", "intptr_t", "ptrdiff_t",
       "int8_t", "int16_t", "int32_t", "int64_t",
       "uint8_t", "uint16_t", "uint32_t", "uint64_t"].map(&:freeze).freeze
+
+    MEMFUNC_WORD_SKIPPED_MAP = Hash[*(MEMFUNC_WORD_SKIPPED_SET.map{ |word| [word, true] }.flatten)].freeze
+    MEMFUNC_WORD_RESERVED_TYPE_MAP = Hash[*(MEMFUNC_WORD_RESERVED_TYPE_SET.map{ |word| [word, true] }.flatten)].freeze
+
     MEMFUNC_WORD_END_OF_TYPE_SET = ["*", "&", "]", MEMFUNC_WORD_RESERVED_TYPE_SET].flatten.map(&:freeze).freeze
+    MEMFUNC_WORD_END_OF_TYPE_MAP = Hash[*(MEMFUNC_WORD_END_OF_TYPE_SET.map{ |word| [word, true] }.flatten)].freeze
     MEMFUNC_WORD_COMPARED_SET = ["const", "&", "&&"].map(&:freeze).freeze
+    MEMFUNC_WORD_COMPARED_MAP = Hash[*(MEMFUNC_WORD_COMPARED_SET.map{ |word| [word, true] }.flatten)].freeze
 
     # Keywords which are qualifiers for member functions, do not appear in member variables
     MEMVAR_FIRST_WORD_REJECTED_SET = ["using", "typedef"].map(&:freeze).freeze
     MEMVAR_FIRST_WORD_EXCLUDED_SET = ["extern", "static", "struct", "class"].map(&:freeze).freeze
     MEMVAR_LAST_WORD_REJECTED_SET = ["const", "override", "final", "&", "&&"].map(&:freeze).freeze
+
+    MEMVAR_FIRST_WORD_REJECTED_MAP = Hash[*(MEMVAR_FIRST_WORD_REJECTED_SET.map{ |word| [word, true] }.flatten)].freeze
+    MEMVAR_FIRST_WORD_EXCLUDED_MAP = Hash[*(MEMVAR_FIRST_WORD_EXCLUDED_SET.map{ |word| [word, true] }.flatten)].freeze
+    MEMVAR_LAST_WORD_REJECTED_MAP = Hash[*(MEMVAR_LAST_WORD_REJECTED_SET.map{ |word| [word, true] }.flatten)].freeze
 
     # The namespace which containts generated codes
     GENERATED_SYMBOL_NAMESPACE = "MyUnittest".freeze

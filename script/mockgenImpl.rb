@@ -5,39 +5,62 @@
 # + Decorator class which contains MOCK_*METHOD* methods
 # + Forwarder variable (class instance) to delegate methods its
 #   original variable or a mock instance
+# + Stubs to undefined functions
 #
-# Step
-# 1. Read a given header file and parse its each line
+# Collect free standing functions in a .hpp file and generate codes.
+# + Forwarder class and global variable instance to switch call to the
+#   functions or their mocks
+# + Stubs to undefined functions
+#
+#
+# Steps
+# 1. Read a given linker output file and parse its each line
+#  Parse symbols in the file and detect variables and functions.
+# - C++ linkage (mangled) symbols contains a name and types to
+#   check which overloaded functions in header files need to
+#   make stub.
+# - C linkage (extern "C") symbols contains a name and no types
+#   so this script determines whether the symbol is a variable or
+#   a function in the later step and disregards types in header files.
+#
+# 2. Read a given header file and parse its each line
 #  Parse the file that clang preprocessed and wrote as a pretty AST.
 #  The AST contains
 #  - Blocks which begin with a "...{" line and ends with a "... }" line
 #  - Non-Blocks which contains only one line ended with ";"
-#  and
-#  - Nesting depth of a block and its indent spaces do not match.
+#  and in the AST,
 #  - Implicit namespaces for some symbols are solved.
+#  - All #include directives are expanded and system headers are
+#    imported if specified in the header file.
+#  - All comments are removed.
+#  - Nesting depth of a block and its indent spaces do not match.
 #
 #  Filter out data structures that this script do not handle.
-#  - User-defined type except simple (not template) class and struct
+#  - User-defined types except simple (not template) class and struct
 #  - Standard C++, Boost C++, Google Test/Mock headers.
-#  - Compiler internal symbol that contains double underline (__)
+#  - Compiler internal symbols that contains double underline (__)
+#
+#  Filter free functions by the arguments at launch this script to
+#  exclude system functions such as C library and thread libraries.
 #
 #  Abandon data structures unused later steps in this step because
 #  standard C++ and Boost C++ headers are large.
 #
-# 2. Construct class hierarchy
+# 3. Construct class hierarchy
 #  - Search public base classes
 #  - Determine namespaces for symbols in namespace blocks
+#  - Build a tree to search local typedefs
 #
 #  Note that struct is a syntactic sugar that means class with
 #  default public access and inheritance.
 #
-# 3. Collect class member functions
+# 4. Collect class member functions
 #  - Public and non-pure virtual
 #  - Distinguish const and non-const. & and && are not supported.
 #  - Treat same no arguments f() and void argument f(void)
 #  - VA_arg, perfect forwarding and move semantics are not supported
 #
-# 4. Format and generate codes
+# 5. Format and generate codes
 #  - Decorator class : delegate member function to its original (base)
 #    class or a registered mock instance with its original arguments.
 #  - Forwarder class : delegate member function to its original
@@ -46,7 +69,10 @@
 #  - Declare and define forwarder class instances
 #  - Macros to swap class and variable names
 #
-# 5. Write the generated codes to a specified output file
+#  Generate codes for free functions in a similar manner that defines
+#  a new class per a namespace including the top-level namespace.
+#
+# 6. Write the generated codes to specified output files by the argument.
 
 require 'tempfile'
 require_relative './mockgenConst.rb'
@@ -58,15 +84,17 @@ module Mockgen
     def initialize(typeStrSet)
       strSet = typeStrSet.map { |str| str.split(/([\s\*&]+)/) }.flatten
       @strSet = strSet.reject do |typeword|
-        Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.any? { |word| word == typeword.strip } ||
-          typeword =~ /^\s*$/
+        word = typeword.strip
+        word.empty? || Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_MAP.key?(word)
       end.map { |word| word.strip }
     end
   end
 
   # Block-scoped typedef set
   class TypeAliasSet
+    # Public only to merge other instances
     attr_reader :aliasSet
+
     def initialize
       @aliasSet = {}
     end
@@ -110,10 +138,10 @@ module Mockgen
 
     # remove system internal definitions such as __uint32_t
     def removeSystemInternalSymbols
-      @aliasSet.reject! { |key, value| isSystemInternalSymbol(key) || isSystemInternalSymbol(value) }
+      @aliasSet.reject! { |key, value| isSystemInternalSymbol?(key) || isSystemInternalSymbol?(value) }
     end
 
-    def isSystemInternalSymbol(str)
+    def isSystemInternalSymbol?(str)
       str.include?("__") || (!str.empty? && str[0] == "_")
     end
 
@@ -137,7 +165,11 @@ module Mockgen
       @parent = nil     # nil for the root block
       @children = []    # Children order by addition
       @typedefBlock = nil  # type alias for this block
-      @typeAliasSet = TypeAliasSet.new  # type aliases in this block scope
+
+      # type aliases in this block scope
+      # clang splits "typedef struct tagName {} Name;" into struct and typedef
+      # so this is not used now.
+      @typeAliasSet = TypeAliasSet.new
     end
 
     # Skip to parse child members
@@ -192,10 +224,7 @@ module Mockgen
       aliasType = resolveAlias(typeStr)
       found = (aliasType != typeStr)
       canInitializeByZero = false
-
-      primitive = aliasType.split(" ").any? do |aliasWord|
-        Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_SET.any? { |word| word == aliasWord }
-      end
+      primitive = aliasType.split(" ").any? { |word| Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_MAP.key?(word) }
 
       if primitive
         found = true
@@ -207,7 +236,7 @@ module Mockgen
 
     ## Derived classes override methods below
     # Return if need to traverse this block
-    def canTraverse
+    def canTraverse?
       false
     end
 
@@ -283,23 +312,6 @@ module Mockgen
       ((pos.nil? || pos == 0) ? "" : "::") + name
     end
 
-    def isConstructor(line)
-      line.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
-    end
-
-    # Treat type(*func)(args...) as a variable having a function pointer
-    def isPointerToFunction(line)
-      # Recursive regular expression
-      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
-      newline = ChompAfterDelimiter.new(ChompAfterDelimiter.new(line, ";").str, "{").str
-      phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
-
-      return false unless phraseSet
-      elementSet = phraseSet.map { |p| p[1] }.compact
-      return false if elementSet.size < 2
-      !(phraseSet[-1])[1].nil? && elementSet[-2].include?("*")
-    end
-
     # Concatenate this block's namespaces with the arg name
     # template <> is excluded
     def getNonTypedFullname(name)
@@ -348,7 +360,7 @@ module Mockgen
       super
     end
 
-    def canTraverse
+    def canTraverse?
       true
     end
   end
@@ -362,15 +374,16 @@ module Mockgen
       if md = line.tr("{","").match(/^namespace\s+(\S+)/)
         @name = md[1]
       end
+
+      @valid = isValid?(@name)
     end
 
-    def canTraverse
-      return false if @name.include?(Mockgen::Constants::NAMESPACE_COMPILER_INTERNAL)
-      !(Mockgen::Constants::NAMESPACE_SKIPPED_SET.any? { |name| @name =~ /^#{name}/ })
+    def canTraverse?
+      @valid
     end
 
     def canMock?
-      canTraverse() && super
+      canTraverse?() && super
     end
 
     def isNamespace?
@@ -380,6 +393,15 @@ module Mockgen
     def getNamespace
       @name
     end
+
+    def isValid?(argName)
+      # empty name is valid
+      return false if argName.include?(Mockgen::Constants::NAMESPACE_COMPILER_INTERNAL)
+      Mockgen::Constants::NAMESPACE_SKIPPED_SET.all? do |name|
+        pos = argName.index(name)
+        pos.nil? || pos > 0
+      end
+    end
   end
 
   # Extern "C" block
@@ -388,7 +410,7 @@ module Mockgen
       super
     end
 
-    def canTraverse
+    def canTraverse?
       true
     end
 
@@ -432,7 +454,7 @@ module Mockgen
       @actualTypeSet = TypeStringWithoutModifier.new(typeStrSet).strSet
     end
 
-    def canTraverse
+    def canTraverse?
       return !@typeAlias.nil?
     end
 
@@ -493,8 +515,7 @@ module Mockgen
       end
 
       wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(" ")
-      if (wordSet.size <= 1 ||
-          Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_SET.any? { |word| word == wordSet[-1] })
+      if ((wordSet.size <= 1) || Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_MAP.key?(wordSet[-1]))
         argType = wordSet.join(" ")
         argName = "dummy#{serial}"
         newArgStr = "#{str} #{argName}"
@@ -682,7 +703,7 @@ module Mockgen
       parse(line.gsub(/\s*[{;].*$/,"").strip)
     end
 
-    def canTraverse
+    def canTraverse?
       @canTraverse
     end
 
@@ -710,12 +731,9 @@ module Mockgen
       # Exclude member functions and type aliases
       wordSet = line.split(" ")
       return if wordSet.nil? || wordSet.empty?
-      return if Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_SET.any? { |word| word == wordSet[0] }
-      return if Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_SET.any? { |word| word == wordSet[-1] }
-
-      newWordSet = wordSet.reject do |word|
-        Mockgen::Constants::MEMVAR_FIRST_WORD_EXCLUDED_SET.any? { |key| key == word }
-      end
+      return if Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_MAP.key?(wordSet[0])
+      return if Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_MAP.key?(wordSet[-1])
+      newWordSet = wordSet.reject { |word| Mockgen::Constants::MEMVAR_FIRST_WORD_EXCLUDED_MAP.key?(word) }
       return if newWordSet.size < 2
 
       className = getNonTypedFullname("")
@@ -832,7 +850,7 @@ module Mockgen
 
     def postFunctionPhrase(phrase)
       phrase.split(" ").map do |poststr|
-        Mockgen::Constants::MEMFUNC_WORD_COMPARED_SET.any? { |word| word == poststr } ? poststr : ""
+        Mockgen::Constants::MEMFUNC_WORD_COMPARED_MAP.key?(poststr) ? poststr : ""
       end.join("")
     end
 
@@ -888,7 +906,7 @@ module Mockgen
       ChompAfterDelimiter.new(line, ":").str
     end
 
-    def canTraverse
+    def canTraverse?
       @valid
     end
 
@@ -951,7 +969,7 @@ module Mockgen
       @valid = (parsedLine =~ /#{@name}\s*\(/) ? true : false
     end
 
-    def canTraverse
+    def canTraverse?
       @valid
     end
 
@@ -1019,7 +1037,7 @@ module Mockgen
       parse(body.rstrip)
     end
 
-    def canTraverse
+    def canTraverse?
       @valid
     end
 
@@ -1083,11 +1101,11 @@ module Mockgen
       # Exclude destructors
       return false if funcName.include?("~")
       # Skip pure virtual functions
-      return false if isPureVirtual(postFunc)
+      return false if isPureVirtual?(postFunc)
       # Operators are not supported
       return false if line.match(/\boperator\b/)
 
-      @constMemfunc = isConstMemberFunction(postFunc)
+      @constMemfunc = isConstMemberFunction?(postFunc)
       @staticMemfunc, @returnType, @returnVoid = extractReturnType(@preFunc)
       @decl = @returnType + " #{funcName}(" + @typedArgSet + ")"
       @decl = @decl+ " " + postFunc unless postFunc.empty?
@@ -1099,11 +1117,11 @@ module Mockgen
       @valid = true
     end
 
-    def isPureVirtual(phrase)
+    def isPureVirtual?(phrase)
       phrase.gsub(/\s+/,"").include?("=0")
     end
 
-    def isConstMemberFunction(phrase)
+    def isConstMemberFunction?(phrase)
       return false if phrase.empty?
       phrase.split(/\s+/).any? { |word| word == "const" }
     end
@@ -1114,7 +1132,7 @@ module Mockgen
       staticMemfunc = wordSet.include?("static")
 
       returnType = wordSet.reject do |word|
-        Mockgen::Constants::MEMFUNC_WORD_SKIPPED_SET.any? { |key| key == word }
+        Mockgen::Constants::MEMFUNC_WORD_SKIPPED_MAP.key?(word)
       end.join(" ")
 
       # Distinguish void and void*
@@ -1249,6 +1267,8 @@ module Mockgen
       @block.getFullNamespace
     end
 
+    # time = O(@funcSet.size) * O(referenceSet.refSet.size)
+    # Need to improve to reduce execution time
     def filterByReferences(referenceSet)
       @funcSet.each do |func|
         referenceSet.refSet.each do |ref|
@@ -1461,6 +1481,7 @@ module Mockgen
 
       # Update generated class names
       setClassNameSet
+      @uniqueName
     end
 
     # Skip to parse child members
@@ -1468,7 +1489,7 @@ module Mockgen
       !@pub
     end
 
-    def canTraverse
+    def canTraverse?
       @valid
     end
 
@@ -1494,20 +1515,20 @@ module Mockgen
       # Disregard private members (need to change in considering the NVI idiom)
       newBlock = nil
       destructorBlock = DestructorBlock.new(line, @name)
-      if (destructorBlock.canTraverse)
+      if (destructorBlock.canTraverse?)
         newBlock = destructorBlock
         @destructor = destructorBlock
-      elsif isConstructor(line)
+      elsif isConstructor?(line)
         newBlock = ConstructorBlock.new(line, @name)
         if @pub
-          @constructorSet << newBlock if newBlock.canTraverse
+          @constructorSet << newBlock if newBlock.canTraverse?
         end
-        @allConstructorSet << newBlock if newBlock.canTraverse
-      elsif isPointerToFunction(line)
+        @allConstructorSet << newBlock if newBlock.canTraverse?
+      elsif isPointerToFunction?(line)
       # Not supported yet
       else
         newBlock = MemberVariableStatement.new(line)
-        if newBlock.canTraverse
+        if newBlock.canTraverse?
           if @pub
             @memberVariableSet << newBlock
           end
@@ -1515,13 +1536,13 @@ module Mockgen
         else
           newBlock = MemberFunctionBlock.new(line)
           if @pub
-            @memberFunctionSet << newBlock if newBlock.canTraverse
+            @memberFunctionSet << newBlock if newBlock.canTraverse?
           end
-          @allMemberFunctionSet << newBlock if newBlock.canTraverse
+          @allMemberFunctionSet << newBlock if newBlock.canTraverse?
         end
       end
 
-      block = newBlock if !newBlock.nil? && newBlock.canTraverse
+      block = newBlock if !newBlock.nil? && newBlock.canTraverse?
       block
     end
 
@@ -1542,6 +1563,23 @@ module Mockgen
       end
 
       false
+    end
+
+    def isConstructor?(line)
+      line.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
+    end
+
+    # Treat type(*func)(args...) as a variable having a function pointer
+    def isPointerToFunction?(line)
+      # Recursive regular expression
+      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
+      newline = ChompAfterDelimiter.new(ChompAfterDelimiter.new(line, ";").str, "{").str
+      phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+
+      return false unless phraseSet
+      elementSet = phraseSet.map { |p| p[1] }.compact
+      return false if elementSet.size < 2
+      !(phraseSet[-1])[1].nil? && elementSet[-2].include?("*")
     end
 
     def getStringToClassFile
@@ -1655,7 +1693,7 @@ module Mockgen
       end
       # uniqueName is a alias of name until changed
       @uniqueName = @name
-      return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_SET.any? { |name| name == @name }
+      return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_MAP.key?(@name)
       # Set generated class names
       setClassNameSet
 
@@ -1773,19 +1811,19 @@ module Mockgen
       name = getFullname()
 
       @undefinedConstructorSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse
+        src += member.makeStubDef(name) if member.canTraverse?
       end
 
-      if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse
+      if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse?
         src += @undefinedDestructor.makeStubDef(name)
       end
 
       @undefinedFunctionSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse
+        src += member.makeStubDef(name) if member.canTraverse?
       end
 
       @undefinedVariableSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse
+        src += member.makeStubDef(name) if member.canTraverse?
       end
 
       src
@@ -1856,7 +1894,7 @@ module Mockgen
       str = ""
 
       @memberFunctionSet.each do |member|
-        next unless member.canTraverse
+        next unless member.canTraverse?
         next if derivedSet.any? { |f| f.override?(member) }
         name = getFullname
         str += member.send(methodFunc, name)
@@ -1960,7 +1998,7 @@ module Mockgen
 
     # Check whether this instance has something to write to files
     def empty?
-      [@typeSwapperStr, @varSwapperStr, @declStr, @defStr].all?(:empty?)
+      [@typeSwapperStr, @varSwapperStr, @declStr, @defStr].all?(&:empty?)
     end
   end
 
@@ -1983,6 +2021,7 @@ module Mockgen
 
     # Remove instances that have nothing to write to files
     def cleanUp
+      @set.values.each { |entry| entry.reject!(&:empty?) }
       @set.reject! { |key, value| value.empty? }
     end
 
@@ -2154,15 +2193,15 @@ module Mockgen
         declFilename = argDeclFilename.gsub(".", suffix)
         defFilename = argDefFilename.gsub(".", suffix)
 
-        writeClassFilename(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+        writeClassFile(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeVarSwapperFile(varSwapperFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeDeclFile(declFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
 
         if @stubOnly
-          writeStubFilename(defFilename, @inputFilename, argBlockSet)
+          writeStubFile(defFilename, @inputFilename, argBlockSet)
         else
-          writeDefFilename(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
+          writeDefFile(defFilename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         end
 
         classFilenameSet << classFilename
@@ -2223,13 +2262,13 @@ module Mockgen
     def eliminateAllUnusedBlock(argBlock)
       argBlock.children.each do |child|
         if @stubOnly && child.isClass?
-          if child.canTraverse && child.needStub?
+          if child.canTraverse? && child.needStub?
             eliminateAllUnusedBlock(child)
           else
             eliminateUnusedBlock(child)
           end
         else
-          if child.canTraverse && child.canMock?
+          if child.canTraverse? && child.canMock?
             eliminateAllUnusedBlock(child)
           else
             eliminateUnusedBlock(child)
@@ -2321,7 +2360,7 @@ module Mockgen
       # Construct top-level namespace typedefs
       rootBlock.collectAliases
       # Construct block scoped typedefs
-      doForAllBlocks(rootBlock.children, lambdaToBlock, :canTraverse)
+      doForAllBlocks(rootBlock.children, lambdaToBlock, :canTraverse?)
 
       # Construct top-level namespace typedefs including extern "C" {}
       typedefArray = collectTopLevelTypedefSet(rootBlock).flatten.compact
@@ -2441,7 +2480,7 @@ module Mockgen
       # Depth-first search
       result = []
       blockSet.each do |block|
-        next unless block.canTraverse
+        next unless block.canTraverse?
         result << block if block.isClass?
         # Calls should flatten result
         result << collectClassesToWrite(block.children)
@@ -2461,7 +2500,7 @@ module Mockgen
       previousSet = nil
 
       argBlock.children.each do |block|
-        next unless block.canTraverse
+        next unless block.canTraverse?
 
         if block.isFreeFunction?
           currentSet.add(block) if block.valid
@@ -2513,7 +2552,7 @@ module Mockgen
       end
     end
 
-    def writeClassFilename(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
+    def writeClassFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
       File.open(filename, "w") do |file|
         file.puts getClassFileHeader(@inputFilename, filename)
         file.puts beginNamespace
@@ -2545,21 +2584,21 @@ module Mockgen
       writeFile(filename, :declStr, preStr, postStr, blockSet)
     end
 
-    def writeDefFilename(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
+    def writeDefFile(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
       preStr = getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
       postStr = endNamespace + "\n" + usingNamespace
       writeFile(filename, :defStr, preStr, postStr, blockSet)
-      writeSourceFilename(filename, blockSet)
+      writeSourceFile(filename, blockSet)
     end
 
-    def writeStubFilename(filename, inputFilename, blockSet)
+    def writeStubFile(filename, inputFilename, blockSet)
       File.open(filename, "w") do |file|
         file.puts getIncludeDirective(inputFilename)
       end
-      writeSourceFilename(filename, blockSet)
+      writeSourceFile(filename, blockSet)
     end
 
-    def writeSourceFilename(filename, blockSet)
+    def writeSourceFile(filename, blockSet)
       File.open(filename, "a") do |file|
         lambdaToBlock = lambda do |block|
           str = block.getStringToSourceFile

@@ -6,12 +6,13 @@
 # Usage:
 # $ mockgen.rb [stub|mock] [-filter pattern]* 7-filenames clang-options
 #
-# The first seven arguments are in/out filenames.
 # - stub or mock (specify stub to generate stubs
 #   stub : generate stubs
 #   mock : generate stubs and mocks
 # - none or more sets of -filter pattern
 #   regular expression to filter free functions to mock
+#   no filters mean to handle all free functions including system headers
+# The trailing seven arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [output file] intermediate .hpp file that clang writes
 # - [output file] class definition
@@ -19,13 +20,11 @@
 # - [output file] variable swapper macro
 # - [output file] forwarder declaration
 # - [output file] forwarder definition
-# - trailing options are passed to clang
-#
-# Eighth and more arguments are passed to clang.
+# All other arguments are passed to clang. Specify include paths here.
 #
 # Before parsing input files, this script launches the clang front end
 # to format the files.
-# + Execute preprocessing and expand macros
+# + Execute preprocessing, import headers and expand macros
 # + Indent lines. Write a symbol declaration and definition in one line.
 # + Resolve implicit namespaces
 #
