@@ -301,7 +301,7 @@ module Mockgen
     end
 
     # To mock only undefined references
-    def filterByReferences(arg)
+    def filterByReferenceSet(arg)
       true
     end
 
@@ -707,8 +707,10 @@ module Mockgen
       @canTraverse
     end
 
-    def filterByReferences(reference)
-      !reference.memberName.nil? && (reference.memberName == @varNameNoCardinality)
+    def filterByReferenceSet(referenceSet)
+      referenceSet.getReferenceSetByFullname(getFullname()).any? do |reference|
+        !reference.memberName.nil? && (reference.memberName == @varNameNoCardinality)
+      end
     end
 
     # Need to improve to handle class-local typedefs
@@ -910,9 +912,11 @@ module Mockgen
       @valid
     end
 
-    def filterByReferences(reference)
+    def filterByReferenceSet(referenceSet)
       fullname = getNonTypedFullname(@className)
-      FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
+      referenceSet.getReferenceSetByFullname(fullname).any? do |reference|
+        FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
+      end
     end
 
     # Non default constructive base classes are not supported yet
@@ -973,8 +977,12 @@ module Mockgen
       @valid
     end
 
-    def filterByReferences(reference)
-      !reference.memberName.nil? && reference.memberName == @name
+    def filterByReferenceSet(referenceSet, classFullname)
+      fullname = "#{classFullname}::#{@name}"
+
+      referenceSet.getReferenceSetByFullname(fullname).any? do |reference|
+        !reference.memberName.nil? && reference.memberName == @name
+      end
     end
 
     def makeStubDef(className)
@@ -1041,9 +1049,11 @@ module Mockgen
       @valid
     end
 
-    def filterByReferences(reference)
+    def filterByReferenceSet(referenceSet)
       fullname = getNonTypedFullname(@funcName)
-      FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc).compare
+      referenceSet.getReferenceSetByFullname(fullname).any? do |reference|
+        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc).compare
+      end
     end
 
     def makeMockDef(className)
@@ -1229,7 +1239,7 @@ module Mockgen
       @needStub = false
     end
 
-    def filterByReferences(reference)
+    def filterByReferenceSet(referenceSet)
       result = super
       @needStub |= result
       result
@@ -1267,16 +1277,9 @@ module Mockgen
       @block.getFullNamespace
     end
 
-    # time = O(@funcSet.size) * O(referenceSet.refSet.size)
-    # Need to improve to reduce execution time
-    def filterByReferences(referenceSet)
+    def filterByReferenceSet(referenceSet)
       @funcSet.each do |func|
-        referenceSet.refSet.each do |ref|
-          if func.filterByReferences(ref)
-            @undefinedFunctionSet << func
-            break
-          end
-        end
+        @undefinedFunctionSet << func if func.filterByReferenceSet(referenceSet)
       end
     end
 
@@ -1590,38 +1593,34 @@ module Mockgen
       @staticMockDef + @mockClassFunc
     end
 
-    def filterByReferences(referenceSet)
+    def filterByReferenceSet(referenceSet)
       constructorBlockSet = []
       functionBlockSet = []
       variableBlockSet = []
       @filtered = false
-
       return if referenceSet.nil? || !referenceSet.valid
-      referenceSet.refSet.each do |ref|
-        next if ref.classFullname != getFullname
-        @filtered = true
 
-        # Create a default destructor if it does not exist
-        @destructor ||= DestructorBlock.new(nil, @uniqueName)
-        @undefinedDestructor = @destructor if @destructor.filterByReferences(ref)
+      # Create a default destructor if it does not exist
+      @destructor ||= DestructorBlock.new(nil, @uniqueName)
+      @undefinedDestructor = @destructor if @destructor.filterByReferenceSet(referenceSet, getFullname())
 
-        @allConstructorSet.each do |block|
-          constructorBlockSet << block if block.filterByReferences(ref)
-        end
+      @allConstructorSet.each do |block|
+        constructorBlockSet << block if block.filterByReferenceSet(referenceSet)
+      end
 
-        @allMemberFunctionSet.each do |block|
-          functionBlockSet << block if block.filterByReferences(ref)
-        end
+      @allMemberFunctionSet.each do |block|
+        functionBlockSet << block if block.filterByReferenceSet(referenceSet)
+      end
 
-        # Assume instance variables do not appear in referenceSet
-        @allMemberVariableSet.each do |block|
-          variableBlockSet << block if block.filterByReferences(ref)
-        end
+      # Assume instance variables do not appear in referenceSet
+      @allMemberVariableSet.each do |block|
+        variableBlockSet << block if block.filterByReferenceSet(referenceSet)
       end
 
       @undefinedConstructorSet = constructorBlockSet.uniq
       @undefinedFunctionSet = functionBlockSet.uniq
       @undefinedVariableSet = variableBlockSet.uniq
+      @filtered = true
     end
 
     ## Public methods added on the base class
@@ -2078,31 +2077,65 @@ module Mockgen
 
   # Undefined reference set
   class UndefinedReferenceSet
-    attr_reader :valid, :refSet
+    attr_reader :valid
 
     def initialize(filename)
       @valid = false
       @refSet = []
+      @refFullnameSet = {}
       return unless filename
 
       # Filename may not exist in clean build
       if File.exist?(filename)
         File.open(filename, "r") { |file|
-          @refSet = readAllLines(file)
+          @refSet, @refFullnameSet = readAllLines(file)
         }
       end
 
       @valid = !@refSet.empty?
     end
 
+    # Filter by a namespace::functionName
+    def getReferenceSetByFullname(fullname)
+      getReferenceSet(stripFullname(fullname), @refFullnameSet, @refSet)
+    end
+
     ## Implementation detail (public for testing)
     def readAllLines(file)
       refSet = []
-      while rawLine = file.gets
-        ref = UndefinedReference.new(rawLine.encode("UTF-8").chomp)
-        refSet << ref if ref.fullname
+      refFullnameSet = {}
+
+      while line = file.gets
+        ref = UndefinedReference.new(line.encode("UTF-8").chomp)
+        add(ref, refSet, refFullnameSet)
       end
-      refSet
+
+      return refSet, refFullnameSet
+    end
+
+    def getReferenceSet(name, refMap, defaultSet)
+      name.nil? ? defaultSet : (refMap.key?(name) ? refMap[name] : [])
+    end
+
+    def add(ref, refSet, refFullnameSet)
+      fullname = ref.fullname
+      if fullname
+        key = stripFullname(fullname)
+        refSet << ref
+        # A key is unique for each namespace/class::name.
+        refFullnameSet[key] = [] unless refFullnameSet.key?(key)
+
+        # Arrays contain overloaded functions but function
+        # overloading is rare in user defined functions and
+        # most of the arrays have only one element.
+        refFullnameSet[key] << ref
+      end
+    end
+
+    def stripFullname(name)
+      return nil unless name
+      varname = ChompAfterDelimiter.new(name, "[").str
+      (varname.size >= 2 && varname[0..1] == "::") ? varname[2..-1] : varname.dup
     end
   end
 
@@ -2164,16 +2197,16 @@ module Mockgen
         defFilename = argDefFilename.gsub(".", suffix)
 
         writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToClassFile, nil)
+                              argBlockSet, :getStringToClassFile, nil, true)
         writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToDeclFile, nil)
+                              argBlockSet, :getStringToDeclFile, nil, false)
         writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                              argBlockSet, :getStringToSwapperFile, nil)
+                              argBlockSet, :getStringToSwapperFile, nil, false)
         writeFreeFunctionFile(defFilename, declFilename, nil, nil, nil,
-                              argBlockSet, :getStringOfStub, nil)
+                              argBlockSet, :getStringOfStub, nil, false)
         unless @stubOnly
           writeFreeFunctionFile(defFilename, declFilename, beginNamespace, endNamespace, nil,
-                                argBlockSet, :getStringOfVariableDefinition, "a")
+                                argBlockSet, :getStringOfVariableDefinition, "a", false)
         end
 
         classFilenameSet << classFilename
@@ -2286,7 +2319,7 @@ module Mockgen
       freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block, filterSet)
 
       freeFunctionSetArray.each do |funcSet|
-        funcSet.filterByReferences(referenceSet)
+        funcSet.filterByReferenceSet(referenceSet)
       end
 
       mergeFreeFunctionSetArray(freeFunctionSetArray)
@@ -2327,7 +2360,7 @@ module Mockgen
     def collectClasses(rootBlockSet, referenceSet)
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
-        block.filterByReferences(referenceSet)
+        block.filterByReferenceSet(referenceSet)
         fullname = block.getFullname
         classSet[fullname] = block unless fullname.empty?
       end
@@ -2535,11 +2568,11 @@ module Mockgen
       end
     end
 
-    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode)
+    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode, writeMacro)
       filemode = mode
       filemode ||= "w"
       File.open(filename, filemode) do |file|
-        file.puts getClassFileHeader(includeFilename, filename)
+        file.puts getClassFileHeader(includeFilename, filename, writeMacro)
         file.puts beginNamespace if beginNamespace
         file.puts usingNamespace if usingNamespace
         lambdaToBlock = lambda do |block|
@@ -2554,7 +2587,7 @@ module Mockgen
 
     def writeClassFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
       File.open(filename, "w") do |file|
-        file.puts getClassFileHeader(@inputFilename, filename)
+        file.puts getClassFileHeader(@inputFilename, filename, true)
         file.puts beginNamespace
         lambdaToBlock = lambda do |block|
           str = block.getStringToClassFile
@@ -2622,22 +2655,25 @@ module Mockgen
       end
     end
 
-    def getClassFileHeader(inputFilename, outClassFilename)
+    def getClassFileHeader(inputFilename, outClassFilename, writeMacro)
       str =  "// Mock and forwarder class definitions\n"
       str += "// This file is machine generated.\n\n"
       str += getIncludeGuardHeader(outClassFilename)
       str += "#include <gmock/gmock.h>\n"
       str += getIncludeDirective(inputFilename)
       str += "\n"
-      str += "#define MOCK_OF(className) "+ "::#{@cppNameSpace}::className"
-      str += '##' + Mockgen::Constants::CLASS_POSTFIX_MOCK + "\n"
-      str += "#define DECORATOR(className) "+ "::#{@cppNameSpace}::className"
-      str += '##' + Mockgen::Constants::CLASS_POSTFIX_DECORATOR + "\n"
-      str += "#define FORWARDER(className) "+ "::#{@cppNameSpace}::className"
-      str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
-      str += "#define INSTANCE_OF(varName) "+ "::#{@cppNameSpace}::varName"
-      str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
-      str += "\n"
+
+      if (writeMacro)
+        str += "#define MOCK_OF(className) "+ "::#{@cppNameSpace}::className"
+        str += '##' + Mockgen::Constants::CLASS_POSTFIX_MOCK + "\n"
+        str += "#define DECORATOR(className) "+ "::#{@cppNameSpace}::className"
+        str += '##' + Mockgen::Constants::CLASS_POSTFIX_DECORATOR + "\n"
+        str += "#define FORWARDER(className) "+ "::#{@cppNameSpace}::className"
+        str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
+        str += "#define INSTANCE_OF(varName) "+ "::#{@cppNameSpace}::varName"
+        str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
+        str += "\n"
+      end
       str
     end
 

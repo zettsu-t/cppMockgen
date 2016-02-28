@@ -4,7 +4,7 @@
 # Google Mock Generator from C++ header files
 #
 # Usage:
-# $ mockgen.rb [stub|mock] [-filter pattern]* 7-filenames clang-options
+# $ mockgen.rb [stub|mock] [-filter pattern]* 8-filenames clang-options
 #
 # - stub or mock (specify stub to generate stubs
 #   stub : generate stubs
@@ -12,8 +12,9 @@
 # - none or more sets of -filter pattern
 #   regular expression to filter free functions to mock
 #   no filters mean to handle all free functions including system headers
-# The trailing seven arguments are in/out filenames.
+# The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
+# - [input file]  LD output (link error log) file
 # - [output file] intermediate .hpp file that clang writes
 # - [output file] class definition
 # - [output file] type swapper macro
