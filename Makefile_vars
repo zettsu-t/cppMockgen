@@ -42,7 +42,7 @@ TESTED_HEADER_DIR=tested_include
 TESTER_HEADER_DIR=tester_include
 TESTED_SRC_DIR=tested_src
 TESTER_SRC_DIR=tester_src
-GENERATED_FILE_DIR=generated
+GENERATED_FILE_DIR=./generated
 
 OBJ_DIR=obj
 TARGET_DIR=bin

@@ -1363,7 +1363,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'desctructor' => "~Dtor(void)",
     'virtual desctructor' => "virtual ~Dtor(void)",
     'copy constructor' => "T& operator=(const T& rhs)",
-    'operator' => "bool operator<(void)")
+    'operator' => "bool operator<(void)",
+    'va_arg' => "int printf(const char *format, ...)")
   def test_cannotInitializeAndParse(data)
     line = data
     ["", "{", " {", ";", " ;"].each do |suffix|
@@ -1588,7 +1589,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'void double pointer' => ["void**", "void * *", false],
     'reference' => ["int&", "int &", false],
     'const reference1' => ["const Type&", "const Type &", false],
-    'const reference2' => ["const Type &", "const Type &", false])
+    'const reference2' => ["const Type &", "const Type &", false],
+    'va_arg' => ["...", "...", false])
   def test_extractReturnType(data)
     phrase, expected, isVoid = data
     block = MemberFunctionBlock.new("")
@@ -3214,6 +3216,22 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(expected, actual[1].instance_variable_get(:@funcSet).size)
   end
 
+  data(
+    'empty' => ["", "", ""],
+    'no extension empty postfix' => ["base", "", "base"],
+    'empty postfix' => ["base.hpp", "", "base.hpp"],
+    'no extension' => ["base", "_1", "base_1"],
+    'with extension' => ["base.hpp", "_1", "base_1.hpp"],
+    'current dir' => ["./base.hpp", "_1", "./base_1.hpp"],
+    'parent dir' => ["../dir/base.hpp", "_1", "../dir/base_1.hpp"],
+    'begin with period' => [".ext", "_1", "_1.ext"],
+    'end with period' => ["base.", "_1", "base_1."])
+  def test_addPostfixToBasename(data)
+    name, postfix, expected = data
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    assert_equal(expected, parser.addPostfixToBasename(name, postfix))
+  end
+
   def test_buildClassTree
     [false, true].each do |testBuild|
       blockA = TestClassMock.new("A", "ClassA", [])
@@ -3515,10 +3533,10 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_true(actual.include?("generated"))
     assert_true(actual.include?("#include <gmock/gmock.h>\n"))
 
-    expected =  "#define MOCK_OF(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_MOCK}\n"
-    expected += "#define DECORATOR(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}\n"
-    expected += "#define FORWARDER(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}\n"
-    expected += "#define INSTANCE_OF(varName) ::MyTest::varName###{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}\n"
+    expected =  "#ifndef MOCK_OF\n#define MOCK_OF(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_MOCK}\n#endif\n"
+    expected += "#ifndef DECORATOR\n#define DECORATOR(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}\n#endif\n"
+    expected += "#ifndef FORWARDER\n#define FORWARDER(className) ::MyTest::className###{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}\n#endif\n"
+    expected += "#ifndef INSTANCE_OF\n#define INSTANCE_OF(varName) ::MyTest::varName###{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}\n#endif\n"
     assert_equal(writeMacro, actual.include?(expected))
   end
 

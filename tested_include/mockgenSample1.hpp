@@ -104,6 +104,8 @@ public:
     // These operators are for testing use only. Do not call them
     static void *operator new(std::size_t s) { return &instance_; }
     static void operator delete(void *p) {}
+    // va_arg is not supported
+    void unknownArgTypeFunction(...) {}
     static ClassNotInstanciated instance_;
     static void (*f)(int a);
     static int arrayMissing[4];

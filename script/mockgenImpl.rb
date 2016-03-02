@@ -1124,7 +1124,8 @@ module Mockgen
 
       @funcName = funcName
       @postFunc = postFunc
-      @valid = true
+      # va_arg is not supported
+      @valid = true unless @argSignature.include?("...")
     end
 
     def isPureVirtual?(phrase)
@@ -1683,10 +1684,10 @@ module Mockgen
 
     def parseClassHeader(line, typenameStr)
       if md = line.match(/^(template.*\S)\s+#{typenameStr}\s+(\S+)/)
-        @templateHeader = md[1]  # テンプレート
-        @name = md[2]   # クラス名
+        @templateHeader = md[1]
+        @name = md[2]
       elsif md = line.match(/^#{typenameStr}\s+(\S+)/)
-        @name = md[1]   # クラス名
+        @name = md[1]
       else
         return false
       end
@@ -2189,24 +2190,24 @@ module Mockgen
 
       while(index < @functionSetArray.size)
         argBlockSet = @functionSetArray.slice(index, sizeOfSet)
-        suffix = "_#{serial}."
+        postfix = "_#{serial}"
 
-        classFilename = argClassFilename.gsub(".", suffix)
-        varSwapperFilename = argVarSwapperFilename.gsub(".", suffix)
-        declFilename = argDeclFilename.gsub(".", suffix)
-        defFilename = argDefFilename.gsub(".", suffix)
+        classFilename = addPostfixToBasename(argClassFilename, postfix)
+        varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
+        declFilename = addPostfixToBasename(argDeclFilename, postfix)
+        defFilename = addPostfixToBasename(argDefFilename, postfix)
 
         writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToClassFile, nil, true)
+                              argBlockSet, :getStringToClassFile, nil, true, true)
         writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToDeclFile, nil, false)
+                              argBlockSet, :getStringToDeclFile, nil, false, true)
         writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                              argBlockSet, :getStringToSwapperFile, nil, false)
+                              argBlockSet, :getStringToSwapperFile, nil, false, true)
         writeFreeFunctionFile(defFilename, declFilename, nil, nil, nil,
-                              argBlockSet, :getStringOfStub, nil, false)
+                              argBlockSet, :getStringOfStub, nil, false, false)
         unless @stubOnly
-          writeFreeFunctionFile(defFilename, declFilename, beginNamespace, endNamespace, nil,
-                                argBlockSet, :getStringOfVariableDefinition, "a", false)
+          writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
+                                argBlockSet, :getStringOfVariableDefinition, "a", false, false)
         end
 
         classFilenameSet << classFilename
@@ -2218,13 +2219,13 @@ module Mockgen
       index = 0
       while(index < blockSet.size)
         argBlockSet = blockSet.slice(index, sizeOfSet)
-        suffix = "_#{serial}."
+        postfix = "_#{serial}"
 
-        classFilename = argClassFilename.gsub(".", suffix)
-        typeSwapperFilename = argTypeSwapperFilename.gsub(".", suffix)
-        varSwapperFilename = argVarSwapperFilename.gsub(".", suffix)
-        declFilename = argDeclFilename.gsub(".", suffix)
-        defFilename = argDefFilename.gsub(".", suffix)
+        classFilename = addPostfixToBasename(argClassFilename, postfix)
+        typeSwapperFilename = addPostfixToBasename(argTypeSwapperFilename, postfix)
+        varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
+        declFilename = addPostfixToBasename(argDeclFilename, postfix)
+        defFilename = addPostfixToBasename(argDefFilename, postfix)
 
         writeClassFile(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
@@ -2547,6 +2548,21 @@ module Mockgen
       newSetArray
     end
 
+    # Convert ./dir/base.hpp to ./dir/base_1.hpp
+    # Insert                      postfix ^^
+    def addPostfixToBasename(name, postfix)
+      str = name.dup
+      pos = name.rindex(".")
+
+      if pos
+        str.insert(pos, postfix)
+      else
+        str += postfix
+      end
+
+      str
+    end
+
     def writeFile(filename, labelAttr, preStr, postStr, blockSet)
       lineDelimiter = "\n"
 
@@ -2568,11 +2584,18 @@ module Mockgen
       end
     end
 
-    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode, writeMacro)
+    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode, writeMacro, needGuard)
       filemode = mode
       filemode ||= "w"
       File.open(filename, filemode) do |file|
-        file.puts getClassFileHeader(includeFilename, filename, writeMacro)
+        str = ""
+        if needGuard
+          str = getClassFileHeader(includeFilename, filename, writeMacro)
+        else
+          str = getIncludeDirective(includeFilename) if includeFilename
+        end
+
+        file.puts str unless str.empty?
         file.puts beginNamespace if beginNamespace
         file.puts usingNamespace if usingNamespace
         lambdaToBlock = lambda do |block|
@@ -2581,7 +2604,7 @@ module Mockgen
         end
         doForBlockSet(blockSet, lambdaToBlock)
         file.puts endNamespace if endNamespace
-        file.puts getIncludeGuardFooter
+        file.puts getIncludeGuardFooter if needGuard
       end
     end
 
@@ -2664,15 +2687,16 @@ module Mockgen
       str += "\n"
 
       if (writeMacro)
-        str += "#define MOCK_OF(className) "+ "::#{@cppNameSpace}::className"
-        str += '##' + Mockgen::Constants::CLASS_POSTFIX_MOCK + "\n"
-        str += "#define DECORATOR(className) "+ "::#{@cppNameSpace}::className"
-        str += '##' + Mockgen::Constants::CLASS_POSTFIX_DECORATOR + "\n"
-        str += "#define FORWARDER(className) "+ "::#{@cppNameSpace}::className"
-        str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
-        str += "#define INSTANCE_OF(varName) "+ "::#{@cppNameSpace}::varName"
-        str += '##' + Mockgen::Constants::CLASS_POSTFIX_FORWARDER + "\n"
-        str += "\n"
+        [["MOCK_OF", "className", Mockgen::Constants::CLASS_POSTFIX_MOCK],
+         ["DECORATOR", "className", Mockgen::Constants::CLASS_POSTFIX_DECORATOR],
+         ["FORWARDER", "className", Mockgen::Constants::CLASS_POSTFIX_FORWARDER],
+         ["INSTANCE_OF", "varName", Mockgen::Constants::CLASS_POSTFIX_FORWARDER]
+        ].each do |name, arg, postfix|
+          str += "#ifndef #{name}\n"
+          str += "#define #{name}(#{arg}) "+ "::#{@cppNameSpace}::#{arg}"
+          str += '##' + postfix + "\n"
+          str += "#endif\n"
+        end
       end
       str
     end
