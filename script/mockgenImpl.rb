@@ -12,20 +12,22 @@
 #   functions or their mocks
 # + Stubs to undefined functions
 #
+# This script is applicable to C code, which has top-level namespace,
+# no other namespaces and no classes.
 #
 # Steps
 # 1. Read a given linker output file and parse its each line
 #  Parse symbols in the file and detect variables and functions.
-# - C++ linkage (mangled) symbols contains a name and types to
+# - A C++ linkage (mangled) symbol contains a name and types to
 #   check which overloaded functions in header files need to
 #   make stub.
-# - C linkage (extern "C") symbols contains a name and no types
+# - A C linkage (extern "C") symbol contains a name and no types
 #   so this script determines whether the symbol is a variable or
 #   a function in the later step and disregards types in header files.
 #
 # 2. Read a given header file and parse its each line
-#  Parse the file that clang preprocessed and wrote as a pretty AST.
-#  The AST contains
+#  Parse the file that clang preprocessed and wrote as a pretty AST
+#  (abstract syntax tree). The AST contains
 #  - Blocks which begin with a "...{" line and ends with a "... }" line
 #  - Non-Blocks which contains only one line ended with ";"
 #  and in the AST,
@@ -57,7 +59,7 @@
 # 4. Collect class member functions
 #  - Public and non-pure virtual
 #  - Distinguish const and non-const. & and && are not supported.
-#  - Treat same no arguments f() and void argument f(void)
+#  - Treat same no arguments f() as void argument f(void)
 #  - VA_arg, perfect forwarding and move semantics are not supported
 #
 # 5. Format and generate codes
@@ -1189,13 +1191,27 @@ module Mockgen
   # Class member function
   # Templates are not supported yet
   class MemberFunctionBlock < FunctionBlock
+    attr_reader :virtual
+
     def initialize(line)
       super
+      @virtual = (@preFunc && @preFunc.match(/\bvirtual\b/)) ? true : false
+      @superMemberSet = []
     end
 
     ## Public methods added on the base class
     def override?(block)
       @argSignature == block.argSignature
+    end
+
+    # If a member function is virtual in a base class,
+    # virtual keyword can be omitted in its derived classes
+    def addSuperMember(member)
+      @superMemberSet << member unless @superMemberSet.include?(member)
+    end
+
+    def virtual?
+      @virtual || @superMemberSet.any?(&:virtual?)
     end
 
     def makeDecoratorDef(className)
@@ -1433,7 +1449,8 @@ module Mockgen
       @forwarderName = ""
       @uniqueName = @name  # Unique name for inner class name
       @typename = "class"  # class or struct
-      @pub = false         # Now parsing publicmembers
+      @pub = false         # Now parsing public members
+      @private = true      # Now parsing private members
       @filtered = false    # Filter undefined functions
       @destructor = nil    # None or one instance
 
@@ -1453,7 +1470,8 @@ module Mockgen
       # One or more constructors
       @destructor = nil
       @constructorSet = []
-      @memberFunctionSet = []
+      @publicMemberFunctionSet = []
+      @protectedMemberFunctionSet = []
       @memberVariableSet = []
       # Including protected and private members
       @allConstructorSet = []
@@ -1539,10 +1557,11 @@ module Mockgen
           @allMemberVariableSet << newBlock
         else
           newBlock = MemberFunctionBlock.new(line)
-          if @pub
-            @memberFunctionSet << newBlock if newBlock.canTraverse?
+          if newBlock.canTraverse?
+            @allMemberFunctionSet << newBlock
+            @publicMemberFunctionSet << newBlock if @pub
+            @protectedMemberFunctionSet << newBlock if !@pub && !@private
           end
-          @allMemberFunctionSet << newBlock if newBlock.canTraverse?
         end
       end
 
@@ -1556,12 +1575,15 @@ module Mockgen
         case(md[1])
         when "public"
           @pub = true
+          @private = false
           return true
         when "protected"
           @pub = false
+          @private = false
           return true
         when "private"
           @pub = false
+          @private = true
           return true
         end
       end
@@ -1699,6 +1721,7 @@ module Mockgen
 
       @typename = typenameStr
       @pub = (typenameStr == "struct")
+      @private = (typenameStr == "class")
       true
     end
 
@@ -1750,6 +1773,49 @@ module Mockgen
 
       typeSet = md[1].split(/,/).map{ |phrase| phrase.split(/\s+/)[-1] }.join(", ")
       "#{fullname}<#{typeSet}>"
+    end
+
+    # Actually this should be called for leaf classes in each class
+    # hierarchy to reduce execution time
+    def markMemberFunctionSetVirtual
+      markMemberFunctionSetVirtualSub([])
+    end
+
+    def markMemberFunctionSetVirtualSub(derivedSet)
+      # Connect overriding and overridden functions to check whether
+      # they are virtual
+      @allMemberFunctionSet.each do |member|
+        next unless member.canTraverse?
+
+        # Need to improve to match faster
+        derivedMemberSet = derivedSet.select { |f| f.override?(member) }
+        derivedMemberSet.each do |derivedMember|
+          derivedMember.addSuperMember(member)
+        end
+
+        derivedSet << member if derivedMemberSet.empty?
+      end
+
+      @baseClassBlockSet.each do |block|
+        # Duplicate not to mix super classes
+        block.markMemberFunctionSetVirtualSub(derivedSet.dup)
+      end
+    end
+
+    # A function needs to be public to be forwarded from outside of its class
+    def canForwardToFunction(func)
+      return false unless func.canTraverse?
+      @publicMemberFunctionSet.include?(func)
+    end
+
+    # A function needs to be protected to be forwarded from its derived class
+    def canDecorateFunction(func)
+      canForwardToFunction(func) || @protectedMemberFunctionSet.include?(func)
+    end
+
+    # Can mock private and protected functions if virtual
+    def canMockFunction(func)
+      canDecorateFunction(func) || func.virtual?
     end
 
     # Cannot handle templates
@@ -1877,25 +1943,27 @@ module Mockgen
     end
 
     def collectMockDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef)
+      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction)
     end
 
     def collectDecoratorDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef)
+      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction)
     end
 
     def collectForwarderDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef)
+      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef, :canForwardToFunction)
     end
 
     # If find an overriding function (which has same name, args and const
     # modifier as of its base class), call the most subclass definition.
-    def collectFunctionDef(derivedSet, methodClass, methodFunc)
+    def collectFunctionDef(derivedSet, methodClass, methodFunc, filterFunc)
       str = ""
 
-      @memberFunctionSet.each do |member|
-        next unless member.canTraverse?
+      @allMemberFunctionSet.each do |member|
+        next unless send(filterFunc, member)
         next if derivedSet.any? { |f| f.override?(member) }
+
+        # Add member
         name = getFullname
         str += member.send(methodFunc, name)
         derivedSet << member
@@ -2361,6 +2429,7 @@ module Mockgen
     def collectClasses(rootBlockSet, referenceSet)
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
+        block.markMemberFunctionSetVirtual
         block.filterByReferenceSet(referenceSet)
         fullname = block.getFullname
         classSet[fullname] = block unless fullname.empty?

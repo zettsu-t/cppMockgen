@@ -43,6 +43,10 @@ namespace Sample1 {
             virtual const void* FuncMissing(long a, const char* p) const;
             virtual void Func(void) override;
             inline void FuncInline(void) {}  // Hide the base class definition
+        protected:
+            // Search protected member functions to use the NVI idiom
+            void ProtectedFunc(void) {};
+            virtual void ProtectedVirtualFunc(void) {};
         private:
             // Search no private member functions
             void PrivateFunc(void) {};

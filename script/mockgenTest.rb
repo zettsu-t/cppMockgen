@@ -1316,30 +1316,30 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     ["void Func()",
      "void Func()",
      "Func()",
-     false, false, "void", true, "", "Func", "", ""],
+     false, false, "void", true, "", "Func", "", "", false],
     'one word type and function post modifier' =>
     ["int Func2(long a) const override {",
      "int Func2(long a) const override",
      "Func2(long)const",
-     true, false, "int", false, "a", "Func2", "long a", "const override"],
+     true, false, "int", false, "a", "Func2", "long a", "const override", false],
     'static and attribute' =>
     ['static int Func(long b)',
      "int Func(long b)",
      "Func(long)",
-     false, true, "int", false, "b", "Func", "long b", ""],
+     false, true, "int", false, "b", "Func", "long b", "", false],
     'multiple word type and poset modifier' =>
     ["virtual const void* Func(int a, const T* p);",
      "const void * Func(int a,const T* p)",
      "Func(int,const T *)",
-     false, false, "const void *", false, "a,p", "Func", "int a,const T* p", ""],
+     false, false, "const void *", false, "a,p", "Func", "int a,const T* p", "", true],
     'inline and reference' =>
     ["inline T&* Func(T& a) const",
      "T & * Func(T& a) const",
      "Func(T &)const",
-     true, false, "T & *", false, "a", "Func", "T& a", "const"])
+     true, false, "T & *", false, "a", "Func", "T& a", "const", false])
   def test_initializeAndParse(data)
     line, decl, argSignature, constMemfunc, staticMemfunc,
-    returnType, returnVoid, argSet, funcName, typedArgSet, postFunc = data
+    returnType, returnVoid, argSet, funcName, typedArgSet, postFunc, virtual = data
 
     ["", "{", " {", ";", " ;"].each do |suffix|
       block = MemberFunctionBlock.new(line + suffix)
@@ -1355,6 +1355,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
       assert_equal(argSignature, block.argSignature)
       assert_equal(postFunc, block.instance_variable_get(:@postFunc))
+      assert_equal([], block.instance_variable_get(:@superMemberSet))
+      assert_equal(virtual, block.virtual?)
     end
   end
 
@@ -1418,6 +1420,29 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_false(leftBlock.override?(rightBlock))
       assert_false(leftBlock.override?(constBlock))
     end
+  end
+
+  def test_addSuperMember
+    line = "void Func();"
+    baseBlock = MemberFunctionBlock.new("virtual #{line}")
+    middleBlock = MemberFunctionBlock.new("#{line}")
+    subBlock = MemberFunctionBlock.new("#{line}")
+
+    assert_true(baseBlock.virtual)
+    assert_false(middleBlock.virtual)
+    assert_false(subBlock.virtual)
+
+    subBlock.addSuperMember(middleBlock)
+    middleBlock.addSuperMember(baseBlock)
+    assert_true([baseBlock, middleBlock, subBlock].all?(&:virtual?))
+
+    assert_equal(0, baseBlock.instance_variable_get(:@superMemberSet).size)
+    assert_equal(1, middleBlock.instance_variable_get(:@superMemberSet).size)
+    assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+
+    # Ignore an already binded block
+    subBlock.addSuperMember(middleBlock)
+    assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
   end
 
   data(
@@ -1971,6 +1996,7 @@ class TestClassBlock < Test::Unit::TestCase
 
     assert_equal(typeName, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
+    assert_equal(!pub, block.instance_variable_get(:@private))
     assert_equal(baseClassNameSet, block.instance_variable_get(:@baseClassNameSet))
   end
 
@@ -2023,15 +2049,19 @@ class TestClassBlock < Test::Unit::TestCase
 
     assert_nil(block.parseChildren("public:"))
     assert_equal(true, block.instance_variable_get(:@pub))
+    assert_equal(false, block.instance_variable_get(:@private))
     assert_false(block.skippingParse)
 
     assert_nil(block.parseChildren("protected:"))
     assert_equal(false, block.instance_variable_get(:@pub))
+    assert_equal(false, block.instance_variable_get(:@private))
     assert_true(block.skippingParse)
 
     assert_nil(block.parseChildren("public :"))
     assert_equal(true, block.instance_variable_get(:@pub))
-    assert_equal([], block.instance_variable_get(:@memberFunctionSet))
+    assert_equal(false, block.instance_variable_get(:@private))
+    assert_equal([], block.instance_variable_get(:@publicMemberFunctionSet))
+    assert_equal([], block.instance_variable_get(:@protectedMemberFunctionSet))
     assert_equal([], block.instance_variable_get(:@allMemberFunctionSet))
     assert_false(block.skippingParse)
 
@@ -2040,13 +2070,15 @@ class TestClassBlock < Test::Unit::TestCase
 
     varLine = "static Count count_;"
     assert_not_nil(block.parseChildren(varLine))
-    assert_not_equal([], block.instance_variable_get(:@memberVariableSet))
+    assert_true(block.instance_variable_get(:@publicMemberFunctionSet).empty?)
+    assert_true(block.instance_variable_get(:@protectedMemberFunctionSet).empty?)
     assert_not_equal([], block.instance_variable_get(:@allMemberVariableSet))
     assert_false(block.canMock?)
 
     funcLine = "void Func();"
     assert_not_nil(block.parseChildren(funcLine))
-    assert_not_equal([], block.instance_variable_get(:@memberFunctionSet))
+    assert_false(block.instance_variable_get(:@publicMemberFunctionSet).empty?)
+    assert_true(block.instance_variable_get(:@protectedMemberFunctionSet).empty?)
     assert_not_equal([], block.instance_variable_get(:@allMemberFunctionSet))
     assert_true(block.canMock?)
 
@@ -2058,6 +2090,16 @@ class TestClassBlock < Test::Unit::TestCase
     destructorLine = "~NameC();"
     assert_not_nil(block.parseChildren(destructorLine))
     assert_not_nil(block.instance_variable_get(:@destructor))
+
+    block.parseChildren("private:")
+    funcLine = "void FuncPrivate();"
+    assert_not_nil(block.parseChildren(funcLine))
+    assert_true(block.instance_variable_get(:@protectedMemberFunctionSet).empty?)
+
+    block.parseChildren("protected:")
+    funcLine = "void FuncProtected();"
+    assert_not_nil(block.parseChildren(funcLine))
+    assert_false(block.instance_variable_get(:@protectedMemberFunctionSet).empty?)
   end
 
   def test_parseChildrenClassPrivate
@@ -2072,7 +2114,6 @@ class TestClassBlock < Test::Unit::TestCase
 
     funcLine = "void Func();"
     assert_not_nil(block.parseChildren(funcLine))
-    assert_equal([], block.instance_variable_get(:@memberFunctionSet))
     assert_not_equal([], block.instance_variable_get(:@allMemberFunctionSet))
     assert_true(block.canMock?)
 
@@ -2087,8 +2128,10 @@ class TestClassBlock < Test::Unit::TestCase
     block = ClassBlock.new("struct NameS")
     assert_nil(block.parseChildren("protected:"))
     assert_equal(false, block.instance_variable_get(:@pub))
+    assert_equal(false, block.instance_variable_get(:@private))
     assert_nil(block.parseChildren("public:"))
     assert_equal(true, block.instance_variable_get(:@pub))
+    assert_equal(false, block.instance_variable_get(:@private))
     assert_false(block.canMock?)
 
     constructorLine = "NameS();"
@@ -2098,15 +2141,15 @@ class TestClassBlock < Test::Unit::TestCase
 
     assert_nil(block.parseChildren("private :"))
     assert_equal(false, block.instance_variable_get(:@pub))
-    assert_equal([], block.instance_variable_get(:@memberFunctionSet))
+    assert_equal(true, block.instance_variable_get(:@private))
 
     funcLine = "void Func();"
     nonFuncLine = "typedef Count int;"
     assert_not_nil(block.parseChildren(funcLine))
-    assert_equal(block.children, block.instance_variable_get(:@memberFunctionSet))
 
     assert_nil(block.parseChildren("public :"))
     assert_equal(true, block.instance_variable_get(:@pub))
+    assert_equal(false, block.instance_variable_get(:@private))
     assert_nil(block.parseChildren(nonFuncLine))
     assert_not_nil(block.parseChildren(funcLine))
   end
@@ -2114,14 +2157,15 @@ class TestClassBlock < Test::Unit::TestCase
   def test_parseAccess
     block = ClassBlock.new("")
 
-    [["public:", true, true],
-     ["protected:", true, false],
-     ["public:", true, true],
-     ["private:", true, false],
-     ["publicFunc", false, false],
-     ["public:", true, true]].each do |line, expected, expectedPub|
+    [["public:", true, true, false],
+     ["protected:", true, false, false],
+     ["public:", true, true, false],
+     ["private:", true, false, true],
+     ["publicFunc", false, false, true],
+     ["public:", true, true, false]].each do |line, expected, expectedPub, expectedPrivate|
       assert_equal(expected, block.parseAccess(line))
       assert_equal(expectedPub, block.instance_variable_get(:@pub))
+      assert_equal(expectedPrivate, block.instance_variable_get(:@private))
     end
   end
 
@@ -2146,7 +2190,6 @@ class TestClassBlock < Test::Unit::TestCase
 
     block.filterByReferenceSet(refSet)
     assert_equal([childBlockU], block.instance_variable_get(:@undefinedFunctionSet))
-    assert_equal(2, block.instance_variable_get(:@memberFunctionSet).size)
     assert_true(block.canTraverse?)
     assert_true(block.needStub?)
   end
@@ -2225,7 +2268,7 @@ class TestClassBlock < Test::Unit::TestCase
     'template struct' => ["template <typename T, typename S> struct StructName",
                           "template <typename T, typename S>", "StructName", "struct", true])
   def test_parseClassName(data)
-    line, th, name, tn, pub= data
+    line, th, name, tn, pub = data
     block = ClassBlock.new("")
     assert_true(block.parseClassName(line))
     assert_equal(th, block.instance_variable_get(:@templateHeader))
@@ -2237,6 +2280,7 @@ class TestClassBlock < Test::Unit::TestCase
 
     assert_equal(tn, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
+    assert_equal(!pub, block.instance_variable_get(:@private))
   end
 
   def test_parseClassNameExcluded
@@ -2356,8 +2400,132 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("::R::A::B::ClassName", block.getNonTypedFullname(name))
   end
 
+  def test_markMemberFunctionSetVirtualShort
+    line = "void Func();"
+    funcBaseLine = "virtual " + line
+    funcDerivedLine = line
+    funcBase = MemberFunctionBlock.new(funcBaseLine)
+    funcDerived = MemberFunctionBlock.new(funcDerivedLine)
+    blockBase = ClassBlock.new("class Base")
+    blockDerived = ClassBlock.new("class Derived")
+    blockDerived.instance_variable_set(:@baseClassBlockSet, [blockBase])
+
+    blockBase.connect(funcBase)
+    blockDerived.connect(funcDerived)
+    addMemberFunction(blockBase, funcBase)
+    addMemberFunction(blockDerived, funcDerived)
+    assert_true(funcBase.virtual?)
+    assert_false(funcDerived.virtual?)
+
+    str = blockDerived.markMemberFunctionSetVirtual
+    assert_true(funcBase.virtual?)
+    assert_true(funcDerived.virtual?)
+  end
+
+  def test_markMemberFunctionSetVirtualFull
+    linePub = "void FuncPub();"
+    linePubOther = "void FuncOther();"
+    lineProtected = "void FuncProtected();"
+    linePrivate = "void FuncPrivate();"
+    lineProtectedImpl = "void protectedImpl();"
+    linePrivateImpl = "void privateImpl();"
+
+    # NVI idiom
+    blockBase = ClassBlock.new("class Base")
+    blockBase.parseChildren("public:")
+    blockBase.parseChildren(linePub)
+    blockBase.parseChildren("protected:")
+    blockBase.parseChildren("virtual " + lineProtected)
+    blockBase.parseChildren(lineProtectedImpl)
+    blockBase.parseChildren("private:")
+    blockBase.parseChildren("virtual " + linePrivate)
+    blockBase.parseChildren(linePrivateImpl)
+
+    blockDerived = ClassBlock.new("class Derived")
+    blockDerived.parseChildren("public:")
+    blockDerived.parseChildren(linePubOther)
+
+    blockDerived.parseChildren("protected:")
+    # Omit virtual keyword but it is valid
+    blockDerived.parseChildren(lineProtected)
+    # Hiding base class definition
+    blockDerived.parseChildren(lineProtectedImpl)
+
+    blockDerived.parseChildren("private:")
+    # Omit virtual keyword but it is valid
+    blockDerived.parseChildren(linePrivate)
+    # Hiding base class definition
+    blockDerived.parseChildren(linePrivateImpl)
+    blockDerived.instance_variable_set(:@baseClassBlockSet, [blockBase])
+
+    [[["FuncOther"], :@publicMemberFunctionSet],
+     [["FuncProtected", "protectedImpl"], :@protectedMemberFunctionSet]
+    ].each do |expectedNameSet, varName|
+      assert_equal(expectedNameSet, blockDerived.instance_variable_get(varName).map(&:funcName))
+    end
+
+    [[["FuncPub"], :@publicMemberFunctionSet],
+     [["FuncProtected", "protectedImpl"], :@protectedMemberFunctionSet]
+    ].each do |expectedNameSet, varName|
+      assert_equal(expectedNameSet, blockBase.instance_variable_get(varName).map(&:funcName))
+    end
+
+    blockDerived.markMemberFunctionSetVirtual
+    expected = [["FuncOther", false], ["FuncProtected", true], ["protectedImpl", false],
+                ["FuncPrivate", true], ["privateImpl", false]]
+    blockDerived.instance_variable_get(:@allMemberFunctionSet).each_with_index do |func, i|
+      assert_equal(expected[i][0], func.funcName)
+      assert_equal(expected[i][1], func.virtual?)
+    end
+
+    expected = [["FuncPub", false], ["FuncProtected", true], ["protectedImpl", false],
+                ["FuncPrivate", true], ["privateImpl", false]]
+    blockBase.instance_variable_get(:@allMemberFunctionSet).each_with_index do |func, i|
+      assert_equal(expected[i][0], func.funcName)
+      assert_equal(expected[i][1], func.virtual?)
+    end
+  end
+
+  def test_canForwardToDecorateMockFunction
+    block = ClassBlock.new("class Name")
+    funcBlock = BaseBlock.new("")
+    def funcBlock.virtual?
+      false
+    end
+
+    assert_false(block.canForwardToFunction(funcBlock))
+    assert_false(block.canDecorateFunction(funcBlock))
+    assert_false(block.canMockFunction(funcBlock))
+
+    def funcBlock.canTraverse?
+      true
+    end
+    assert_false(block.canForwardToFunction(funcBlock))
+    assert_false(block.canDecorateFunction(funcBlock))
+    assert_false(block.canMockFunction(funcBlock))
+
+    block.instance_variable_set(:@publicMemberFunctionSet, [funcBlock])
+    assert_true(block.canForwardToFunction(funcBlock))
+    assert_true(block.canDecorateFunction(funcBlock))
+    assert_true(block.canMockFunction(funcBlock))
+
+    block.instance_variable_set(:@publicMemberFunctionSet, [])
+    block.instance_variable_set(:@protectedMemberFunctionSet, [funcBlock])
+    assert_false(block.canForwardToFunction(funcBlock))
+    assert_true(block.canDecorateFunction(funcBlock))
+    assert_true(block.canMockFunction(funcBlock))
+
+    block.instance_variable_set(:@protectedMemberFunctionSet, [])
+    def funcBlock.virtual?
+      true
+    end
+    assert_false(block.canForwardToFunction(funcBlock))
+    assert_false(block.canDecorateFunction(funcBlock))
+    assert_true(block.canMockFunction(funcBlock))
+  end
+
   def addMemberFunction(block, func)
-    block.instance_variable_get(:@memberFunctionSet) << func
+    block.instance_variable_get(:@publicMemberFunctionSet) << func
     block.instance_variable_get(:@allMemberFunctionSet) << func
   end
 
@@ -2365,7 +2533,7 @@ class TestClassBlock < Test::Unit::TestCase
     funcSet.each do |func|
       block.connect(func)
     end
-    block.instance_variable_get(:@memberFunctionSet).concat(funcSet)
+    block.instance_variable_get(:@publicMemberFunctionSet).concat(funcSet)
     block.instance_variable_get(:@allMemberFunctionSet).concat(funcSet)
   end
 
@@ -2818,6 +2986,29 @@ class TestClassBlock < Test::Unit::TestCase
     checkCollectDef(:collectForwarderDef, lambdaCheck1, lambdaCheck2)
   end
 
+  def test_collectFunctionAll
+    block = ClassBlock.new("class Tested")
+    ["public:", "void FuncPublic();", "protected:", "void FuncProtected();",
+     "private:", "virtual void FuncPrivate();", "void Impl();"].each do |line|
+      funcBlock = block.parseChildren(line)
+      def funcBlock.makeMockDef(name)
+        "a"
+      end
+
+      def funcBlock.makeDecoratorDef(name)
+        "b"
+      end
+
+      def funcBlock.makeForwarderDef(name)
+        "c"
+      end
+    end
+
+    assert_equal(3, block.collectMockDef([]).size)
+    assert_equal(2, block.collectDecoratorDef([]).size)
+    assert_equal(1, block.collectForwarderDef([]).size)
+  end
+
   def test_collectBaseFunctionDef
     funcBaseLine = "void FuncBase()"
     funcBaseA = MemberFunctionBlock.new(funcBaseLine)
@@ -2833,8 +3024,12 @@ class TestClassBlock < Test::Unit::TestCase
     block = ClassBlock.new("class BaseD")
     block.instance_variable_set(:@baseClassBlockSet, [blockBaseA, blockBaseB])
 
+    def block.checkFunc(func)
+      true
+    end
+
     lambdaCheck = lambda { |n| puts n; true }
-    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck)
+    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck, :checkFunc)
     assert_equal("    MOCK_METHOD0(FuncBase,void());\n", str)
   end
 
@@ -2931,6 +3126,10 @@ class TestClassMock < Mockgen::BaseBlock
 
   def setBaseClass(classSet)
     @visited = true if classSet
+  end
+
+  def markMemberFunctionSetVirtual
+    false
   end
 end
 
@@ -3093,7 +3292,7 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(originalBlock, parser.instance_variable_get(:@block))
     assert_equal(3, classBlock.children.size)
     assert_equal(funcBlockA, classBlock.children[1])
-    assert_not_equal([], classBlock.instance_variable_get(:@memberFunctionSet))
+    assert_false(classBlock.instance_variable_get(:@publicMemberFunctionSet).empty?)
   end
 
   def test_parseTypedefAndStruct

@@ -6,34 +6,36 @@
 # Usage:
 # $ mockgen.rb [stub|mock] [-filter pattern]* 8-filenames clang-options
 #
-# - stub or mock (specify stub to generate stubs
+# - String "stub" or "mock"
 #   stub : generate stubs
 #   mock : generate stubs and mocks
-# - none or more sets of -filter pattern
-#   regular expression to filter free functions to mock
-#   no filters mean to handle all free functions including system headers
+# - None or more sets of -filter pattern
+#   Regular expression to filter free functions to mock.
+#   No filters mean to handle all free functions including system headers.
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [input file]  LD output (link error log) file
+#     Missing the LD output file implies no link errors occured.
 # - [output file] intermediate .hpp file that clang writes
 # - [output file] class definition
 # - [output file] type swapper macro
 # - [output file] variable swapper macro
 # - [output file] forwarder declaration
 # - [output file] forwarder definition
-# All other arguments are passed to clang. Specify include paths here.
+# All other arguments are passed to clang. Specify include paths and
+# macros (-DSYMBOL=VALUE) here.
 #
 # Before parsing input files, this script launches the clang front end
 # to format the files.
-# + Execute preprocessing, import headers and expand macros
-# + Indent lines. Write a symbol declaration and definition in one line.
-# + Resolve implicit namespaces
+# - Execute preprocessing, import headers and expand macros
+# - Indent lines. Write a symbol declaration and definition in one line.
+# - Resolve implicit namespaces
 #
 # In my environment, the clang front end requires these option.
 # These paths may differ in different environment such as
-# + Cygwin/MinGW 64 or 32bit version
-# + C++ compiler version
-# + Google Test/Mock directories
+# - Cygwin/MinGW 64 or 32bit version
+# - C++ compiler version
+# - Google Test/Mock directories
 #
 # Cygwin64 + bash:
 #   clang++ -cc1 -ast-print -fblocks -fgnu-keywords -x c++ -std=gnu++11
