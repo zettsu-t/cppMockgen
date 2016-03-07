@@ -2,6 +2,8 @@
 #include "vardecl_mockgenSample1.hpp"
 // Swap class names used later to their decorator
 #include "typeSwapper_mockgenSample1.hpp"
+// Forwarder of the top level namespace
+#include "varDecl_mockgenSample1.hpp"
 
 #include "mockgenSample2.hpp"
 #include <gtest/gtest.h>
@@ -88,6 +90,14 @@ TEST_F(TestSample, TopLevelNamespace) {
     }
     ASSERT_FALSE(INSTANCE_OF(aTopLevelObject).pMock_);
     ASSERT_FALSE(localTopLevelObject.pMock_);
+
+    {
+        MOCK_OF(All) mock;
+        all_Forwarder.TopLevelSampleFunc();
+        all_Forwarder.pMock_ = &mock;
+        all_Forwarder.TopLevelSampleFunc();
+        all_Forwarder.pMock_ = 0;
+    }
 }
 
 TEST_F(TestSample, SwapVariableCtorWithArg) {

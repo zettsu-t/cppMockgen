@@ -387,6 +387,16 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal(expected, BaseBlock.new("").addTopNamespace(name))
   end
 
+  data(
+    'notNamespace' => ["::Name", "Name"],
+    'topNamespace' => ["::Name", "::Name"],
+    'relativeNestedNamespace' => ["::Name::A::B", "Name::A::B"],
+    'topNestedNamespace' => ["::Name::A::B", "::Name::A::B"])
+  def test_getNameFromTopNamespace(data)
+    expected, name = data
+    assert_equal(expected, BaseBlock.new("").getNameFromTopNamespace(name))
+  end
+
   def test_getNonTypedFullname
     name = "Symbol"
     nsBlockA = NamespaceBlock.new("namespace R::A")
@@ -1719,7 +1729,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
   def test_makeForwarderDef
     block = FreeFunctionBlock.new("extern int Func(int a);")
-    expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return Func(a); }\n"
+    expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return ::Func(a); }\n"
     assert_equal(expected, block.makeForwarderDef(""))
 
     nsBlock = NamespaceBlock.new("namespace A")
@@ -1828,8 +1838,8 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "class All_Forwarder {\n"
     expected += "public:\n"
     expected += "    All_Forwarder(void) : pMock_(0) {}\n"
-    expected += "    void FuncA() { if (pMock_) { pMock_->FuncA(); return; } FuncA(); }\n"
-    expected += "    int FuncB(int a) { if (pMock_) { return pMock_->FuncB(a); } return FuncB(a); }\n"
+    expected += "    void FuncA() { if (pMock_) { pMock_->FuncA(); return; } ::FuncA(); }\n"
+    expected += "    int FuncB(int a) { if (pMock_) { return pMock_->FuncB(a); } return ::FuncB(a); }\n"
     expected += "    All_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)

@@ -314,6 +314,12 @@ module Mockgen
       ((pos.nil? || pos == 0) ? "" : "::") + name
     end
 
+    # Append :: prefix to call a free function instead of a member function
+    def getNameFromTopNamespace(name)
+      pos = name.index("::")
+      ((!pos.nil? && pos == 0) ? "" : "::") + name
+    end
+
     # Concatenate this block's namespaces with the arg name
     # template <> is excluded
     def getNonTypedFullname(name)
@@ -1276,7 +1282,9 @@ module Mockgen
     end
 
     def makeForwarderDef(className)
-      makeForwarderDefImpl(getNonTypedFullname(className))
+      # Add :: to call a free function and prevent infinite calling
+      # to a member function itself
+      makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)))
     end
   end
 
@@ -1897,7 +1905,9 @@ module Mockgen
 
     def formatDecoratorClass(decoratorName, mockClassName, baseName)
       header = @templateHeader.empty? ? "" : (@templateHeader + " ")
-      str =  "#{header}#{@typename} #{decoratorName} : public #{baseName} {\n"
+
+      # class can inherit struct
+      str =  "#{header}class #{decoratorName} : public #{baseName} {\n"
       str += "public:\n"
 
       initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
@@ -1913,7 +1923,9 @@ module Mockgen
     def formatForwarderClass(forwarderName, mockClassName, baseName)
       # Inherit a base class to refer class-local enums of the class
       header = @templateHeader.empty? ? "" : (@templateHeader + " ")
-      str =  "#{header}#{@typename} #{forwarderName} : public #{baseName} {\n"
+
+      # class can inherit struct
+      str =  "#{header}class #{forwarderName} : public #{baseName} {\n"
       str += "public:\n"
       [["#{baseName}* pActual", "pActual_(pActual)"],
        ["#{baseName}& actual",  "pActual_(&actual)"]].each do |arg, initMember|
@@ -2279,6 +2291,8 @@ module Mockgen
         end
 
         classFilenameSet << classFilename
+        declFilenameSet << declFilename
+
         serial += 1
         index += sizeOfSet
       end
