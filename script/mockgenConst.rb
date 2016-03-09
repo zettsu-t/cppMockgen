@@ -9,6 +9,7 @@ module Mockgen
     ARGUMENT_MODE_STUB = "stub".freeze
     ARGUMENT_MODE_MOCK = "mock".freeze
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
+    ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
 
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
@@ -82,6 +83,12 @@ module Mockgen
 
     # clang executable
     CLANG_COMMAND = "clang++".freeze
+
+    # ctags
+    CTAGS_COMMAND = "ctags".freeze
+    CTAGS_OPTIONS = "-x --c++-kinds=f".freeze
+    # keywords in TAGS
+    CTAGS_TYPENAME_FUNCTION_DEFINITION = "function".freeze
   end
 end
 

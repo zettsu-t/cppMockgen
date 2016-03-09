@@ -8,6 +8,7 @@ require 'test/unit'
 # Omit the module name in this testing
 include Mockgen
 
+TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
 TestMockRefClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
 
 class TestMockRefSetClass
@@ -912,14 +913,14 @@ class TestExternVariableStatement < Test::Unit::TestCase
     reference = referenceClass.new("a")
     nilReference = referenceClass.new(nil)
 
-    assert_true(varBlockA.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
-    assert_true(arrayBlock.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
-    assert_false(varBlockA.filterByReferenceSet(TestMockRefMonoSetClass.new(nilReference)))
-    assert_false(varBlockB.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
+    assert_true(varBlockA.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
+    assert_true(arrayBlock.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
+    assert_false(varBlockA.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(nilReference)))
+    assert_false(varBlockB.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
 
     refSet = TestMockRefSetClass.new(true, [reference, referenceClass.new("b")])
-    assert_true(varBlockA.filterByReferenceSet(refSet))
-    assert_true(varBlockB.filterByReferenceSet(refSet))
+    assert_true(varBlockA.filterByReferenceSet(nil, refSet))
+    assert_true(varBlockB.filterByReferenceSet(nil, refSet))
   end
 
   def test_makeStubDef
@@ -1195,18 +1196,18 @@ class TestConstructorBlock < Test::Unit::TestCase
 
     className = "NameC"
     block = ConstructorBlock.new("NameC(int);", className)
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
+    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
 
     otherLine = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE
     otherLine += " `NameC::Func()'"
     referenceOther = UndefinedReference.new(otherLine)
     refSet = TestMockRefSetClass.new(true, [referenceOther, reference])
-    assert_true(block.filterByReferenceSet(refSet))
+    assert_true(block.filterByReferenceSet(nil, refSet))
 
     block = ConstructorBlock.new("NameC();", className)
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
+    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
     block = ConstructorBlock.new("~NameC();", className)
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(reference)))
+    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
 
   end
 
@@ -1245,18 +1246,18 @@ class TestDestructorBlock < Test::Unit::TestCase
     classBlock.connect(block)
 
     refDestructor = TestMockRefClass.new(className, "#{className}::~NameD", "~NameD", nil, nil)
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refDestructor), className))
+    assert_true(block.filterByUndefinedReferenceSet(TestMockRefMonoSetClass.new(refDestructor), className))
 
     refConstructor = TestMockRefClass.new(className, "#{className}::NameD", "NameD", nil, nil)
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refConstructor), className))
+    assert_false(block.filterByUndefinedReferenceSet(TestMockRefMonoSetClass.new(refConstructor), className))
 
     refSet = TestMockRefSetClass.new(true, [refDestructor, refConstructor])
-    assert_true(block.filterByReferenceSet(refSet, className))
+    assert_true(block.filterByUndefinedReferenceSet(refSet, className))
 
     def refDestructor.memberName
       nil
     end
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refDestructor), className))
+    assert_false(block.filterByUndefinedReferenceSet(TestMockRefMonoSetClass.new(refDestructor), className))
   end
 
   def test_makeStubDef
@@ -1393,13 +1394,13 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     refUnmatched2 = TestMockRefClass.new("", "Func1", "Func1", "int*", "const")
 
     block = MemberFunctionBlock.new("void Func1(int) const")
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refMatched1)))
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refMatched2)))
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refUnmatched1)))
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(refUnmatched2)))
+    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refMatched1)))
+    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refMatched2)))
+    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refUnmatched1)))
+    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refUnmatched2)))
 
     refSet = TestMockRefSetClass.new(true, [refUnmatched1, refMatched1])
-    assert_true(block.filterByReferenceSet(refSet))
+    assert_true(block.filterByReferenceSet(nil, refSet))
   end
 
   def test_override?
@@ -1692,21 +1693,48 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     assert_false(block.valid)
   end
 
-  def test_filterByReferenceSet
+  def test_filterByDefinedReferenceSet
+    block = FreeFunctionBlock.new("extern int Func(int a);")
+    assert_false(block.instance_variable_get(:@alreadyDefined))
+
+    assert_false(block.makeMockDef("").empty?)
+    assert_false(block.makeStubDef("").empty?)
+    assert_false(block.makeForwarderDef("").empty?)
+
+    defRefSet = Object.new()
+    def defRefSet.freeFunctionDefined?(arg)
+      true
+    end
+
+    ref = UndefinedReference.new("")
+    block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref))
+    assert_true(block.instance_variable_get(:@alreadyDefined))
+
+    assert_equal("", block.makeMockDef(""))
+    assert_equal("", block.makeStubDef(""))
+    assert_equal("", block.makeForwarderDef(""))
+  end
+
+  def test_filterByUndefinedReferenceSet
     block = FreeFunctionBlock.new("extern int Func(int a);")
     assert_true(block.isFreeFunction?)
     assert_equal("Func", block.funcName)
     assert_equal("Func(int)", block.argSignature)
 
+    defRefSet = Object.new()
+    def defRefSet.freeFunctionDefined?(arg)
+      false
+    end
+
     prefix = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE + " "
     ref = UndefinedReference.new(prefix + "`Func(int)'")
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(ref)))
+    assert_true(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
 
     ref = UndefinedReference.new(prefix + "`Func'")
-    assert_true(block.filterByReferenceSet(TestMockRefMonoSetClass.new(ref)))
+    assert_true(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
 
     ref = UndefinedReference.new(prefix + "`A::Func'")
-    assert_false(block.filterByReferenceSet(TestMockRefMonoSetClass.new(ref)))
+    assert_false(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
   end
 
   data(
@@ -1893,7 +1921,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     end
 
     refSet = TestMockRefSetClass.new(true, refArray)
-    funcSet.filterByReferenceSet(refSet)
+    funcSet.filterByReferenceSet(nil, refSet)
     assert_true(funcSet.needStub?)
 
     expectedStub =  "void FuncA(int a) {\n    return;\n}\n\n"
@@ -1924,7 +1952,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
 
     ref = TestMockRefClass.new("", "A::B::Func", "Func", nil, "")
     refSet = TestMockRefSetClass.new(true, [ref])
-    funcSet.filterByReferenceSet(refSet)
+    funcSet.filterByReferenceSet(nil, refSet)
     assert_true(funcSet.needStub?)
 
     expectedStub = "namespace A {\nnamespace B {\nvoid Func() {\n    return;\n}\n\n}\n}\n"
@@ -1943,7 +1971,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     ["extern int Func(int a);",
      "extern int Func(int b);"].each do |line|
       func = FreeFunctionBlock.new(line)
-      def func.filterByReferenceSet(ref)
+      def func.filterByReferenceSet(dRef, uDef)
         true
       end
       block.connect(func)
@@ -1951,7 +1979,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     end
 
     refSet = TestMockRefSetClass.new(true, [1])
-    funcSet.filterByReferenceSet(refSet)
+    funcSet.filterByReferenceSet(nil, refSet)
 
     assert_equal(2, funcSet.funcSet.size)
     assert_equal(2, funcSet.undefinedFunctionSet.size)
@@ -2179,7 +2207,46 @@ class TestClassBlock < Test::Unit::TestCase
     end
   end
 
-  def test_filterByReferenceSet
+  def test_filterByDefinedReferenceSet
+    classname = "NameC"
+    block = ClassBlock.new("class " + classname)
+    assert_false(block.instance_variable_get(:@alreadyDefined))
+
+    def block.formatStub
+      "a"
+    end
+
+    def block.formatMockClass(a,b,c,d)
+      return "b", "B"
+    end
+
+    def block.formatDecoratorClass(a,b,c)
+      "c"
+    end
+
+    def block.formatForwarderClass(a,b,c)
+      "d"
+    end
+
+    block.makeClassSet
+    assert_false(block.getStringToClassFile.empty?)
+    block.makeStubSet
+    assert_false(block.getStringToSourceFile.empty?)
+
+    refSet = Object.new()
+    def refSet.classDefined?(arg)
+      true
+    end
+
+    block.filterByReferenceSet(refSet, nil)
+    assert_true(block.instance_variable_get(:@alreadyDefined))
+    block.makeClassSet
+    assert_true(block.getStringToClassFile.empty?)
+    block.makeStubSet
+    assert_true(block.getStringToSourceFile.empty?)
+  end
+
+  def test_filterByUndefinedReferenceSet
     classname = "NameC"
     block = ClassBlock.new("class " + classname)
     assert_nil(block.parseChildren("public :"))
@@ -2198,7 +2265,7 @@ class TestClassBlock < Test::Unit::TestCase
     ref = TestMockRefClass.new(classname, funcname, funcname, "int", "const")
     refSet = TestMockRefSetClass.new(true, [ref])
 
-    block.filterByReferenceSet(refSet)
+    block.filterByReferenceSet(nil, refSet)
     assert_equal([childBlockU], block.instance_variable_get(:@undefinedFunctionSet))
     assert_true(block.canTraverse?)
     assert_true(block.needStub?)
@@ -2219,18 +2286,18 @@ class TestClassBlock < Test::Unit::TestCase
     assert_false(block.needStub?)
 
     if memberName.include?("~")
-      def memberBlock.filterByReferenceSet(ref, fullname)
+      def memberBlock.filterByUndefinedReferenceSet(ref, fullname)
         true
       end
     else
-      def memberBlock.filterByReferenceSet(ref)
+      def memberBlock.filterByReferenceSet(dRef, uRef)
         true
       end
     end
 
     ref = TestMockRefClass.new(classname, "#{classname}::#{memberName}", memberName, "", "")
 
-    block.filterByReferenceSet(TestMockRefMonoSetClass.new(ref))
+    block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(ref))
     assert_true(block.needStub?)
     assert_true(block.canMock?)
   end
@@ -2732,7 +2799,7 @@ class TestClassBlock < Test::Unit::TestCase
     refDestructor = TestMockRefClass.new(testedName, "#{testedName}::~#{testedName}", "~#{testedName}", "", postFunc)
     refVar = TestMockRefClass.new(testedName, "#{testedName}::varStub", "varStub", "", "")
     refSet = TestMockRefSetClass.new(true, [refFunc, refDestructor, refVar])
-    block.filterByReferenceSet(refSet)
+    block.filterByReferenceSet(nil, refSet)
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_equal(expectedStub, block.formatStub)
@@ -2775,7 +2842,7 @@ class TestClassBlock < Test::Unit::TestCase
     assert_true(block.canTraverse?)
 
     # Do not filter the base class
-    blockBase.filterByReferenceSet(refSet)
+    blockBase.filterByReferenceSet(nil, refSet)
     actualDecl, actualDef = blockBase.formatMockClass(mockName, decoratorName, forwarderName, baseName)
     assert_equal(2, actualDecl.scan("FuncStub").size)
     assert_equal(1, actualDecl.scan("FuncOther").size)
@@ -2794,7 +2861,7 @@ class TestClassBlock < Test::Unit::TestCase
     block, blockBase = getClassBlockWithDefault(testedName, baseName)
     refFunc = TestMockRefClass.new(testedName, "FuncStub", "FuncStub", "NameSpace::Enum", "")
     refSet = TestMockRefSetClass.new(true, [refFunc])
-    block.filterByReferenceSet(refSet)
+    block.filterByReferenceSet(nil, refSet)
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_true(actualDecl.include?("MOCK_METHOD1(FuncStub,void(NameSpace::Enum e));\n"))
@@ -2814,7 +2881,7 @@ class TestClassBlock < Test::Unit::TestCase
     ["FuncStub", "FuncOther"].each do |funcname|
       ref = TestMockRefClass.new(testedName, funcname, funcname, "", "const")
       refSet = TestMockRefSetClass.new(true, [ref])
-      block.filterByReferenceSet(refSet)
+      block.filterByReferenceSet(nil, refSet)
     end
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
@@ -3172,6 +3239,178 @@ class TestClassInstanceMap < Test::Unit::TestCase
   end
 end
 
+class TestDefinedReference < Test::Unit::TestCase
+  data(
+    'empty' => ["", nil, nil, nil, false],
+    'member' => ["anObject  member  6 dir/body.cpp ::Sample1::Types::DerivedClass anObject;",
+                 nil, nil, nil, false],
+    'free function' => ["main  function  4 ./dir/main.cpp int main(int argc, char* argv[]) {",
+                        "main", nil, nil, true],
+    'member function' => ["Func  function 34 ./dir/file.cpp int NameA::Func(void) { return 0; }",
+                          "Func", "NameA", "NameA", false],
+    'inner class' => ["Func  function 34 ./dir/file.cpp int Outer::NameA::Func(void) { return 0; }",
+                      "Func", "NameA", "Outer::NameA", false])
+  def test_parse(data)
+    line, expectedFunctionName, expectedClassName,
+    expectedRelativeClassName, expectedIsFreeFunction = data
+
+    ref = DefinedReference.new(line)
+    assert_equal(expectedFunctionName, ref.functionName)
+    assert_equal(expectedClassName, ref.className)
+    assert_equal(expectedRelativeClassName, ref.relativeClassName)
+    assert_equal(expectedIsFreeFunction, ref.isFreeFunction)
+  end
+end
+
+class TestStrippedFullname < Test::Unit::TestCase
+  data(
+    'nil' => [nil, nil],
+    'name' => ["Name", "Name"],
+    'top level' => ["::Name", "Name"],
+    'namespace' => ["Namespace::Name", "Namespace::Name"],
+    'array' => ["array[10]", "array"],
+    'mixed' => ["::name::array[10]", "name::array"])
+  def test_all(data)
+    arg, expected = data
+    assert_equal(expected, StrippedFullname.new(arg).name)
+  end
+end
+
+class TestDefinedReferenceSet < Test::Unit::TestCase
+  def test_initialize
+    refSet = DefinedReferenceSet.new(TestInputSourceFileSet)
+
+    # Check the input files
+    ["SampleFunc", "SampleFuncArray"].each do |name|
+      assert_true(refSet.freeFunctionDefined?(name))
+    end
+
+    ["BaseClass", "TopLevelClass"].each do |name|
+      assert_true(refSet.classDefined?(name))
+    end
+  end
+
+  def test_parseAllLines
+    refSet = DefinedReferenceSet.new([])
+
+    lineSet = ["main  function  4 ./dir/main.cpp int main(int argc, char* argv[]) {\n",
+               "Func  function 34 ./dir/file.cpp int NameA::Func(void) { return 0; }\n",
+               "Func  function 34 ./dir/file.cpp int Outer::NameB::Func(void) { return 0; }\n"]
+    refClassNameSet = {}
+    refFunctionSet = {}
+    refSet.parseAllLines(lineSet, refFunctionSet, refClassNameSet)
+
+    assert_not_nil(refFunctionSet["main"])
+    assert_not_nil(refClassNameSet["NameA"])
+    assert_not_nil(refClassNameSet["NameB"])
+  end
+
+  def test_addNothing
+    refSet = DefinedReferenceSet.new([])
+    refFunctionSet = {}
+    refClassNameSet = {}
+
+    refClass = Struct.new(:functionName, :className, :relativeClassName, :isFreeFunction)
+    ref = refClass.new(nil, nil, nil, false)
+    refSet.add(ref, refFunctionSet, refClassNameSet)
+    assert_true(refFunctionSet.empty?)
+    assert_true(refClassNameSet.empty?)
+
+    functionName = "func"
+    ref = refClass.new(functionName, nil, nil, false)
+    refSet.add(ref, refFunctionSet, refClassNameSet)
+    assert_true(refFunctionSet.empty?)
+  end
+
+  def test_addFreeFunction
+    refSet = DefinedReferenceSet.new([])
+    refFunctionSet = {}
+    refClassNameSet = {}
+
+    functionName = "func"
+    className = "NameA"
+
+    refClass = Struct.new(:functionName, :className, :relativeClassName, :isFreeFunction)
+    1.upto(2) do |i|
+      ref = refClass.new(functionName, nil, nil, true)
+      refSet.add(ref, refFunctionSet, refClassNameSet)
+      assert_equal(1, refFunctionSet.size)
+      assert_not_nil(refFunctionSet[functionName])
+      assert_true(refClassNameSet.empty?)
+    end
+
+    refSet.instance_variable_set(:@refFunctionSet, refFunctionSet)
+    [["", true], ["::", true], ["A", false]].each do |prefix, expected|
+      assert_equal(expected, refSet.freeFunctionDefined?(prefix + functionName))
+    end
+  end
+
+  def test_addClass
+    refSet = DefinedReferenceSet.new([])
+    refFunctionSet = {}
+    refClassNameSet = {}
+
+    refClass = Struct.new(:functionName, :className, :relativeClassName, :isFreeFunction)
+    className = "NameA"
+    memberFunctionName = "memfunc"
+    1.upto(2) do |i|
+      ref = refClass.new(memberFunctionName, className, className, false)
+      refSet.add(ref, refFunctionSet, refClassNameSet)
+      assert_true(refFunctionSet.empty?)
+      assert_equal(1, refClassNameSet.size)
+      assert_not_nil(refClassNameSet[className])
+      assert_equal(1, refClassNameSet[className].size)
+    end
+
+    refSet.instance_variable_set(:@refClassNameSet, refClassNameSet)
+    [["", true], ["::", true], ["A", false]].each do |prefix, expected|
+      assert_equal(expected, refSet.classDefined?(prefix + className))
+    end
+
+    relativeClassName = "Outer::" + className
+    1.upto(2) do |i|
+      ref = refClass.new(memberFunctionName, className, relativeClassName, false)
+      refSet.add(ref, refFunctionSet, refClassNameSet)
+      assert_equal(1, refClassNameSet.size)
+      assert_not_nil(refClassNameSet[className])
+      assert_equal(2, refClassNameSet[className].size)
+    end
+  end
+
+  def test_addInnerClass
+    refSet = DefinedReferenceSet.new([])
+    refFunctionSet = {}
+    refClassNameSet = {}
+
+    refClass = Struct.new(:functionName, :className, :relativeClassName, :isFreeFunction)
+    className = "NameA"
+    memberFunctionName = "memfunc"
+    relativeClassName = "Outer::" + className
+
+    ref = refClass.new(memberFunctionName, className, relativeClassName, false)
+    refSet.add(ref, refFunctionSet, refClassNameSet)
+    assert_equal(1, refClassNameSet.size)
+    assert_not_nil(refClassNameSet[className])
+    assert_equal(1, refClassNameSet[className].size)
+
+    refSet.instance_variable_set(:@refClassNameSet, refClassNameSet)
+    assert_false(refSet.classDefined?(className))
+
+    ["", "::", "Extra::"].each do |prefix|
+      assert_true(refSet.classDefined?(prefix + relativeClassName))
+    end
+
+    ["A", "::Extra::"].each do |prefix|
+      assert_false(refSet.classDefined?(prefix + relativeClassName))
+    end
+  end
+
+  def test_stripFullname
+    refSet = DefinedReferenceSet.new([])
+    assert_equal("Name", refSet.stripFullname("Name"))
+  end
+end
+
 class TestUndefinedReference < Test::Unit::TestCase
   data(
     'toplevel' => ["undefined reference to `TopLevelClass::GetValue()'",
@@ -3249,21 +3488,13 @@ class TestUndefinedReferenceSet < Test::Unit::TestCase
     assert_equal(2, refFullnameSet.size)
   end
 
-  data(
-    'nil' => [nil, nil],
-    'name' => ["Name", "Name"],
-    'top level' => ["::Name", "Name"],
-    'namespace' => ["Namespace::Name", "Namespace::Name"],
-    'array' => ["array[10]", "array"],
-    'mixed' => ["::name::array[10]", "name::array"])
-  def test_stripFullname(data)
-    arg, expected = data
+  def test_stripFullname
     refSet = UndefinedReferenceSet.new(nil)
-    assert_equal(expected, refSet.stripFullname(arg))
+    assert_equal("Name", refSet.stripFullname("::Name"))
   end
 end
 
-CppFileParserNilArgSet = [nil, nil, nil, false, []].freeze
+CppFileParserNilArgSet = [nil, nil, nil, false, [], []].freeze
 
 class TestCppFileParser < Test::Unit::TestCase
   def test_parseLine
@@ -3452,9 +3683,9 @@ class TestCppFileParser < Test::Unit::TestCase
       if (testBuild)
         blockD = TestClassMock.new("D", "", [blockC])
         parser.instance_variable_set(:@block, blockD)
-        parser.buildClassTree(nil)
+        parser.buildClassTree(nil, nil)
       else
-        classSet = parser.collectClasses([blockC], nil)
+        classSet = parser.collectClasses([blockC], nil, nil)
         assert_equal({ "ClassA" => blockA }, classSet)
         parser.connectClasses([blockC], classSet)
       end
@@ -3467,7 +3698,51 @@ class TestCppFileParser < Test::Unit::TestCase
     blockV = ExternVariableStatement.new("extern Base varB_;")
 
     parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
-    assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], nil))
+    assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], nil, nil))
+  end
+
+  def test_filterOutClassInSourceFile
+    blockA = ClassBlock.new("class NameA {")
+    blockB = ClassBlock.new("class NameB {")
+
+    refSet = Object.new
+    def refSet.classDefined?(relativeClassName)
+      relativeClassName.include?("A")
+    end
+
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser.collectClasses([blockA, blockB], refSet, nil)
+    assert_true(blockA.instance_variable_get(:@alreadyDefined))
+    assert_false(blockB.instance_variable_get(:@alreadyDefined))
+  end
+
+  def test_filterOutFreeFunctionInSourceFile
+    blockA = FreeFunctionBlock.new("extern int FuncA(int a);")
+    blockB = FreeFunctionBlock.new("extern int FuncB(int a);")
+
+    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+
+    defRefSet = Object.new
+    def defRefSet.freeFunctionDefined?(name)
+      name.include?("A")
+    end
+
+    undefRefSet = Object.new
+    def undefRefSet.getReferenceSetByFullname(fullname)
+      []
+    end
+
+    parser.instance_variable_set(:@presetFunctinSet, [blockA, blockB])
+    def parser.collectFreeFunctions(a,b,c)
+      @presetFunctinSet
+    end
+
+    def parser.mergeFreeFunctionSetArray(a)
+    end
+
+    parser.buildFreeFunctionSet(defRefSet, undefRefSet, [])
+    assert_true(blockA.instance_variable_get(:@alreadyDefined))
+    assert_false(blockB.instance_variable_get(:@alreadyDefined))
   end
 
   def test_connectClasses
@@ -3868,6 +4143,12 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(expected.tr("/", "\\"), target.instance_variable_get(:@clangArgs))
   end
 
+  def getOptionSet
+    ["input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
+     "varSwapper.hpp", "swapper.hpp", "swapper.hpp",
+     "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"]
+  end
+
   def test_parseFilter
     filterSet = ["Utility", '"Utility"', "write_.*"]
     0.upto(filterSet.size) do |i|
@@ -3876,11 +4157,23 @@ class TestMockGenLauncher < Test::Unit::TestCase
 
       args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
       args.concat(filterArgs)
-      args.concat(["input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
-                   "varSwapper.hpp", "swapper.hpp", "swapper.hpp",
-                   "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"])
+      args.concat(getOptionSet())
       target = MockGenLauncher.new(args)
       assert_equal(expected, target.instance_variable_get(:@functionNameFilterSet))
+    end
+  end
+
+  def test_parseSourceFilename
+    filterSet = ["a.cpp", '"src/b.cpp"', "../../src/c.cpp"]
+    0.upto(filterSet.size) do |i|
+      expected = ((i > 0) ? filterSet[0..(i-1)] : []).map { |word| word.tr('"','') }
+      sourceArgs = expected.map { |filter| [Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER, filter] }.flatten
+
+      args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
+      args.concat(sourceArgs)
+      args.concat(getOptionSet())
+      target = MockGenLauncher.new(args)
+      assert_equal(expected, target.instance_variable_get(:@sourceFilenameSet))
     end
   end
 
