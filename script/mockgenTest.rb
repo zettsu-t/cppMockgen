@@ -1765,6 +1765,18 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return ::A::Func(a); }\n"
     assert_equal(expected, block.makeForwarderDef(""))
   end
+
+  def test_getSwapperDef
+    name = "var"
+    block = FreeFunctionBlock.new("")
+    assert_equal("", block.getSwapperDef(name))
+
+    block = FreeFunctionBlock.new("extern int Func(int a);")
+    assert_equal("#define Func #{name}.Func\n", block.getSwapperDef(name))
+
+    block.instance_variable_set(:@alreadyDefined, true)
+    assert_equal("", block.getSwapperDef(name))
+  end
 end
 
 class TestMockFreeFunction
@@ -1997,17 +2009,6 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     block = NamespaceBlock.new("namespace B")
     funcSet = FreeFunctionSet.new(block)
     assert_equal(expected, funcSet.surpressUnderscores(str))
-  end
-
-  data(
-    'invalid' => ["", ""],
-    'valid' => ["extern int Func();", "#define Func var.Func\n"])
-  def test_getSwapperDef(data)
-    line, expected = data
-    block = NamespaceBlock.new("namespace B")
-    funcSet = FreeFunctionSet.new(block)
-    func = FreeFunctionBlock.new(line)
-    assert_equal(expected, funcSet.getSwapperDef("var", func))
   end
 end
 
@@ -2358,6 +2359,20 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(tn, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
     assert_equal(!pub, block.instance_variable_get(:@private))
+  end
+
+  data(
+    'class' => ["class", ""],
+    'template class' => ["template <typename T> class", "template <typename T>"])
+  def test_parseClassNameWithExtraWord(data)
+    line, header = data
+    [" ", " attr_added", " attr added"].each do |extra|
+      name = "ClassName"
+      block = ClassBlock.new("")
+      assert_true(block.parseClassName(line + extra + " " + name))
+      assert_equal(header, block.instance_variable_get(:@templateHeader))
+      assert_equal(name, block.instance_variable_get(:@name))
+    end
   end
 
   def test_parseClassNameExcluded

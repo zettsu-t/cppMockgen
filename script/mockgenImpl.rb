@@ -1293,6 +1293,10 @@ module Mockgen
       # to a member function itself
       @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)))
     end
+
+    def getSwapperDef(varName)
+      (!@valid || @alreadyDefined) ? "" : "#define #{@funcName} #{varName}.#{@funcName}\n"
+    end
   end
 
   class FreeFunctionSet < BaseBlock
@@ -1434,7 +1438,7 @@ module Mockgen
       varName = forwarderName[0].downcase + forwarderName[1..-1]
       varline = "#{forwarderName} #{varName};\n"
       varDecl = "extern " + varline
-      varSwap = @funcSet.map { |func| getSwapperDef(varName, func) }.join("")
+      varSwap = @funcSet.map { |func| func.getSwapperDef(varName) }.join("")
 
       src = varline
       return str, varDecl, varSwap, src
@@ -1442,12 +1446,6 @@ module Mockgen
 
     def surpressUnderscores(str)
       str.gsub(/_+/, "_")
-    end
-
-    def getSwapperDef(varName, func)
-      return "" unless func.valid
-      funcName = func.funcName
-      "#define #{funcName} #{varName}.#{funcName}\n"
     end
   end
 
@@ -1731,11 +1729,15 @@ module Mockgen
     end
 
     def parseClassHeader(line, typenameStr)
+      # Discard words between class/struct keyword and a class name
+      wordSet = ChompAfterDelimiter.new(line, ":").str.strip.split(" ")
+      name = wordSet.empty? ? "" : wordSet[-1]
+
       if md = line.match(/^(template.*\S)\s+#{typenameStr}\s+(\S+)/)
         @templateHeader = md[1]
-        @name = md[2]
+        @name = name
       elsif md = line.match(/^#{typenameStr}\s+(\S+)/)
-        @name = md[1]
+        @name = name
       else
         return false
       end
