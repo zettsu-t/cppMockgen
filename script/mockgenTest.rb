@@ -1869,10 +1869,16 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     assert_equal("", funcSet.getStringOfStub)
 
     funcSet.makeClassSet
-    expected =  "class All_Mock {\n"
+    expected =  "class All_Forwarder;\n"
+    expected += "class All_Mock {\n"
     expected += "public:\n"
+    expected += "    All_Mock(All_Forwarder* pForwarder);\n"
+    expected += "    All_Mock(All_Forwarder& forwarder);\n"
+    expected += "    ~All_Mock(void);\n"
     expected += "    MOCK_METHOD0(FuncA,void());\n"
     expected += "    MOCK_METHOD1(FuncB,int(int a));\n"
+    expected += "private:\n"
+    expected += "    All_Forwarder* pForwarder_;\n"
     expected += "};\n\n"
     expected += "class All_Mock;\n"
     expected += "class All_Forwarder {\n"
@@ -1883,6 +1889,14 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "    All_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
+
+    expected =  "All_Mock::All_Mock(All_Forwarder* pForwarder) : pForwarder_(pForwarder) "
+    expected += "{ pForwarder_->pMock_ = this; }\n"
+    expected += "All_Mock::All_Mock(All_Forwarder& forwarder) : pForwarder_(&forwarder) "
+    expected += "{ pForwarder_->pMock_ = this; }\n"
+    expected += "All_Mock::~All_Mock(void) "
+    expected += "{ pForwarder_->pMock_ = 0; }\n\n"
+    assert_equal(expected, funcSet.getStringOfStub)
 
     expectedSwapper =  "#define FuncA all_Forwarder.FuncA\n"
     expectedSwapper += "#define FuncB all_Forwarder.FuncB\n"
@@ -1898,9 +1912,15 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.add(func)
 
     funcSet.makeClassSet
-    expected =  "class All_A_Mock {\n"
+    expected =  "class All_A_Forwarder;\n"
+    expected += "class All_A_Mock {\n"
     expected += "public:\n"
+    expected += "    All_A_Mock(All_A_Forwarder* pForwarder);\n"
+    expected += "    All_A_Mock(All_A_Forwarder& forwarder);\n"
+    expected += "    ~All_A_Mock(void);\n"
     expected += "    MOCK_METHOD0(Func,void());\n"
+    expected += "private:\n"
+    expected += "    All_A_Forwarder* pForwarder_;\n"
     expected += "};\n\n"
     expected += "class All_A_Mock;\n"
     expected += "class All_A_Forwarder {\n"
@@ -1910,6 +1930,14 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "    All_A_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
+
+    expected =  "All_A_Mock::All_A_Mock(All_A_Forwarder* pForwarder) : pForwarder_(pForwarder) "
+    expected += "{ pForwarder_->pMock_ = this; }\n"
+    expected += "All_A_Mock::All_A_Mock(All_A_Forwarder& forwarder) : pForwarder_(&forwarder) "
+    expected += "{ pForwarder_->pMock_ = this; }\n"
+    expected += "All_A_Mock::~All_A_Mock(void) "
+    expected += "{ pForwarder_->pMock_ = 0; }\n\n"
+    assert_equal(expected, funcSet.getStringOfStub)
 
     expected = "All_A_Forwarder all_A_Forwarder;\n"
     assert_equal("extern " + expected, funcSet.getStringToDeclFile)
@@ -2729,6 +2757,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    MOCK_CONST_METHOD0(Func,void());\n"
     expected += "    MOCK_METHOD1(Func,void(int a));\n"
     expected += "    MOCK_METHOD2(Other,int(long a,T* b));\n"
+    expected += "private:\n"
     expected += "    Decorator* pDecorator_;\n"
     expected += "    Forwarder* pForwarder_;\n"
     expected += "};\n\n"
@@ -2833,6 +2862,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    MOCK_CONST_METHOD0(FuncStub,void());\n"
     expected += "    MOCK_METHOD1(FuncOther,void(int a));\n"
     expected += "    MOCK_METHOD2(FuncDefaultValue,void(int a,int b));\n"
+    expected += "private:\n"
     expected += "    Decorator* pDecorator_;\n"
     expected += "    Forwarder* pForwarder_;\n"
     expected += "};\n\n"

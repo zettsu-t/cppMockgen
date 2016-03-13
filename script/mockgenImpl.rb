@@ -1361,7 +1361,7 @@ module Mockgen
       nameSpaceStr = (!nameSpaceStr.empty? && nameSpaceStr[0] != ":") ? "::#{nameSpaceStr}" : nameSpaceStr
       className = surpressUnderscores(prefix + nameSpaceStr.gsub("::", "_"))
       mockName = surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_MOCK)
-      forwarderName= surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER)
+      forwarderName = surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER)
 
       @mockClassDef, @mockClassFunc = formatMockClass(mockName, forwarderName)
       @forwarderClassDef, @funcDecl, @funcSwapDef, @forwarderVarDef = formatForwarderClass(forwarderName, mockName)
@@ -1389,18 +1389,36 @@ module Mockgen
 
     def formatMockClass(mockClassName, forwarderName)
       str = ""
+      src = ""
+
       unless @funcSet.empty?
-        str =  "class #{mockClassName} {\n"
+        str += "class #{forwarderName};\n"
+        str += "class #{mockClassName} {\n"
         str += "public:\n"
+        str += "    #{mockClassName}(#{forwarderName}* pForwarder);\n"
+        str += "    #{mockClassName}(#{forwarderName}& forwarder);\n"
+        str += "    ~#{mockClassName}(void);\n"
 
         str += @funcSet.map do |func|
           func.valid ? func.makeMockDef(mockClassName) : ""
         end.join("")
 
+        str += "private:\n"
+        str += "    #{forwarderName}* pForwarder_;\n"
         str += "};\n\n"
+
+        # Need to merge with the classBlock's method
+        src += "#{mockClassName}::#{mockClassName}(#{forwarderName}* pForwarder) : "
+        src += "pForwarder_(pForwarder) "
+        src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
+        src += "#{mockClassName}::#{mockClassName}(#{forwarderName}& forwarder) : "
+        src += "pForwarder_(&forwarder) "
+        src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
+        src += "#{mockClassName}::~#{mockClassName}(void) "
+        src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = 0; }\n\n"
       end
 
-      src = formatStub()
+      src += formatStub()
       return str, src
     end
 
@@ -1867,6 +1885,7 @@ module Mockgen
 
       str += "    ~#{className}(void);\n"
       str += collectMockDef([])
+      str += "private:\n"
       str += "    #{decoratorName}* pDecorator_;\n"
       str += "    #{forwarderName}* pForwarder_;\n"
       str += "};\n\n"
@@ -2440,7 +2459,7 @@ module Mockgen
                               argBlockSet, :getStringToDeclFile, nil, false, true)
         writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
                               argBlockSet, :getStringToSwapperFile, nil, false, true)
-        writeFreeFunctionFile(defFilename, declFilename, nil, nil, nil,
+        writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
                               argBlockSet, :getStringOfStub, nil, false, false)
         unless @stubOnly
           writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,

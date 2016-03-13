@@ -92,12 +92,12 @@ TEST_F(TestSample, TopLevelNamespace) {
     ASSERT_FALSE(localTopLevelObject.pMock_);
 
     {
-        MOCK_OF(All) mock;
+        MOCK_OF(All) mock(all_Forwarder);
         all_Forwarder.TopLevelSampleFunc();
         all_Forwarder.pMock_ = &mock;
         all_Forwarder.TopLevelSampleFunc();
-        all_Forwarder.pMock_ = 0;
     }
+    ASSERT_FALSE(all_Forwarder.pMock_);
 }
 
 TEST_F(TestSample, SwapVariableCtorWithArg) {
