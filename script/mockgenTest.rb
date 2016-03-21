@@ -622,6 +622,26 @@ class TestStringOfParenthesis < Test::Unit::TestCase
   end
 end
 
+class TestStringOfAngleBrackets < Test::Unit::TestCase
+  data(
+    'empty' => ["", []],
+    'one' => ["<>", [["<>", ""]]],
+    'one+str1' => ["<typename T>", [["<typename T>", "typename T"]]],
+    'one+str2' => ["< typename T >", [["<typename T>", "typename T"]]],
+    'template empty' => ["template <>", [["template", nil], ["<>", ""]]],
+    'template one' => ["template <class T>", [["template", nil], ["<class T>", "class T"]]],
+    'template two' => ["template <class T, size_t S>",
+                       [["template", nil], ["<class T, size_t S>", "class T, size_t S"]]],
+    'specialized' => ["template <> class T<int>",
+                      [["template", nil], ["<>", ""], ["class", nil], ["T", nil], ["<int>", "int"]]],
+    'nested' => ["template <class T, class S = tmp<T>>",
+                 [["template", nil], ["<class T, class S = tmp<T>>", "class T, class S = tmp<T>"]]])
+  def test_splitByOuterAngleBrackets(data)
+    line, expected = data
+    assert_equal(expected, StringOfAngleBrackets.new(line).parse)
+  end
+end
+
 class TestTypedVariable < Test::Unit::TestCase
   data(
     'primitive1' => ["int a", "int", "a"],
@@ -856,6 +876,38 @@ class TestArgVariableSet < Test::Unit::TestCase
     assert_equal(expectedArgStrSet, argSetWithoutDefault)
     assert_equal(expectedArgTypeSet, argTypeSet)
     assert_equal(expectedArgNameSet, argNameSet)
+  end
+end
+
+class TestTemplateParameter < Test::Unit::TestCase
+  data(
+    'template class' => ['template <typename T> class Name',
+                         "typename T", nil, ["typename"], "T", "class Name", ""],
+    'default type' => ['template <typename T = int> class Name',
+                       "typename T", nil, ["typename"], "T", "class Name", ""],
+    'variadic template class1' => ['template <typename... Ts> class Name',
+                                   "typename... Ts", nil, ["typename"], "Ts...", "class Name", ""],
+    'variadic template class2' => ['template <typename ...Ts> class Name',
+                                   "typename ...Ts", nil, ["typename"], "Ts...", "class Name", ""],
+    'full specialization class' => ['template <> class Name<int>', "", "int", [], "", "class Name", ""],
+    'partial specialization class' => ['template <typename T, size_t I> class Name<T,8>',
+                                       "typename T, size_t I", "T,8", ["typename", "size_t"], "T,I", "class Name", ""],
+    'template function' => ['template <typename T> const T* func',
+                            "typename T", nil, ["typename"], "T", "const T* func", ""],
+    'variadic template function' => ['template <typename... Ts> const T* func',
+                                     "typename... Ts", nil, ["typename"], "Ts...", "const T* func", ""],
+    'specialization function' => ['template <> const T* func<int>()',
+                                  "", "int", [], "", "const T* func", "()"])
+  def test_parse(data)
+     line, generic, specialized, typenameSet, varSet, type, post = data
+
+     param = TemplateParameter.new(line)
+     assert_equal(generic, param.generic)
+     assert_equal(specialized, param.specialized)
+     assert_equal(typenameSet, param.typenameSet)
+     assert_equal(varSet, param.varSet)
+     assert_equal(type, param.type)
+     assert_equal(post, param.post)
   end
 end
 
@@ -1107,30 +1159,35 @@ end
 class TestConstructorBlock < Test::Unit::TestCase
   data(
     'no args' =>
-    ["NameC()", "", "", "", ""],
+    ["NameC()", "", "", "", "", "", ""],
     'one arg' =>
-    ["NameC(long a)", "long a", "long", ", long a", "NameC(a), "],
+    ["NameC(long a)", "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
     'two args' =>
     ["NameC(long a, const void* p)", "long a,const void* p", "long,const void *",
-     ", long a,const void* p", "NameC(a,p), "],
+     ", long a,const void* p", "", "a,p", "::A::NameC(a,p), "],
     'initializer list' =>
-    ["NameC(long a) : Base(a)", "long a", "long", ", long a", "NameC(a), "])
+    ["NameC(long a) : Base(a)", "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
+    'template' =>
+    ["NameC<T>(T* a) : Base(a)", "T* a", "T *", ", T* a", "<T>", "a", "::A::NameC<T>(a), "])
   def test_initializeAndAll(data)
-    line, expectedTASet, expectedATStr, expectedArgsBC, expectedCallBase = data
+    line, expectedTASet, expectedATStr, expectedArgsBC,
+    expectedTypeStr, expectedArgSet, expectedCallBase = data
     name = "NameC"
 
     block = ConstructorBlock.new(line, name)
-    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase = block.parse(line, name)
+    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSet = block.parse(line, name)
     assert_true(valid)
     assert_true(block.canTraverse?)
     assert_equal(expectedTASet, typedArgSet)
     assert_equal(expectedTASet, typedArgSetWithoutDefault)
     assert_equal(expectedATStr, argTypeStr)
-    assert_equal(expectedCallBase, callBase)
+    assert_equal(expectedTypeStr, typeStr)
+    assert_equal(expectedArgSet, argSet)
     assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
     assert_equal(expectedArgsBC, block.getTypedArgsWithoutValue)
-    assert_equal(expectedCallBase, block.getCallForBaseClassInitializer)
+    assert_equal("", block.getCallForBaseClassInitializer)
 
+    block.setBaseClassName("::A::NameC")
     className = "Dereived"
     initMember = "extra(0)"
     argStr = expectedTASet.empty? ? "void" : expectedTASet
@@ -1151,28 +1208,32 @@ class TestConstructorBlock < Test::Unit::TestCase
 
   data(
     'two args' =>
-    ["NameC(long a = 0, const void* p = void)",
+    ["NameC<T>(long a = 0, const void* p = void)",
      "long a = 0,const void* p = void",
      "long a,const void* p",
      "long,const void *",
      ", long a = 0,const void* p = void",
-     ", long a,const void* p", "NameC(a,p), "])
+     ", long a,const void* p",
+     "<T>", "a,p", "::A::NameC<T>(a,p), "])
   def test_initializeWithDefaultValue(data)
     line, expectedTypedArgSet, expectedTypedArgSetWithoutDefault, expectedArgTypeStr,
-    expectedTypedArgsForBaseClass, expectedTypedArgsWithoutValue, expectedCallBase = data
+    expectedTypedArgsForBaseClass, expectedTypedArgsWithoutValue,
+    expectedTypeStr, expectedArgSet, expectedCallBase = data
 
     name = "NameC"
     block = ConstructorBlock.new(line, name)
-    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase = block.parse(line, name)
+    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSet = block.parse(line, name)
     assert_true(valid)
     assert_equal(expectedTypedArgSet, typedArgSet)
     assert_equal(expectedTypedArgSetWithoutDefault, typedArgSetWithoutDefault)
     assert_equal(expectedArgTypeStr, argTypeStr)
-    assert_equal(expectedCallBase, callBase)
+    assert_equal(expectedTypeStr, typeStr)
+    assert_equal(expectedArgSet, argSet)
     assert_equal(expectedTypedArgsForBaseClass, block.getTypedArgsForBaseClass)
     assert_equal(expectedTypedArgsWithoutValue, block.getTypedArgsWithoutValue)
-    assert_equal(expectedCallBase, block.getCallForBaseClassInitializer)
+    assert_equal("", block.getCallForBaseClassInitializer)
 
+    block.setBaseClassName("::A::NameC")
     decoratorName = "Dereived"
     initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
     expected = "    #{decoratorName}(#{expectedTypedArgSet}) : " +
@@ -1511,10 +1572,14 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      block = MemberFunctionBlock.new(line + ";")
 
      assert_true(block.valid)
-     assert_equal(mock + ";\n", block.makeMockDef(className))
+     expectedMock = mock + ";\n"
+     assert_equal(expectedMock, block.makeMockDef(className, ""))
      assert_equal(stub, block.makeStubDef(className))
      assert_equal(decorator, block.makeDecoratorDef(className))
      assert_equal(forwarder, block.makeForwarderDef(className))
+
+     expected = expectedMock.gsub(/(METHOD\d)/, '\1_T')
+     assert_equal(expected, block.makeMockDef(className, "_T"))
   end
 
   def test_makeDefSetAlias(data)
@@ -1697,7 +1762,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     block = FreeFunctionBlock.new("extern int Func(int a);")
     assert_false(block.instance_variable_get(:@alreadyDefined))
 
-    assert_false(block.makeMockDef("").empty?)
+    assert_false(block.makeMockDef("", "").empty?)
     assert_false(block.makeStubDef("").empty?)
     assert_false(block.makeForwarderDef("").empty?)
 
@@ -1710,7 +1775,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref))
     assert_true(block.instance_variable_get(:@alreadyDefined))
 
-    assert_equal("", block.makeMockDef(""))
+    assert_equal("", block.makeMockDef("", ""))
     assert_equal("", block.makeStubDef(""))
     assert_equal("", block.makeForwarderDef(""))
   end
@@ -2042,29 +2107,37 @@ end
 
 class TestClassBlock < Test::Unit::TestCase
   data(
-    'base class' => ["class NameC", "", "NameC", "class", false, []],
-    'derived class' => ["class NameC : public Base", "", "NameC", "class", false, ["Base"]],
-    'derived struct' => ["struct NameS : Base", "", "NameS", "struct", true, ["Base"]])
+    'base class' => ["class NameC", "NameC", "class", false, []],
+    'derived class' => ["class NameC : public Base", "NameC", "class", false, ["Base"]],
+    'derived struct' => ["struct NameS : Base", "NameS", "struct", true, ["Base"]])
   def test_initializeAndParse(data)
-    line, templateHeader, name, typeName, pub, baseClassNameSet = data
-    block = ClassBlock.new(line + " {")
-    assert_true(block.instance_variable_get(:@valid))
-    assert_true(block.canTraverse?)
-    assert_true(block.isClass?)
+    line, name, typeName, pub, baseClassNameSet = data
 
-    assert_equal(name, block.getNamespace)
-    assert_equal(templateHeader, block.instance_variable_get(:@templateHeader))
-    assert_equal(name, block.instance_variable_get(:@name))
-    assert_equal(name, block.instance_variable_get(:@uniqueName))
+    ["", "template <typename T, size_t S> "].each do |header|
+      block = ClassBlock.new(header + line + " {")
+      assert_true(block.instance_variable_get(:@valid))
+      assert_true(block.canTraverse?)
+      assert_true(block.isClass?)
 
-    assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_MOCK}", block.mockName)
-    assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", block.decoratorName)
-    assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}", block.forwarderName)
+      assert_equal(name, block.getNamespace)
+      assert_equal(name, block.instance_variable_get(:@name))
+      assert_equal(name, block.instance_variable_get(:@uniqueName))
 
-    assert_equal(typeName, block.instance_variable_get(:@typename))
-    assert_equal(pub, block.instance_variable_get(:@pub))
-    assert_equal(!pub, block.instance_variable_get(:@private))
-    assert_equal(baseClassNameSet, block.instance_variable_get(:@baseClassNameSet))
+      assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_MOCK}", block.mockName)
+      assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", block.decoratorName)
+      assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}", block.forwarderName)
+
+      assert_equal(typeName, block.instance_variable_get(:@typename))
+      assert_equal(pub, block.instance_variable_get(:@pub))
+      assert_equal(!pub, block.instance_variable_get(:@private))
+      assert_equal(baseClassNameSet, block.instance_variable_get(:@baseClassNameSet))
+
+      if header.empty?
+        assert_nil(block.instance_variable_get(:@templateParam))
+      else
+        assert_not_nil(block.instance_variable_get(:@templateParam))
+      end
+    end
   end
 
   def test_initializeInnerClass
@@ -2082,17 +2155,9 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_FORWARDER}", innerBlockA.forwarderName)
   end
 
-  # Template is not supported yet
-  data(
-    'template class' => [
-      "template <typename T> class NameC : public B", "template <typename T>",
-      "NameC", "class", false, ["B"]],
-    'template class multi types' => [
-      "template <typename T, typename S> struct StructName : private B, protected C, public D, E",
-      "template <typename T, typename S>", "StructName", "struct", true, ["D", "E"]])
-  def test_initializeAndParseTemplate(data)
-    line, templateHeader, name, typeName, pub, baseClassNameSet = data
-    block = ClassBlock.new(line + " {")
+  # Partial template specialization is not supported
+  def test_initializeAndParseTemplate
+    block = ClassBlock.new("template <> class NameC<T> {")
     assert_false(block.canTraverse?)
     assert_false(block.isClass?)
   end
@@ -2338,7 +2403,13 @@ class TestClassBlock < Test::Unit::TestCase
 
     block.instance_variable_set(:@name, "ClassName")
     assert_equal("::A::ClassName", block.getFullname)
-    block.instance_variable_set(:@templateHeader, "template <size_t N>")
+
+    param = Object.new
+    def param.generic
+      "size_t N"
+    end
+
+    block.instance_variable_set(:@templateParam, param)
     assert_equal("template <size_t N> ::A::ClassName", block.getFullname)
   end
 
@@ -2367,39 +2438,50 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   data(
-    'class' => ["class ClassName", "", "ClassName", "class", false],
-    'struct' => ["struct StructName", "", "StructName", "struct", true],
+    'class' => ["class ClassName", false, "ClassName", "class", false],
+    'struct' => ["struct StructName", false, "StructName", "struct", true],
     'template class' => ["template <typename T> class ClassName",
-                         "template <typename T>", "ClassName", "class", false],
+                         true, "ClassName", "class", false],
     'template struct' => ["template <typename T, typename S> struct StructName",
-                          "template <typename T, typename S>", "StructName", "struct", true])
+                          true, "StructName", "struct", true])
   def test_parseClassName(data)
-    line, th, name, tn, pub = data
+    line, isTemplate, name, typename, pub = data
     block = ClassBlock.new("")
     assert_true(block.parseClassName(line))
-    assert_equal(th, block.instance_variable_get(:@templateHeader))
+
+    if isTemplate
+      assert_not_nil(block.instance_variable_get(:@templateParam))
+    else
+      assert_nil(block.instance_variable_get(:@templateParam))
+    end
+
     assert_equal(name, block.instance_variable_get(:@name))
 
     assert_equal(name + Mockgen::Constants::CLASS_POSTFIX_MOCK, block.instance_variable_get(:@mockName))
     assert_equal(name + Mockgen::Constants::CLASS_POSTFIX_DECORATOR, block.instance_variable_get(:@decoratorName))
     assert_equal(name + Mockgen::Constants::CLASS_POSTFIX_FORWARDER, block.instance_variable_get(:@forwarderName))
 
-    assert_equal(tn, block.instance_variable_get(:@typename))
+    assert_equal(typename, block.instance_variable_get(:@typename))
     assert_equal(pub, block.instance_variable_get(:@pub))
     assert_equal(!pub, block.instance_variable_get(:@private))
   end
 
   data(
-    'class' => ["class", ""],
-    'template class' => ["template <typename T> class", "template <typename T>"])
+    'class' => ["class", false],
+    'template class' => ["template <typename T> class", true])
   def test_parseClassNameWithExtraWord(data)
-    line, header = data
+    line, isTemplate = data
     [" ", " attr_added", " attr added"].each do |extra|
       name = "ClassName"
       block = ClassBlock.new("")
       assert_true(block.parseClassName(line + extra + " " + name))
-      assert_equal(header, block.instance_variable_get(:@templateHeader))
       assert_equal(name, block.instance_variable_get(:@name))
+
+      if isTemplate
+        assert_not_nil(block.instance_variable_get(:@templateParam))
+      else
+        assert_nil(block.instance_variable_get(:@templateParam))
+      end
     end
   end
 
@@ -2451,7 +2533,8 @@ class TestClassBlock < Test::Unit::TestCase
     'void2' => " NameC () = default",
     'void3' => " NameC ( void ) = default",
     'one' => "NameC(int a)",
-    'two' => " NameC ( int a, const void* p )")
+    'two' => " NameC ( int a, const void* p )",
+    'template' => " NameC<T>(T& arg)")
   def test_isConstructor?(data)
     line = data
     block = ClassBlock.new("class NameC")
@@ -2486,22 +2569,6 @@ class TestClassBlock < Test::Unit::TestCase
     line = data
     block = ClassBlock.new("class NameC")
     assert_false(block.isPointerToFunction?(line))
-  end
-
-  data(
-    'empty' => ["", "::A::ClassName"],
-    'template' => ["template <typename T>", "::A::ClassName<T>"],
-    'template multi types' => ["template <typename T, size_t N>", "::A::ClassName<T, N>"])
-  def test_getTypedFullname(data)
-    th, expected = data
-    nsBlock = NamespaceBlock.new("namespace A")
-    block = ClassBlock.new("")
-    nsBlock.connect(block)
-
-    className = "ClassName"
-    block.instance_variable_set(:@name, className)
-    block.instance_variable_set(:@templateHeader, th)
-    assert_equal(expected, block.getTypedFullname)
   end
 
   def test_getNonTypedFullname
@@ -2666,7 +2733,8 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   def getClassBlockToFormat(baseName, trivialConstructor)
-    block = ClassBlock.new("class Tested : public Base")
+    name = "Tested"
+    block = ClassBlock.new("class #{name} : public Base")
     blockBase = ClassBlock.new("class #{baseName}")
     table = { "Base" => blockBase }
     block.setBaseClass(table)
@@ -2675,8 +2743,11 @@ class TestClassBlock < Test::Unit::TestCase
       block.parseChildren("public:")
       constructorVoid = block.parseChildren("Tested(void);")
       constructorArg1 = block.parseChildren("Tested(int a);")
-      block.connect(constructorVoid)
-      block.connect(constructorArg1)
+
+      [constructorVoid, constructorArg1].each do |constructor|
+        constructor.setBaseClassName(name)
+        block.connect(constructor)
+      end
     end
 
     func = MemberFunctionBlock.new("void Func()")
@@ -2695,9 +2766,11 @@ class TestClassBlock < Test::Unit::TestCase
     funcVoid = block.parseChildren("#{name}(void)")
     funcArg1 = block.parseChildren("#{name}(int a)")
     funcArg2 = block.parseChildren("#{name}(int a, int b = 0)")
-    block.connect(funcVoid)
-    block.connect(funcArg1)
-    block.connect(funcArg2)
+
+    [funcVoid, funcArg1, funcArg2].each do |func|
+      func.setBaseClassName(name)
+      block.connect(func)
+    end
     block
   end
 
@@ -2735,6 +2808,26 @@ class TestClassBlock < Test::Unit::TestCase
     return block, blockBase
   end
 
+  def getTemplateClassBlock(name)
+    block = ClassBlock.new("template <typename T> class #{name} {")
+    assert_not_nil(block.instance_variable_get(:@templateParam))
+
+    block.parseChildren("public:")
+    constructorVoid = block.parseChildren("#{name}<T>(void);")
+    constructorArg1 = block.parseChildren("#{name}<T>(int a);")
+    memfunc = block.parseChildren("virtual void Func(void);")
+
+    [constructorVoid, constructorArg1].each do |func|
+      func.setBaseClassName(name)
+    end
+
+    [constructorVoid, constructorArg1, memfunc].each do |func|
+      block.connect(func)
+    end
+
+    block
+  end
+
   def test_formatMockClass
     baseName = "BaseClass"
     mockName = "Mock"
@@ -2743,7 +2836,7 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
     block = getClassBlockToFormat(baseName, true)
 
-    actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
+    actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     expected =  "class #{decoratorName};\n"
     expected += "class #{forwarderName};\n"
     expected += "class #{mockName} : public #{testedName} {\n"
@@ -2776,7 +2869,8 @@ class TestClassBlock < Test::Unit::TestCase
                 "    if (pDecorator_ && (pDecorator_->pMock_ == this)) { pDecorator_->pMock_ = 0; }\n"
     expected += "    if (pDecorator_ && (pDecorator_->pClassMock_ == this)) { pDecorator_->pClassMock_ = 0; }\n"
     expected += "    if (pForwarder_ && (pForwarder_->pMock_ == this)) { pForwarder_->pMock_ = 0; }\n}\n\n"
-    assert_equal(expected, actualDef)
+    assert_equal("", actualHpp)
+    assert_equal(expected, actualCpp)
   end
 
   def test_formatMockClassWithArgs
@@ -2787,7 +2881,7 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
 
     block = getClassBlockWithConstructorArgs(name)
-    actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
+    actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     ["#{mockName}(#{decoratorName}* pDecorator)",
      "#{mockName}(#{decoratorName}& decorator)",
      "#{mockName}(#{forwarderName}* pForwarder)",
@@ -2797,7 +2891,8 @@ class TestClassBlock < Test::Unit::TestCase
      "#{mockName}(#{forwarderName}* pForwarder, int a)",
      "#{mockName}(#{forwarderName}& forwarder, int a)"].each do |expected|
       assert_true(actualDecl.include?(expected))
-      assert_true(actualDef.include?(expected))
+      assert_equal("", actualHpp)
+      assert_true(actualCpp.include?(expected))
     end
 
     ["#{mockName}(#{decoratorName}* pDecorator, int a,int b = 0)",
@@ -2811,15 +2906,15 @@ class TestClassBlock < Test::Unit::TestCase
      "#{mockName}(#{decoratorName}& decorator, int a,int b)",
      "#{mockName}(#{forwarderName}* pForwarder, int a,int b)",
      "#{mockName}(#{forwarderName}& forwarder, int a,int b)"].each do |expected|
-      assert_true(actualDef.include?(expected))
+      assert_true(actualCpp.include?(expected))
     end
 
-    ["#{name}(a), pDecorator_(pDecorator), pForwarder_(0)",
-     "#{name}(a), pDecorator_(&decorator), pForwarder_(0)",
-     "#{name}(a), pDecorator_(0), pForwarder_(pForwarder)",
-     "#{name}(a), pDecorator_(0), pForwarder_(&forwarder)",
+    ["#{testedName}(a), pDecorator_(pDecorator), pForwarder_(0)",
+     "#{testedName}(a), pDecorator_(&decorator), pForwarder_(0)",
+     "#{testedName}(a), pDecorator_(0), pForwarder_(pForwarder)",
+     "#{testedName}(a), pDecorator_(0), pForwarder_(&forwarder)",
     ].each do |expected|
-      assert_true(actualDef.include?(expected))
+      assert_true(actualCpp.include?(expected))
     end
   end
 
@@ -2845,7 +2940,7 @@ class TestClassBlock < Test::Unit::TestCase
     refSet = TestMockRefSetClass.new(true, [refFunc, refDestructor, refVar])
     block.filterByReferenceSet(nil, refSet)
 
-    actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
+    actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_equal(expectedStub, block.formatStub)
 
     # Filter the derived class
@@ -2883,16 +2978,18 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    if (pForwarder_ && (pForwarder_->pMock_ == this)) { pForwarder_->pMock_ = 0; }\n}\n\n"
     expected += expectedFuncStub
     expected += expectedVarStub
-    assert_equal(expected, actualDef)
+    assert_equal("", actualHpp)
+    assert_equal(expected, actualCpp)
     assert_true(block.canTraverse?)
 
     # Do not filter the base class
     blockBase.filterByReferenceSet(nil, refSet)
-    actualDecl, actualDef = blockBase.formatMockClass(mockName, decoratorName, forwarderName, baseName)
+    actualDecl, actualHpp, actualCpp = blockBase.formatMockClass(mockName, decoratorName, forwarderName, baseName)
     assert_equal(2, actualDecl.scan("FuncStub").size)
     assert_equal(1, actualDecl.scan("FuncOther").size)
-    assert_equal(1, actualDef.scan("FuncStub").size)
-    assert_false(actualDef.include?("FuncOther"))
+    assert_equal(1, actualCpp.scan("FuncStub").size)
+    assert_equal("", actualHpp)
+    assert_false(actualCpp.include?("FuncOther"))
     assert_true(blockBase.canTraverse?)
   end
 
@@ -2932,6 +3029,65 @@ class TestClassBlock < Test::Unit::TestCase
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_true(block.canTraverse?)
     assert_true(blockBase.canTraverse?)
+  end
+
+  def test_formatMockTemplateClass
+    mockName = "Mock"
+    decoratorName = "Decorator"
+    forwarderName = "Forwarder"
+    decoratorType = decoratorName + "<T>"
+    forwarderType = forwarderName + "<T>"
+    testedName = "Tested"
+
+    block = getTemplateClassBlock(testedName)
+    assert_true(block.canTraverse?)
+
+    actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
+    expected =  "template <typename T> class #{decoratorName};\n"
+    expected += "template <typename T> class #{forwarderName};\n"
+    expected += "template <typename T> class #{mockName} : public #{testedName}<T> {\n"
+    expected += "public:\n"
+    expected += "    #{mockName}(#{decoratorType}* pDecorator);\n"
+    expected += "    #{mockName}(#{decoratorType}& decorator);\n"
+    expected += "    #{mockName}(#{forwarderType}* pForwarder);\n"
+    expected += "    #{mockName}(#{forwarderType}& forwarder);\n"
+    expected += "    #{mockName}(#{decoratorType}* pDecorator, int a);\n"
+    expected += "    #{mockName}(#{decoratorType}& decorator, int a);\n"
+    expected += "    #{mockName}(#{forwarderType}* pForwarder, int a);\n"
+    expected += "    #{mockName}(#{forwarderType}& forwarder, int a);\n"
+    expected += "    ~#{mockName}(void);\n"
+    expected += "    MOCK_METHOD0_T(Func,void());\n"
+    expected += "private:\n"
+    expected += "    #{decoratorType}* pDecorator_;\n"
+    expected += "    #{forwarderType}* pForwarder_;\n"
+    expected += "};\n\n"
+    assert_equal(expected, actualDecl)
+
+    expected =  "template <typename T> #{mockName}<T>::#{mockName}(#{decoratorType}* pDecorator) : " +
+                "pDecorator_(pDecorator), pForwarder_(0) { pDecorator_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{decoratorType}& decorator) : " +
+                "pDecorator_(&decorator), pForwarder_(0) { pDecorator_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{forwarderType}* pForwarder) : " +
+                "pDecorator_(0), pForwarder_(pForwarder) { pForwarder_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{forwarderType}& forwarder) : " +
+                "pDecorator_(0), pForwarder_(&forwarder) { pForwarder_->pMock_ = this; }\n"
+
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{decoratorType}* pDecorator, int a) : " +
+                "#{testedName}<T>(a), pDecorator_(pDecorator), pForwarder_(0) { pDecorator_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{decoratorType}& decorator, int a) : " +
+                "#{testedName}<T>(a), pDecorator_(&decorator), pForwarder_(0) { pDecorator_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{forwarderType}* pForwarder, int a) : " +
+                "#{testedName}<T>(a), pDecorator_(0), pForwarder_(pForwarder) { pForwarder_->pMock_ = this; }\n"
+    expected += "template <typename T> #{mockName}<T>::#{mockName}(#{forwarderType}& forwarder, int a) : " +
+                "#{testedName}<T>(a), pDecorator_(0), pForwarder_(&forwarder) { pForwarder_->pMock_ = this; }\n"
+
+
+    expected += "template <typename T> #{mockName}<T>::~#{mockName}(void) {\n" +
+                "    if (pDecorator_ && (pDecorator_->pMock_ == this)) { pDecorator_->pMock_ = 0; }\n"
+    expected += "    if (pDecorator_ && (pDecorator_->pClassMock_ == this)) { pDecorator_->pClassMock_ = 0; }\n"
+    expected += "    if (pForwarder_ && (pForwarder_->pMock_ == this)) { pForwarder_->pMock_ = 0; }\n}\n\n"
+    assert_equal(expected, actualHpp)
+    assert_equal("", actualCpp)
   end
 
   def test_formatDecoratorClass
@@ -2977,6 +3133,26 @@ class TestClassBlock < Test::Unit::TestCase
      end
   end
 
+  def test_formatDecoratorTemplateClass
+    mockName = "Mock"
+    decoratorName = "Decorator"
+    testedName = "Tested"
+    block = getTemplateClassBlock(testedName)
+
+    actual = block.formatDecoratorClass(decoratorName, mockName, testedName)
+    expected  = "template <typename T> class #{decoratorName} : public #{testedName}<T> {\n"
+    expected += "public:\n"
+    expected += "    #{decoratorName}(void) : pMock_(0) {}\n"
+    expected += "    #{decoratorName}(int a) : #{testedName}<T>(a), pMock_(0) {}\n"
+    expected += "    virtual ~#{decoratorName}(void) {}\n"
+    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+                "#{testedName}<T>::Func(); }\n"
+    expected += "    #{mockName}<T>* pMock_;\n"
+    expected += "    static Mock<T>* pClassMock_;\n"
+    expected += "};\n\n"
+    assert_equal(expected, actual)
+  end
+
   def test_formatForwarderClass
     baseName = "BaseClass"
     mockName = "Mock"
@@ -3002,6 +3178,28 @@ class TestClassBlock < Test::Unit::TestCase
                 "return static_cast<#{baseName}*>(pActual_)->Other(a,b); }\n"
     expected += "    #{testedName}* pActual_;\n"
     expected += "    #{mockName}* pMock_;\n"
+    expected += "};\n\n"
+    assert_equal(expected, actual)
+  end
+
+  def test_formatForwarderTemplateClass
+    mockName = "Mock"
+    forwarderName = "Forwarder"
+    testedName = "Tested"
+    block = getTemplateClassBlock(testedName)
+
+    actual = block.formatForwarderClass(forwarderName, mockName, testedName)
+    expected =  "template <typename T> class #{forwarderName} : public #{testedName}<T> {\n"
+    expected += "public:\n"
+    expected += "    #{forwarderName}(#{testedName}<T>* pActual) : pActual_(pActual), pMock_(0) {}\n"
+    expected += "    #{forwarderName}(#{testedName}<T>* pActual,int a) : Tested<T>(a), pActual_(pActual), pMock_(0) {}\n"
+    expected += "    #{forwarderName}(#{testedName}<T>& actual) : pActual_(&actual), pMock_(0) {}\n"
+    expected += "    #{forwarderName}(#{testedName}<T>& actual,int a) : Tested<T>(a), pActual_(&actual), pMock_(0) {}\n"
+    expected += "    virtual ~#{forwarderName}(void) {}\n"
+    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+                "static_cast<#{testedName}<T>*>(pActual_)->Func(); }\n"
+    expected += "    #{testedName}<T>* pActual_;\n"
+    expected += "    #{mockName}<T>* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, actual)
   end
@@ -3093,7 +3291,34 @@ class TestClassBlock < Test::Unit::TestCase
   def test_collectMockDef
     lambdaCheck1 = lambda { |actual, funcLine| actual.include?("Func") }
     lambdaCheck2 = lambda { |actual, funcBaseLine| actual.include?("Other") }
-    checkCollectDef(:collectMockDef, lambdaCheck1, lambdaCheck2)
+    postfix = "_EXTRA"
+
+    block, func, funcLine = getClassBlockToCollect
+    actual = block.collectMockDef([], postfix)
+    assert_equal(1, actual.lines.count)
+    assert_true(lambdaCheck1.call(actual, funcLine))
+    assert_equal("", block.collectMockDef([func], postfix))
+
+    blockBase, funcBaseLine = connectFunctionBlockToCollect(block)
+    actual = block.collectMockDef([], postfix)
+    assert_equal(2, actual.lines.count)
+    assert_true(lambdaCheck2.call(actual, funcBaseLine))
+
+    connectMemberFunctionBlockToCollect(blockBase, funcLine)
+    actual = block.collectMockDef([], postfix)
+    assert_equal(2, actual.lines.count)
+
+    funcNotOverriden = MemberFunctionBlock.new(funcLine + " const")
+    assert_not_equal("", block.collectMockDef([funcNotOverriden], postfix))
+    blockBase.connect(funcNotOverriden)
+    addMemberFunction(blockBase, funcNotOverriden)
+    actual = block.collectMockDef([], postfix)
+    assert_equal(3, actual.lines.count)
+
+    connectFuncConstNotOverriden(blockBase)
+    actual = block.collectMockDef([], postfix)
+    assert_equal(4, actual.lines.count)
+    assert_true(actual.include?(postfix))
   end
 
   def test_collectDecoratorDef
@@ -3113,7 +3338,7 @@ class TestClassBlock < Test::Unit::TestCase
     ["public:", "void FuncPublic();", "protected:", "void FuncProtected();",
      "private:", "virtual void FuncPrivate();", "void Impl();"].each do |line|
       funcBlock = block.parseChildren(line)
-      def funcBlock.makeMockDef(name)
+      def funcBlock.makeMockDef(name, postfix)
         "a"
       end
 
@@ -3126,7 +3351,7 @@ class TestClassBlock < Test::Unit::TestCase
       end
     end
 
-    assert_equal(3, block.collectMockDef([]).size)
+    assert_equal(3, block.collectMockDef([], "").size)
     assert_equal(2, block.collectDecoratorDef([]).size)
     assert_equal(1, block.collectForwarderDef([]).size)
   end
@@ -3150,9 +3375,99 @@ class TestClassBlock < Test::Unit::TestCase
       true
     end
 
-    lambdaCheck = lambda { |n| puts n; true }
-    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck, :checkFunc)
+    lambdaCheck = lambda { |n| true }
+    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck, :checkFunc, "")
     assert_equal("    MOCK_METHOD0(FuncBase,void());\n", str)
+  end
+
+  def test_collectTemplateClassDef
+    funcBaseLine = "virtual void FuncBase()"
+    funcBase = MemberFunctionBlock.new(funcBaseLine)
+    blockBase = ClassBlock.new("class BaseA")
+    blockBase.connect(funcBase)
+    addMemberFunction(blockBase, funcBase)
+
+    funcLine = "virtual int Func(int a)"
+    func = MemberFunctionBlock.new(funcLine)
+    block = ClassBlock.new("template <typename T> class BaseD")
+    block.instance_variable_set(:@baseClassBlockSet, [blockBase])
+    block.connect(func)
+    addMemberFunction(block, func)
+
+    def block.checkFunc(func)
+      true
+    end
+
+    lambdaCheck = lambda { |n| true }
+    str = block.collectMockDef([], "_T")
+    assert_equal("    MOCK_METHOD1_T(Func,int(int a));\n    MOCK_METHOD0_T(FuncBase,void());\n", str)
+  end
+
+  data(
+    'not template' => ["class Name", "class Name : public BaseName", "Name"],
+    'one param' => ["template <typename T> class Name",
+                    "template <typename T> class Name : public BaseName<T>", "Name<T>"],
+    'param set' => ["template <typename T, size_t S> class Name",
+                    "template <typename T, size_t S> class Name : public BaseName<T,S>", "Name<T,S>"])
+  def test_getClassDefinition(data)
+    line, expected, expectedTyped = data
+    isTemplate = line.include?("template")
+    templateParam = TemplateParameter.new(line)
+    argTemplate = isTemplate ? templateParam : nil
+
+    block = ClassBlock.new("")
+    assert_equal(expected, block.getClassDefinition(argTemplate, "Name", "BaseName"))
+
+    pos = expected.index(":")
+    expectedStr = expected[0..(pos-2)]
+    assert_equal(expectedStr, block.getTemplateDeclaration(argTemplate, "Name"))
+
+    pos = expected.index(" class")
+    expectedStr = pos ? (expected[0..(pos-1)] + " ") : ""
+    assert_equal(expectedStr, block.getTemplateHeader(argTemplate))
+    assert_equal(expectedTyped, block.getTypedTemplate(argTemplate, "Name"))
+
+    unless argTemplate
+      actual = block.getVariableDefinitionExample(argTemplate, "Name", "Decorator", nil, nil)
+      assert_true(actual.include?("#{expectedTyped}* Decorator::pClassMock_;\n"))
+      assert_equal(isTemplate, actual.include?("//"))
+    end
+  end
+
+  def test_getDefinitionExample
+    block = ClassBlock.new("class NameA")
+    templateParam = TemplateParameter.new("template <class C, typename T, size_t S, typename ...Ts> class NameA")
+    mockName = "MA"
+    decoratorName = "DA"
+    forwarderName = "FA"
+    fullname = "::NS::NameA"
+
+    expected =  "/* Tester must define these types and variables\n"
+    expected += "using DataType1 = int; (or other appropriate type)\n"
+    expected += "using DataType2 = int; (or other appropriate type)\n"
+    expected += "++ set an appropriate value to type parameter 3 ++\n"
+    expected += "using DataType4 = int; (or other appropriate type)\n"
+    expected += " ** Class (static) variable template **\n"
+    expected += "template <class C, typename T, size_t S, typename ...Ts> MA<C,T,S,Ts...>* DA<C,T,S,Ts...>::pClassMock_;\n"
+    expected += " ** Specialized class template to test **\n"
+    expected += "template class ::NS::NameA<DataType1,DataType2,3,DataType4>;\n"
+    expected += " ** Generated classes**\n"
+    expected += "namespace MyUnittest {\n"
+    expected += " ** Specialized class variable in the decorator class template **\n"
+    expected += "    template MA<DataType1,DataType2,3,DataType4>* DA<DataType1,DataType2,3,DataType4>::pClassMock_;\n"
+    expected += "}\n"
+    expected += " ** Type aliases in a test fixture **\n"
+    expected += "    using Tested = ::NS::NameA<DataType1,DataType2,3,DataType4>;\n"
+    expected += "    using Decorator = MyUnittest::DA<DataType1,DataType2,3,DataType4>;\n"
+    expected += "    using Forwarder = MyUnittest::FA<DataType1,DataType2,3,DataType4>;\n"
+    expected += "    using Mock = MyUnittest::MA<DataType1,DataType2,3,DataType4>;\n"
+    expected += "*/\n"
+    expected += "\n"
+
+    actual = block.getVariableDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname)
+    assert_equal(expected, actual)
+    actual = block.getDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname)
+    assert_equal(expected, actual)
   end
 
   # Test makeClassSet in testing CppFileParser
@@ -3191,9 +3506,8 @@ class TestBlockFactory < Test::Unit::TestCase
     innerClassBlock = factory.createBlock(line, classBlock)
     assert_true(innerClassBlock.isClass?)
 
-    # Template is not supported yet
     line = "template <typename T> class ClassName {"
-    assert_false(factory.createBlock(line, rootBlock).isClass?)
+    assert_true(factory.createBlock(line, rootBlock).isClass?)
 
     line = "typedef unsigned int uint32_tj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse?)

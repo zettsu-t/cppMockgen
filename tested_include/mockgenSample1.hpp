@@ -62,6 +62,26 @@ namespace Sample1 {
         private:
             int value_;
         };
+
+        template <typename T=unsigned long long>
+        class TypedClass : private boost::noncopyable {
+        public:
+            TypedClass(const T& arg) : data_(arg) {}
+            T Get(void) const { return data_; }
+        private:
+            T data_;
+        };
+
+        template <size_t S, size_t V, typename... Ts>
+        class VariadicClass : private boost::noncopyable {
+        public:
+            VariadicClass(void) : sizeS_(S), sizeV_(V), sizeTs_(sizeof...(Ts)) {}
+            size_t Get(void) const { return sizeS_ + sizeV_ * sizeTs_; }
+        private:
+            size_t sizeS_;
+            size_t sizeV_;
+            size_t sizeTs_;
+        };
     }
 
     namespace Vars {

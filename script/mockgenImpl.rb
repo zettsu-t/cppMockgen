@@ -37,13 +37,18 @@
 #  - All comments are removed.
 #  - Nesting depth of a block and its indent spaces do not match.
 #
+#  Support for class template is limited. This script ignores
+#  implicit and explicit instantiation of template so does not
+#  determine for which types it must be instantiated.
+#  Testers have to instantiate a templates and its mock manually.
+#
 #  Filter out data structures that this script do not handle.
-#  - User-defined types except simple (not template) class and struct
 #  - Standard C++, Boost C++, Google Test/Mock headers.
 #  - Compiler internal symbols that contains double underline (__)
 #
-#  Filter free functions by the arguments at launch this script to
-#  exclude system functions such as C library and thread libraries.
+#  Filter non-template free functions by the arguments at launch this
+#  script to exclude system functions such as C library and thread
+#  libraries.
 #
 #  Abandon data structures unused later steps in this step because
 #  standard C++ and Boost C++ headers are large.
@@ -479,24 +484,51 @@ module Mockgen
     end
   end
 
-  # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]]
+  class StringOfBrackets
+    def initialize(line)
+      @line = line
+    end
+
+    def parse(splitRegex, spaceRegex)
+      # Recursive regular expresstion to split () (()) () ...
+      pattern = Regexp.new(splitRegex)
+      phraseSet = @line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+
+      # Remove spaces between parenthesis
+      spacePattern = Regexp.new(spaceRegex)
+      phraseSet.map do |phrase, captured|
+        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
+        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
+        [left, right]
+      end
+    end
+  end
+
+  # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]
   class StringOfParenthesis
     def initialize(line)
       @line = line
     end
 
     def parse
-      # Recursive regular expresstion to split () (()) () ...
-      pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
-      phraseSet = @line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+      pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
+      StringOfBrackets.new(@line).parse(pattern, '\s*(\(|\))\s*')
+    end
+  end
 
-      # Remove spaces between parenthesis
-      spacePattern = Regexp.new('\s*(\(|\))\s*')
-      phraseSet.map do |phrase, captured|
-        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
-        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
-        [left, right]
-      end
+  # Split "template <> class Name<T>" into
+  #   [["template ", nil], ["<>", ""], [" class Name", nil], ["<T>", "T"]]
+  # and "template <typename T, typename U = V<S>>" into
+  #   [["template ", nil], ["<typename T, typename U = V<S>>", "typename T, typename U = V<S>"]]
+  class StringOfAngleBrackets
+    def initialize(line)
+      # split >> into "> >"
+      @line = line.gsub(/([<>])/, ' \1 ')
+    end
+
+    def parse
+      pattern = '((?>[^\s<]+|(<(?>[^<>]+|\g<-1>)*>))+)'
+      StringOfBrackets.new(@line).parse(pattern, '\s*(<|>)\s*')
     end
   end
 
@@ -694,6 +726,67 @@ module Mockgen
     end
   end
 
+  # Class and function template
+  class TemplateParameter
+    attr_reader :generic, :specialized, :typenameSet, :varSet, :type, :post
+
+    def initialize(line)
+      @generic = nil
+      @specialized = nil
+      @typenameSet = []
+      @varSet = ""
+      @type = ""
+      @post = ""
+      parse(line)
+    end
+
+    # Split template
+    def parse(line)
+      phraseSet = StringOfAngleBrackets.new(line).parse
+      return if (phraseSet.size < 3)
+      return if phraseSet[0][0].strip != "template"
+
+      generic = nil
+      typeStrSet = []
+      postStrSet = []
+      phraseSet.shift
+      phraseSet.each do |phraseStr, phraseInBlackets|
+        if phraseInBlackets.nil?
+          str = phraseStr.strip
+          if @specialized.nil?
+            typeStrSet << str
+          else
+            postStrSet << str
+          end
+        else
+          str = phraseInBlackets.strip
+          if generic.nil?
+            generic = str
+          elsif @specialized.nil?
+            @specialized = str
+          end
+        end
+      end
+
+      generic ||= ""
+      genericSet = []
+      @varSet = generic.split(",").map do |str|
+        # Delete default type if specified
+        phrase = ChompAfterDelimiter.new(str.strip, "=").str
+        genericSet << phrase
+        wordSet = phrase.split(/[\s\.]+/)
+        postfix = str.include?("...") ? "..." : ""
+        # Treat typename as typename...
+        @typenameSet << wordSet[0]
+        wordSet.empty? ? "" : (wordSet[-1] + postfix)
+      end.join(",")
+
+      @generic = genericSet.join(", ")
+      @type = typeStrSet.join(" ")
+      @post = postStrSet.join(" ")
+    end
+  end
+
   # External or class member variable (not extern typename)
   class VariableStatement < BaseBlock
     # the className is CV removed and dereferenced
@@ -884,11 +977,23 @@ module Mockgen
     def initialize(line, className)
       super(line)
       @className = className
-      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @callBase = parse(line, className)
+      @callBase = ""
+      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSet = parse(line, className)
     end
 
     def parse(line, className)
-      phrase = removeInitializerList(line)
+      # Accept Constructor<T>(T& arg)
+      elementSet = []
+      typeStr = ""
+      StringOfAngleBrackets.new(line).parse.each do |element, inBlacket|
+        if inBlacket.nil?
+          elementSet << element
+        else
+          typeStr = element if typeStr.empty?
+        end
+      end
+
+      phrase = removeInitializerList(elementSet.join(" "))
       valid = false
       typedArgSet = ""
       typedArgSetWithoutDefault = ""
@@ -903,13 +1008,10 @@ module Mockgen
         typedArgSetWithoutDefault = argVariableSet.argSetWithoutDefault
         argSet = argVariableSet.argNameStr
         argTypeStr = argVariableSet.argTypeStr
-
-        # Add a comma to cascade other initializer arguments
-        callBase = (argSet.empty?) ? "" : "#{className}(#{argSet}), "
         valid = true
       end
 
-      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, callBase]
+      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSet]
     end
 
     def removeInitializerList(line)
@@ -925,6 +1027,11 @@ module Mockgen
       undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
         FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
       end
+    end
+
+    def setBaseClassName(className)
+      # Add a comma to cascade other initializer arguments
+      @callBase = (@argSet.empty?) ? "" : "#{className}#{@typeStr}(#{@argSet}), "
     end
 
     # Non default constructive base classes are not supported yet
@@ -1064,14 +1171,14 @@ module Mockgen
       end
     end
 
-    def makeMockDef(className)
+    def makeMockDef(className, postfix)
       constStr = (@constMemfunc) ? "_CONST" : ""
 
       numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 
-      str = "    MOCK#{constStr}_METHOD#{numberOfArgs}"
+      str = "    MOCK#{constStr}_METHOD#{numberOfArgs}#{postfix}"
       str += "(#{@funcName},#{@returnType}(#{@typedArgSetWithoutDefault}));\n"
       str
     end
@@ -1280,7 +1387,7 @@ module Mockgen
       @valid
     end
 
-    def makeMockDef(className)
+    def makeMockDef(className, postfix)
       @alreadyDefined ? "" : super
     end
 
@@ -1400,7 +1507,7 @@ module Mockgen
         str += "    ~#{mockClassName}(void);\n"
 
         str += @funcSet.map do |func|
-          func.valid ? func.makeMockDef(mockClassName) : ""
+          func.valid ? func.makeMockDef(mockClassName, "") : ""
         end.join("")
 
         str += "private:\n"
@@ -1473,7 +1580,7 @@ module Mockgen
 
     def initialize(line)
       super
-      @templateHeader = "" # Template <T...>
+      @templateParam = nil # Template <T...>
       @name = ""           # Class name
       @mockName = ""
       @decoratorName = ""
@@ -1492,12 +1599,8 @@ module Mockgen
         body = md[1]
       end
 
-      # Template is not supported yet
-      @valid = false
-      unless body.match(/^\s*template\s+/)
-        # Determine whether this block can be handled after parsed
-        @valid = parseClassName(body)
-      end
+      # Determine whether this block can be handled after parsed
+      @valid = parseClassName(body)
 
       # One or more constructors
       @destructor = nil
@@ -1623,8 +1726,12 @@ module Mockgen
       false
     end
 
+    # Accept Constructor<T>(T& arg)
     def isConstructor?(line)
-      line.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
+      str = StringOfAngleBrackets.new(line).parse.select do |element|
+        element[1].nil?
+      end.join(" ")
+      str.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
     end
 
     # Treat type(*func)(args...) as a variable having a function pointer
@@ -1641,11 +1748,11 @@ module Mockgen
     end
 
     def getStringToClassFile
-      @mockClassDef + @decoratorClassDef
+      @mockClassDef + @decoratorClassDef + @classDefInHpp
     end
 
     def getStringToSourceFile
-      @staticMockDef + @mockClassFunc
+      @staticMockDef + @classDefInCpp
     end
 
     def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
@@ -1689,7 +1796,7 @@ module Mockgen
 
     def getFullname
       fullname = getNonTypedFullname(@name)
-      @templateHeader.empty? ? fullname : "#{@templateHeader} #{fullname}"
+      @templateParam ? "template <#{@templateParam.generic}> #{fullname}" : fullname
     end
 
     # Set base classes
@@ -1715,23 +1822,25 @@ module Mockgen
     # Generate class definition texts
     def makeClassSet
       @mockClassDef = ""
-      @mockClassFunc =  ""
+      @classDefInHpp = ""
+      @classDefInCpp = ""
       @decoratorClassDef = ""
       @decoratorClassDef = ""
       @staticMockDef = ""
 
       unless @alreadyDefined
-        fullname = getTypedFullname
-        @mockClassDef, @mockClassFunc = formatMockClass(@mockName, @decoratorName, @forwarderName, fullname)
+        fullname = getNonTypedFullname(@name)
+        @mockClassDef, @classDefInHpp, @classDefInCpp = formatMockClass(@mockName, @decoratorName, @forwarderName, fullname)
         @decoratorClassDef = formatDecoratorClass(@decoratorName, @mockName, fullname)
         @decoratorClassDef += formatForwarderClass(@forwarderName, @mockName, fullname)
-        @staticMockDef = "#{@mockName}* #{@decoratorName}::#{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
+        @staticMockDef = getVariableDefinitionExample(@templateParam, @mockName, @decoratorName, @forwarderName, fullname)
       end
     end
 
     def makeStubSet
       @mockClassDef = ""
-      @mockClassFunc = @alreadyDefined ? "" : formatStub()
+      @classDefInHpp = ""
+      @classDefInCpp = @alreadyDefined ? "" : formatStub()
       @decoratorClassDef = ""
       @decoratorClassDef = ""
       @staticMockDef = ""
@@ -1751,10 +1860,16 @@ module Mockgen
       wordSet = ChompAfterDelimiter.new(line, ":").str.strip.split(" ")
       name = wordSet.empty? ? "" : wordSet[-1]
 
-      if md = line.match(/^(template.*\S)\s+#{typenameStr}\s+(\S+)/)
-        @templateHeader = md[1]
-        @name = name
-      elsif md = line.match(/^#{typenameStr}\s+(\S+)/)
+      classLine = line
+      if line.include?("template")
+        param = TemplateParameter.new(ChompAfterDelimiter.new(line, ":").str)
+        # Ignore specialized classes
+        return false if param.specialized || param.type.empty?
+        classLine = param.type
+        @templateParam = param
+      end
+
+      if md = classLine.match(/^#{typenameStr}\s+(\S+)/)
         @name = name
       else
         return false
@@ -1811,16 +1926,6 @@ module Mockgen
       found ? wordSet.join(" ") : nil
     end
 
-    # Get class name with namespaces
-    def getTypedFullname
-      fullname = getNonTypedFullname(@name)
-      md = @templateHeader.match(/template\s+<([^>]+)>/)
-      return fullname if md.nil?
-
-      typeSet = md[1].split(/,/).map{ |phrase| phrase.split(/\s+/)[-1] }.join(", ")
-      "#{fullname}<#{typeSet}>"
-    end
-
     # Actually this should be called for leaf classes in each class
     # hierarchy to reduce execution time
     def markMemberFunctionSetVirtual
@@ -1864,12 +1969,18 @@ module Mockgen
       canDecorateFunction(func) || func.virtual?
     end
 
-    # Cannot handle templates
     def formatMockClass(className, decoratorName, forwarderName, baseName)
-      str =  "class #{decoratorName};\n"
-      str += "class #{forwarderName};\n"
-      str += "#{@templateHeader}class #{className} : public #{baseName} {\n"
+      postfix = @templateParam.nil? ? "" : "_T"
+      decoratorType = getTypedTemplate(@templateParam, decoratorName)
+      forwarderType = getTypedTemplate(@templateParam, forwarderName)
+
+      str =  getTemplateDeclaration(@templateParam, decoratorName) + ";\n"
+      str += getTemplateDeclaration(@templateParam, forwarderName) + ";\n"
+      str += getClassDefinition(@templateParam, className, baseName) + " {\n"
       str += "public:\n"
+
+      # Template classes need their namespace to call their constructor
+      @constructorSet.each { |constructor| constructor.setBaseClassName(baseName) }
 
       typedArgsArray = @constructorSet.empty? ? [""] : @constructorSet.map(&:getTypedArgsForBaseClass)
       typedArgsArrayWithoutDefault = @constructorSet.empty? ? [""] : @constructorSet.map(&:getTypedArgsWithoutValue)
@@ -1877,37 +1988,43 @@ module Mockgen
       ctorSet = typedArgsArrayWithoutDefault.zip(callBaseArray)
 
       typedArgsArray.each do |argSet|
-        str += "    #{className}(#{decoratorName}* pDecorator#{argSet});\n"
-        str += "    #{className}(#{decoratorName}& decorator#{argSet});\n"
-        str += "    #{className}(#{forwarderName}* pForwarder#{argSet});\n"
-        str += "    #{className}(#{forwarderName}& forwarder#{argSet});\n"
+        str += "    #{className}(#{decoratorType}* pDecorator#{argSet});\n"
+        str += "    #{className}(#{decoratorType}& decorator#{argSet});\n"
+        str += "    #{className}(#{forwarderType}* pForwarder#{argSet});\n"
+        str += "    #{className}(#{forwarderType}& forwarder#{argSet});\n"
       end
 
       str += "    ~#{className}(void);\n"
-      str += collectMockDef([])
+      str += collectMockDef([], postfix)
       str += "private:\n"
-      str += "    #{decoratorName}* pDecorator_;\n"
-      str += "    #{forwarderName}* pForwarder_;\n"
+      str += "    #{decoratorType}* pDecorator_;\n"
+      str += "    #{forwarderType}* pForwarder_;\n"
       str += "};\n\n"
 
+      typeVar = @templateParam ? "<#{@templateParam.varSet}>" : ""
+      typedClassName = getTemplateHeader(@templateParam) + className + typeVar
+
+      # Solve circular dependency between a mock and its decorator/forwarder
       src = ""
       ctorSet.each do |argSet, callBase|
-        src += "#{className}::#{className}(#{decoratorName}* pDecorator#{argSet}) : "
+        src += "#{typedClassName}::#{className}(#{decoratorType}* pDecorator#{argSet}) : "
         src += "#{callBase}pDecorator_(pDecorator), pForwarder_(0) "
         src += "{ pDecorator_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
-        src += "#{className}::#{className}(#{decoratorName}& decorator#{argSet}) : "
+
+        src += "#{typedClassName}::#{className}(#{decoratorType}& decorator#{argSet}) : "
         src += "#{callBase}pDecorator_(&decorator), pForwarder_(0) "
         src += "{ pDecorator_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
 
-        src += "#{className}::#{className}(#{forwarderName}* pForwarder#{argSet}) : "
+        src += "#{typedClassName}::#{className}(#{forwarderType}* pForwarder#{argSet}) : "
         src += "#{callBase}pDecorator_(0), pForwarder_(pForwarder) "
         src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
-        src += "#{className}::#{className}(#{forwarderName}& forwarder#{argSet}) : "
+
+        src += "#{typedClassName}::#{className}(#{forwarderType}& forwarder#{argSet}) : "
         src += "#{callBase}pDecorator_(0), pForwarder_(&forwarder) "
         src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = this; }\n"
       end
 
-      src += "#{className}::~#{className}(void) {\n"
+      src += "#{typedClassName}::~#{className}(void) {\n"
       src += "    if (pDecorator_ && (pDecorator_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} == this)) "
       src += "{ pDecorator_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = 0; }\n"
       src += "    if (pDecorator_ && (pDecorator_->#{Mockgen::Constants::VARNAME_CLASS_MOCK} == this)) "
@@ -1915,8 +2032,10 @@ module Mockgen
       src += "    if (pForwarder_ && (pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} == this)) "
       src += "{ pForwarder_->#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} = 0; }\n}\n\n"
 
-      src += formatStub()
-      return str, src
+      # Define member functions in non-template classes exact once
+      srcInHpp = @templateParam ? src : ""
+      srcInCpp = (@templateParam ? "" : src) + formatStub()
+      return str, srcInHpp, srcInCpp
     end
 
     def formatStub
@@ -1943,39 +2062,40 @@ module Mockgen
     end
 
     def formatDecoratorClass(decoratorName, mockClassName, baseName)
-      header = @templateHeader.empty? ? "" : (@templateHeader + " ")
-
       # class can inherit struct
-      str =  "#{header}class #{decoratorName} : public #{baseName} {\n"
+      str = getClassDefinition(@templateParam, decoratorName, baseName) + " {\n"
       str += "public:\n"
 
       initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
+      mockType = getTypedTemplate(@templateParam, mockClassName)
+
       str += formatConstrutorSet(baseName, decoratorName, "", initMember)
       str += "    virtual ~#{decoratorName}(void) {}\n"
       str += collectDecoratorDef([])
-      str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
-      str += "    static #{mockClassName}* #{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
+      str += "    #{mockType}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
+      str += "    static #{mockType}* #{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
       str += "};\n\n"
       str
     end
 
     def formatForwarderClass(forwarderName, mockClassName, baseName)
       # Inherit a base class to refer class-local enums of the class
-      header = @templateHeader.empty? ? "" : (@templateHeader + " ")
-
       # class can inherit struct
-      str =  "#{header}class #{forwarderName} : public #{baseName} {\n"
+      str = getClassDefinition(@templateParam, forwarderName, baseName) + " {\n"
       str += "public:\n"
-      [["#{baseName}* pActual", "pActual_(pActual)"],
-       ["#{baseName}& actual",  "pActual_(&actual)"]].each do |arg, initMember|
+      baseType = getTypedTemplate(@templateParam, baseName)
+
+      [["#{baseType}* pActual", "pActual_(pActual)"],
+       ["#{baseType}& actual",  "pActual_(&actual)"]].each do |arg, initMember|
         initMember += ", #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
         str += formatConstrutorSet(baseName, forwarderName, arg, initMember)
       end
 
+      mockType = getTypedTemplate(@templateParam, mockClassName)
       str += "    virtual ~#{forwarderName}(void) {}\n"
       str += collectForwarderDef([])
-      str += "    #{baseName}* pActual_;\n"
-      str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
+      str += "    #{baseType}* pActual_;\n"
+      str += "    #{mockType}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "};\n\n"
       str
     end
@@ -1993,30 +2113,32 @@ module Mockgen
       str
     end
 
-    def collectMockDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction)
+    def collectMockDef(derivedSet, postfix)
+      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction, postfix)
     end
 
     def collectDecoratorDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction)
+      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction, nil)
     end
 
     def collectForwarderDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef, :canForwardToFunction)
+      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef, :canForwardToFunction, nil)
     end
 
     # If find an overriding function (which has same name, args and const
     # modifier as of its base class), call the most subclass definition.
-    def collectFunctionDef(derivedSet, methodClass, methodFunc, filterFunc)
+    def collectFunctionDef(derivedSet, methodClass, methodFunc, filterFunc, extraArg)
       str = ""
+      name = getTypedTemplate(@templateParam, getNonTypedFullname(@name))
 
       @allMemberFunctionSet.each do |member|
         next unless send(filterFunc, member)
         next if derivedSet.any? { |f| f.override?(member) }
 
         # Add member
-        name = getFullname
-        str += member.send(methodFunc, name)
+        argSet = [methodFunc, name]
+        argSet << extraArg unless extraArg.nil?
+        str += member.send(*argSet)
         derivedSet << member
       end
 
@@ -2027,10 +2149,82 @@ module Mockgen
         # but D:f is not defined.
         # Though calling D:f is ambiguous in this case,
         # it is practical to create exactly one Mock(D)::f.
-        str += block.send(methodClass, derivedSet)
+        argSet = [methodClass, derivedSet]
+        argSet << extraArg unless extraArg.nil?
+        str += block.send(*argSet)
       end
 
       str
+    end
+
+    def getClassDefinition(templateParam, className, baseName)
+      postbase = (templateParam && templateParam.generic) ? "<#{templateParam.varSet}>" : ""
+      getTemplateDeclaration(templateParam, className) + " : public #{baseName}#{postbase}"
+    end
+
+    def getTemplateDeclaration(templateParam, className)
+      header = getTemplateHeader(templateParam)
+      "#{header}class #{className}"
+    end
+
+    def getTemplateHeader(templateParam)
+      (templateParam && templateParam.generic) ? "template <#{templateParam.generic}> " : ""
+    end
+
+    def getTypedTemplate(templateParam, className)
+      className + (templateParam ? "<#{templateParam.varSet}>" : "")
+    end
+
+    # Testers must defined typed mocks that they need
+    # because the mocks do not know their concrete types needed.
+    def getVariableDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname)
+      templateParam ?
+        getDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname) :
+        "#{mockName}* #{decoratorName}::#{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
+    end
+
+    def getDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname)
+        mockType = getTypedTemplate(templateParam, mockName)
+        decoratorType = getTypedTemplate(templateParam, decoratorName)
+        forwarderType = getTypedTemplate(templateParam, forwarderName)
+        name = Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE
+
+        str =  "/* Tester must define these types and variables\n"
+
+        typeParamSet = []
+        serial = 1
+        templateParam.typenameSet.each do |typenameStr|
+          typeStr = ""
+          if ["typename", "class"].include?(typenameStr)
+            typeStr = "DataType#{serial}"
+            str += "using #{typeStr} = int; (or other appropriate type)\n"
+          else
+            typeStr = serial.to_s
+            str += "++ set an appropriate value to type parameter #{serial} ++\n"
+          end
+          typeParamSet << typeStr
+          serial += 1
+        end
+
+        typeParamSet = "<" + typeParamSet.join(",") + ">"
+        str += " ** Class (static) variable template **\n"
+        str += "template <#{templateParam.generic}> #{mockType}* #{decoratorType}::#{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
+
+        str += " ** Specialized class template to test **\n"
+        str += "template class #{fullname}#{typeParamSet};\n"
+
+        str += " ** Generated classes**\n"
+        str += "namespace #{name} {\n"
+        str += " ** Specialized class variable in the decorator class template **\n"
+        str += "    template #{mockName}#{typeParamSet}* #{decoratorName}#{typeParamSet}::pClassMock_;\n"
+        str += "}\n"
+        str += " ** Type aliases in a test fixture **\n"
+        str += "    using Tested = #{fullname}#{typeParamSet};\n"
+        str += "    using Decorator = #{name}::#{decoratorName}#{typeParamSet};\n"
+        str += "    using Forwarder = #{name}::#{forwarderName}#{typeParamSet};\n"
+        str += "    using Mock = #{name}::#{mockName}#{typeParamSet};\n"
+        str += "*/\n\n"
+        str
     end
   end
 

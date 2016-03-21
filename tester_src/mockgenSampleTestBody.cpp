@@ -93,9 +93,12 @@ TEST_F(TestSample, TopLevelNamespace) {
 
     {
         MOCK_OF(All) mock(all_Forwarder);
+        int expected = 6;
+        EXPECT_CALL(mock, TopLevelSampleFunc()).Times(1).WillOnce(::testing::Return(expected));
         all_Forwarder.TopLevelSampleFunc();
-        all_Forwarder.pMock_ = &mock;
-        all_Forwarder.TopLevelSampleFunc();
+        ++expected;
+        EXPECT_CALL(mock, TopLevelSampleFunc()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, all_Forwarder.TopLevelSampleFunc());
     }
     ASSERT_FALSE(all_Forwarder.pMock_);
 }
@@ -128,6 +131,91 @@ TEST_F(TestSample, SwapTypeCtorWithArg) {
         EXPECT_EQ(expected, SampleFuncCtorWithArg());
     }
     ASSERT_FALSE(localCtorWithArg.pMock_);
+}
+
+using DataType = int;
+template <typename T> TypedClass_Mock<T>* TypedClass_Decorator<T>::pClassMock_;
+template class ::Sample1::Types::TypedClass<DataType>;
+namespace MyUnittest {
+    template TypedClass_Mock<DataType>* TypedClass_Decorator<DataType>::pClassMock_;
+}
+
+class TestTemplateSample : public ::testing::Test {
+protected:
+    using Tested = ::Sample1::Types::TypedClass<DataType>;
+    using Decorator = MyUnittest::TypedClass_Decorator<DataType>;
+    using Forwarder = MyUnittest::TypedClass_Forwarder<DataType>;
+    using Mock = MyUnittest::TypedClass_Mock<DataType>;
+};
+
+TEST_F(TestTemplateSample, Get) {
+    Tested obj(0);
+    EXPECT_EQ(0, obj.Get());
+    {
+        DataType expected = 1;
+        Forwarder forwarder(obj, expected);
+        EXPECT_EQ(0, forwarder.Get());
+
+        ++expected;
+        Mock mock(forwarder, 0);
+        EXPECT_CALL(mock, Get()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, forwarder.Get());
+    }
+
+    {
+        DataType expected = 11;
+        Decorator decorator(expected);
+        EXPECT_EQ(expected, decorator.Get());
+
+        Mock mock(decorator, 0);
+        ++expected;
+        EXPECT_CALL(mock, Get()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, decorator.Get());
+    }
+}
+
+using DataType3 = int;
+template <size_t S, size_t V, typename ...Ts> VariadicClass_Mock<S,V,Ts...>* VariadicClass_Decorator<S,V,Ts...>::pClassMock_;
+template class ::Sample1::Types::VariadicClass<1,2,int,long,unsigned long>;
+namespace MyUnittest {
+    template VariadicClass_Mock<1,2,int,long,unsigned long>* VariadicClass_Decorator<1,2,int,long,unsigned long>::pClassMock_;
+}
+
+class TestVariadicTemplate : public ::testing::Test {
+protected:
+    using Tested = ::Sample1::Types::VariadicClass<1,2,int,long,unsigned long>;
+    using Decorator = MyUnittest::VariadicClass_Decorator<1,2,int,long,unsigned long>;
+    using Forwarder = MyUnittest::VariadicClass_Forwarder<1,2,int,long,unsigned long>;
+    using Mock = MyUnittest::VariadicClass_Mock<1,2,int,long,unsigned long>;
+};
+
+TEST_F(TestVariadicTemplate, Get) {
+    Tested obj;
+    const size_t originalExpected = 7;
+    EXPECT_EQ(originalExpected, obj.Get());
+    {
+        Forwarder forwarder(obj);
+        EXPECT_EQ(originalExpected, forwarder.Get());
+        {
+            const size_t expected = originalExpected + 1;
+            Mock mock(forwarder);
+            EXPECT_CALL(mock, Get()).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_EQ(expected, forwarder.Get());
+        }
+        ASSERT_FALSE(forwarder.pMock_);
+    }
+
+    {
+        Decorator decorator;
+        EXPECT_EQ(originalExpected, decorator.Get());
+        {
+            Mock mock(decorator);
+            const size_t expected = originalExpected + 11;
+            EXPECT_CALL(mock, Get()).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_EQ(expected, decorator.Get());
+        }
+        ASSERT_FALSE(decorator.pMock_);
+    }
 }
 
 /*
