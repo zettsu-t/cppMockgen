@@ -32,7 +32,7 @@ $(TARGET_EXE): $(GENERATED_FILES) $(ALL_OBJS) $(PROCESSED_CPPS) FORCE
 	$(MAKE) $(MAKEFILE_PARALLEL) -f $(MAKEFILE_SUB_COMPILE)
 	$(eval GENERATED_SOURCES := $(notdir $(wildcard $(GENERATED_FILE_DIR)/*.cpp)))
 	$(eval GENERATED_OBJS := $(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES))))
-	$(CXX) $(LIBPATH) -o $@ $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
+	$(LD) $(LIBPATH) -o $@ $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
 
 # Define rules in the sub makefile
 $(ALL_OBJS) : ;

@@ -1532,7 +1532,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      "void Super::Func2() const {\n    return;\n}\n",
      "    void Func2() const override { if (pMock_) { pMock_->Func2(); return; } " +
      "Super::Func2(); }\n",
-     "    void Func2() const { if (pMock_) { pMock_->Func2(); return; } " +
+     "    void Func2() const override { if (pMock_) { pMock_->Func2(); return; } " +
      "static_cast<Super*>(pActual_)->Func2(); }\n"],
     'one arg return primitive' =>
     ["int Func()",
@@ -1743,6 +1743,18 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     phrase, expected = data
     block = MemberFunctionBlock.new("")
     assert_equal(expected, block.splitByReferenceMarks(phrase))
+  end
+
+  data(
+    'non virtual' => ["void Func()", ""],
+    'virtual' => ["virtual void Func()", "override "],
+    'override' => ["void Func() override", ""],
+    'virtual override' => ["virtual void Func() override", ""])
+  def test_getOverrideStr(data)
+    decl, expected = data
+    assert_true(Mockgen::Constants::CPP11_MODE)
+    block = MemberFunctionBlock.new(decl)
+    assert_equal(expected, block.getOverrideStr(decl))
   end
 end
 
@@ -2751,7 +2763,7 @@ class TestClassBlock < Test::Unit::TestCase
     end
 
     func = MemberFunctionBlock.new("void Func()")
-    funcConst = MemberFunctionBlock.new("void Func() const override")
+    funcConst = MemberFunctionBlock.new("virtual void Func() const override")
     funcOverloaded = MemberFunctionBlock.new("void Func(int a)")
     funcBaseLine = MemberFunctionBlock.new("int Other(long a, T* b)")
 
@@ -3145,7 +3157,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    #{decoratorName}(void) : pMock_(0) {}\n"
     expected += "    #{decoratorName}(int a) : #{testedName}<T>(a), pMock_(0) {}\n"
     expected += "    virtual ~#{decoratorName}(void) {}\n"
-    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+    expected += "    void Func() override { if (pMock_) { pMock_->Func(); return; } " +
                 "#{testedName}<T>::Func(); }\n"
     expected += "    #{mockName}<T>* pMock_;\n"
     expected += "    static Mock<T>* pClassMock_;\n"
@@ -3170,7 +3182,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    virtual ~#{forwarderName}(void) {}\n"
     expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
                 "static_cast<#{testedName}*>(pActual_)->Func(); }\n"
-    expected += "    void Func() const { if (pMock_) { pMock_->Func(); return; } " +
+    expected += "    void Func() const override { if (pMock_) { pMock_->Func(); return; } " +
                 "static_cast<#{baseName}*>(pActual_)->Func(); }\n"
     expected += "    void Func(int a) { if (pMock_) { pMock_->Func(a); return; } " +
                 "static_cast<#{baseName}*>(pActual_)->Func(a); }\n"
@@ -3196,7 +3208,7 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    #{forwarderName}(#{testedName}<T>& actual) : pActual_(&actual), pMock_(0) {}\n"
     expected += "    #{forwarderName}(#{testedName}<T>& actual,int a) : Tested<T>(a), pActual_(&actual), pMock_(0) {}\n"
     expected += "    virtual ~#{forwarderName}(void) {}\n"
-    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+    expected += "    void Func() override { if (pMock_) { pMock_->Func(); return; } " +
                 "static_cast<#{testedName}<T>*>(pActual_)->Func(); }\n"
     expected += "    #{testedName}<T>* pActual_;\n"
     expected += "    #{mockName}<T>* pMock_;\n"

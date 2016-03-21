@@ -81,6 +81,10 @@ module Mockgen
     CLASS_POSTFIX_MOCK = "_Mock".freeze
     CLASS_FREE_FUNCTION_SET = "All".freeze
 
+    # To prohibit c++11 keywords, set false
+    CPP11_MODE = true
+    CPP11_MODE.freeze
+
     # clang executable
     CLANG_COMMAND = "clang++".freeze
 

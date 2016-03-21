@@ -1281,12 +1281,9 @@ module Mockgen
     end
 
     protected
-    def makeForwarderDefImpl(forwardingTarget)
-      decl = @decl.dup
-      if (@decl =~ /\s+override$/) || (@decl =~ /\s+override\s/)
-        decl = @decl.gsub(/\s+override(\s?)/, '\1')
-      end
-      str = "    #{decl} { if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}) { "
+    def makeForwarderDefImpl(forwardingTarget, overrideStr)
+      # Leave override keyword
+      str = "    #{@decl} #{overrideStr}{ if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}) { "
 
       if (@returnVoid)
         str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); return; } "
@@ -1330,7 +1327,8 @@ module Mockgen
     def makeDecoratorDef(className)
       mockVarname = @staticMemfunc ? Mockgen::Constants::VARNAME_CLASS_MOCK : Mockgen::Constants::VARNAME_INSTANCE_MOCK
       decl = @staticMemfunc ? "static #{@decl}" : @decl
-      str = "    #{decl} { if (#{mockVarname}) { "
+      overrideStr = getOverrideStr(@decl)
+      str = "    #{decl} #{overrideStr}{ if (#{mockVarname}) { "
 
       if (@returnVoid)
         str += "#{mockVarname}->#{@funcName}(#{@argSet}); return; } "
@@ -1345,7 +1343,11 @@ module Mockgen
     end
 
     def makeForwarderDef(className)
-      makeForwarderDefImpl("static_cast<#{className}*>(pActual_)->")
+      makeForwarderDefImpl("static_cast<#{className}*>(pActual_)->", getOverrideStr(@decl))
+    end
+
+    def getOverrideStr(decl)
+      overrideStr = (Mockgen::Constants::CPP11_MODE && virtual? && decl.match(/\boverride\b/).nil?) ? "override " : ""
     end
 
     ## Implementation detail (public for testing)
@@ -1398,7 +1400,7 @@ module Mockgen
     def makeForwarderDef(className)
       # Add :: to call a free function and prevent infinite calling
       # to a member function itself
-      @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)))
+      @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)), "")
     end
 
     def getSwapperDef(varName)
