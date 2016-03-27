@@ -45,6 +45,14 @@
 #  Filter out data structures that this script do not handle.
 #  - Standard C++, Boost C++, Google Test/Mock headers.
 #  - Compiler internal symbols that contains double underline (__)
+#  - Data structures which are defined in given source files in
+#    the argument. This script treats namespaces always relative
+#    (not absolute from the top) because it does not preprocess
+#    the source files and ignores their using namespace directives.
+#
+#  Preprocessing discards file names and it disturbs to determine
+#  whether a class definition is in one of the source file or
+#  a header file.
 #
 #  Filter non-template free functions by the arguments at launch this
 #  script to exclude system functions such as C library and thread
@@ -628,13 +636,17 @@ module Mockgen
       return argTypeSet.reverse.join(" "), argName, newArgStrSet.reverse.join(" ")
     end
 
-    def extractFuncPtrName(phrase, serial)
-      argType = phrase.gsub(/[^\*]/, "")
+    def extractFuncPtrName(argPhrase, serial)
+      argSet = argPhrase.include?("::*") ? argPhrase.split("::") : [argPhrase]
+      phrase = argSet[-1]
+      typePrefix = (argSet.size > 1) ? (argSet[0..-2].join("::") + "::") : ""
+
+      argType = typePrefix + phrase.gsub(/[^\*]/, "")
       name = phrase.tr("*", "")
-      argStr = phrase
+      argStr = typePrefix + phrase
 
       if (name.empty?)
-        argType = phrase.include?("*") ? phrase : ""
+        argType = typePrefix + (phrase.include?("*") ? phrase : "")
         name = "dummy#{serial}"
         argStr = argType + name
       end
@@ -1763,7 +1775,7 @@ module Mockgen
       variableBlockSet = []
       @filtered = false
 
-      @alreadyDefined = true if !definedReferenceSet.nil? && definedReferenceSet.classDefined?(getFullname())
+      @alreadyDefined = true if !definedReferenceSet.nil? && definedReferenceSet.classDefined?(getFullname(), definedReferenceSet.relativeNamespaceOnly)
       return if undefinedReferenceSet.nil? || !undefinedReferenceSet.valid
 
       # Create a default destructor if it does not exist
@@ -2403,9 +2415,10 @@ module Mockgen
 
   # Defined reference set
   class DefinedReferenceSet
-    attr_reader :valid
+    attr_reader :relativeNamespaceOnly
 
     def initialize(filenameSet)
+      @relativeNamespaceOnly = Mockgen::Constants::MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY
       @refFunctionSet, @refClassNameSet = readAllFiles(filenameSet)
     end
 
@@ -2415,7 +2428,7 @@ module Mockgen
       @refFunctionSet.key?(stripFullname(name)) ? true : false
     end
 
-    def classDefined?(relativeClassName)
+    def classDefined?(relativeClassName, relativeNamespaceOnly)
       className = relativeClassName.split("::")[-1]
       return false unless @refClassNameSet.key?(className)
 
@@ -2425,7 +2438,7 @@ module Mockgen
       strippedName = stripFullname(relativeClassName)
 
       found = false
-      if absolute
+      if absolute && !relativeNamespaceOnly
         found = @refClassNameSet[className].any? do |ref|
           ref.relativeClassName == strippedName
         end

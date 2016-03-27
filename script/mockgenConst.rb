@@ -11,6 +11,9 @@ module Mockgen
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
 
+    # Hard coded mode
+    MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
+
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
     NAMESPACE_SKIPPED_MAP = Hash[*(NAMESPACE_SKIPPED_SET.map{ |word| [word, true] }.flatten)].freeze

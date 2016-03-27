@@ -27,6 +27,33 @@ ConstructorWithArg::ConstructorWithArg(int value) : value_(value) {}
 ConstructorWithArg::~ConstructorWithArg(void) {}
 int ConstructorWithArg::Get(void) const { return value_; }
 
+Counter::Counter(void) : value_(0) {}
+void Counter::Increment(void) { ++value_; }
+void Counter::Decrement(void) { --value_; }
+int Counter::Get(void) const { return value_; }
+
+CountLater::CountLater(void) {}
+CountLater::~CountLater(void) { /* Ignore pFunc_ even if valid */ }
+void CountLater::ExecuteLater(Counter* pTarget, void(Counter::*pFunc)(void)) {
+    execute();
+    pFunc_ = std::bind(pFunc, pTarget);
+    return;
+}
+
+void CountLater::Execute(void) {
+    execute();
+    return;
+}
+
+void CountLater::execute(void) {
+    if (pFunc_) {
+        pFunc_();
+        pFunc_ = nullptr;
+    }
+
+    return;
+}
+
 void defaultCallback(int a) {}
 
 TopLevelClass::TopLevelClass(void) {}

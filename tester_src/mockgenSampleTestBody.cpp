@@ -133,6 +133,41 @@ TEST_F(TestSample, SwapTypeCtorWithArg) {
     ASSERT_FALSE(localCtorWithArg.pMock_);
 }
 
+class TestMemFnPointerSample : public ::testing::Test{};
+
+TEST_F(TestMemFnPointerSample, All) {
+    Counter counter;
+    CountLater countLater;
+
+    int expected = 0;
+    EXPECT_EQ(expected, counter.Get());
+
+    counter.Increment();
+    ++expected;
+    EXPECT_EQ(expected, counter.Get());
+    counter.Decrement();
+    counter.Decrement();
+    expected -= 2;
+    EXPECT_EQ(expected, counter.Get());
+
+    countLater.Execute();
+    EXPECT_EQ(expected, counter.Get());
+
+    countLater.ExecuteLater(&counter, &Counter::Decrement);
+    EXPECT_EQ(expected, counter.Get());
+    --expected;
+    for(int i=0; i<2; ++i) {
+        countLater.Execute();
+        EXPECT_EQ(expected, counter.Get());
+    }
+
+    countLater.ExecuteLater(&counter, &Counter::Increment);
+    EXPECT_EQ(expected, counter.Get());
+    countLater.ExecuteLater(&counter, &Counter::Increment);
+    ++expected;
+    EXPECT_EQ(expected, counter.Get());
+}
+
 using DataType = int;
 template <typename T> TypedClass_Mock<T>* TypedClass_Decorator<T>::pClassMock_;
 template class ::Sample1::Types::TypedClass<DataType>;

@@ -740,7 +740,9 @@ class TestTypedVariable < Test::Unit::TestCase
     'varname' => ["int(f)()", "int () ()", "f", "int (f) ()"],
     'one word' => ["int(*f)()", "int (*) ()", "f", "int (*f) ()"],
     'default var' => ["int(*f)() = callback", "int (*) ()", "f", "int (*f) () = callback"],
-    'multi words' => ["const void* (*f)()", "const void* (*) ()", "f", "const void* (*f) ()"])
+    'multi words' => ["const void* (*f)()", "const void* (*) ()", "f", "const void* (*f) ()"],
+    'member function' => ["void(ClassName::*f)(int)", "void (ClassName::*) (int)", "f", "void (ClassName::*f) (int)"],
+    'member without name' => ["void(ClassName::*)(int)", "void (ClassName::*) (int)", "dummy1", "void (ClassName::*dummy1) (int)"])
   def test_parseArgSetFuncPtr(data)
     line, expectedArgType, expectedArgName, expectedNewArgStr = data
     argType, argName, newArgStr = TypedVariable.new(line).parseAsArgument(1)
@@ -765,7 +767,8 @@ class TestTypedVariable < Test::Unit::TestCase
     'ptr' => ["*", "*", "dummy1", "*dummy1"],
     'name' => ["f", "", "f", "f"],
     'ptrName1' => ["*f", "*", "f", "*f"],
-    'ptrName2' => ["f**", "**", "f", "f**"])
+    'ptrName2' => ["f**", "**", "f", "f**"],
+    'memFuncPtr' => ["ClassName::*f", "ClassName::*", "f", "ClassName::*f"])
   def test_extractFuncPtrName(data)
     line, expectedArgType, expectedName, expectedArgStr = data
     argType, name, argStr = TypedVariable.new(nil).extractFuncPtrName(line, 1)
@@ -2340,7 +2343,11 @@ class TestClassBlock < Test::Unit::TestCase
     assert_false(block.getStringToSourceFile.empty?)
 
     refSet = Object.new()
-    def refSet.classDefined?(arg)
+    def refSet.relativeNamespaceOnly
+      false
+    end
+
+    def refSet.classDefined?(arg, relativeNamespaceOnly)
       true
     end
 
@@ -3648,8 +3655,14 @@ class TestStrippedFullname < Test::Unit::TestCase
 end
 
 class TestDefinedReferenceSet < Test::Unit::TestCase
+  def setup
+    @relativeNamespaceOnly = false
+  end
+
   def test_initialize
     refSet = DefinedReferenceSet.new(TestInputSourceFileSet)
+    assert_equal(Mockgen::Constants::MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY, refSet.relativeNamespaceOnly)
+    assert_false(@relativeNamespaceOnly)
 
     # Check the input files
     ["SampleFunc", "SampleFuncArray"].each do |name|
@@ -3657,7 +3670,7 @@ class TestDefinedReferenceSet < Test::Unit::TestCase
     end
 
     ["BaseClass", "TopLevelClass"].each do |name|
-      assert_true(refSet.classDefined?(name))
+      assert_true(refSet.classDefined?(name, @relativeNamespaceOnly))
     end
   end
 
@@ -3735,7 +3748,7 @@ class TestDefinedReferenceSet < Test::Unit::TestCase
 
     refSet.instance_variable_set(:@refClassNameSet, refClassNameSet)
     [["", true], ["::", true], ["A", false]].each do |prefix, expected|
-      assert_equal(expected, refSet.classDefined?(prefix + className))
+      assert_equal(expected, refSet.classDefined?(prefix + className, @relativeNamespaceOnly))
     end
 
     relativeClassName = "Outer::" + className
@@ -3765,14 +3778,34 @@ class TestDefinedReferenceSet < Test::Unit::TestCase
     assert_equal(1, refClassNameSet[className].size)
 
     refSet.instance_variable_set(:@refClassNameSet, refClassNameSet)
-    assert_false(refSet.classDefined?(className))
+    assert_false(refSet.classDefined?(className, @relativeNamespaceOnly))
 
     ["", "::", "Extra::"].each do |prefix|
-      assert_true(refSet.classDefined?(prefix + relativeClassName))
+      assert_true(refSet.classDefined?(prefix + relativeClassName, @relativeNamespaceOnly))
     end
 
     ["A", "::Extra::"].each do |prefix|
-      assert_false(refSet.classDefined?(prefix + relativeClassName))
+      assert_false(refSet.classDefined?(prefix + relativeClassName, @relativeNamespaceOnly))
+    end
+  end
+
+  def test_addClassInNamespace
+    refSet = DefinedReferenceSet.new([])
+    refClass = Struct.new(:functionName, :className, :relativeClassName, :isFreeFunction)
+    nameSpace = "SpaceA"
+    className = "NameB"
+    relativeClassName = nameSpace + "::" + className
+
+    ref = refClass.new("memfunc", className, relativeClassName, false)
+    refFunctionSet = {}
+    refClassNameSet = {}
+    refSet.add(ref, refFunctionSet, refClassNameSet)
+    assert_equal(1, refClassNameSet.size)
+    refSet.instance_variable_set(:@refClassNameSet, refClassNameSet)
+
+    [["", false, true], ["", true, true], ["::", false, false], ["::", true, true]
+    ].each do |prefix, relativeNamespaceOnly, expected|
+      assert_equal(expected, refSet.classDefined?(prefix + "NameSpaceA::" + relativeClassName, relativeNamespaceOnly))
     end
   end
 
@@ -4077,7 +4110,11 @@ class TestCppFileParser < Test::Unit::TestCase
     blockB = ClassBlock.new("class NameB {")
 
     refSet = Object.new
-    def refSet.classDefined?(relativeClassName)
+    def refSet.relativeNamespaceOnly
+      false
+    end
+
+    def refSet.classDefined?(relativeClassName, relativeNamespaceOnly)
       relativeClassName.include?("A")
     end
 

@@ -1,3 +1,4 @@
+#include <functional>
 #include <sstream>
 #include <cstdlib>
 #include <boost/utility.hpp>
@@ -61,6 +62,29 @@ namespace Sample1 {
             int Get(void) const;
         private:
             int value_;
+        };
+
+        class Counter : private boost::noncopyable {
+        public:
+            Counter(void);
+            virtual ~Counter(void) = default;
+            virtual void Increment(void);
+            virtual void Decrement(void);
+            virtual int Get(void) const;
+        private:
+            int value_;
+        };
+
+        class CountLater : private boost::noncopyable {
+        public:
+            CountLater(void);
+            virtual ~CountLater(void);
+            // C++11 std::function is better than a memfunc ptr
+            virtual void ExecuteLater(Counter* pTarget, void(Counter::*pFunc)(void));
+            virtual void Execute(void);
+        private:
+            void execute(void);
+            std::function<void(void)> pFunc_;
         };
 
         template <typename T=unsigned long long>
