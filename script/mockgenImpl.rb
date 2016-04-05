@@ -1648,11 +1648,15 @@ module Mockgen
       fullname = getNonTypedFullname(@name)
       # Remove head ::
       name = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
-      @uniqueName = name.gsub("::", "_inner_")
+      @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_")
 
       # Update generated class names
       setClassNameSet
       @uniqueName
+    end
+
+    def getFilenamePostfix
+      ("_" + @uniqueName).gsub(Mockgen::Constants::CLASS_SPLITTER_NAME, "_").gsub(/_+/, "_")
     end
 
     # Skip to parse child members
@@ -2639,7 +2643,7 @@ module Mockgen
     end
 
     # Write generated codes to arg files
-    def writeToFiles(argClassFilename, argTypeSwapperFilename, argVarSwapperFilename, argDeclFilename, argDefFilename)
+    def writeToFiles(argClassFilename, argTypeSwapperFilename, argVarSwapperFilename, argDeclFilename, argDefFilename, numberOfClassInFile)
       beginNamespace = "namespace #{@cppNameSpace} {\n\n"
       endNamespace = "} // namespace #{@cppNameSpace}\n\n"
       usingNamespace = "using namespace #{@cppNameSpace};\n"
@@ -2649,44 +2653,41 @@ module Mockgen
       varSwapperFilenameSet = []
       declFilenameSet = []
 
-      index = 0
-      serial = 1
-      sizeOfSet = Mockgen::Constants::GENERATED_BLOCKS_PER_SOURCE
+      # Write all stubs to one file
+      argBlockSet = @functionSetArray
+      postfix = Mockgen::Constants::CLASS_POSTFIX_STUB
 
-      while(index < @functionSetArray.size)
-        argBlockSet = @functionSetArray.slice(index, sizeOfSet)
-        postfix = "_#{serial}"
+      classFilename = addPostfixToBasename(argClassFilename, postfix)
+      varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
+      declFilename = addPostfixToBasename(argDeclFilename, postfix)
+      defFilename = addPostfixToBasename(argDefFilename, postfix)
 
-        classFilename = addPostfixToBasename(argClassFilename, postfix)
-        varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
-        declFilename = addPostfixToBasename(argDeclFilename, postfix)
-        defFilename = addPostfixToBasename(argDefFilename, postfix)
-
-        writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToClassFile, nil, true, true)
-        writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringToDeclFile, nil, false, true)
-        writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                              argBlockSet, :getStringToSwapperFile, nil, false, true)
-        writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
-                              argBlockSet, :getStringOfStub, nil, false, false)
-        unless @stubOnly
-          writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
-                                argBlockSet, :getStringOfVariableDefinition, "a", false, false)
-        end
-
-        classFilenameSet << classFilename
-        declFilenameSet << declFilename
-
-        serial += 1
-        index += sizeOfSet
+      writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
+                            argBlockSet, :getStringToClassFile, nil, true, true)
+      writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
+                            argBlockSet, :getStringToDeclFile, nil, false, true)
+      writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
+                            argBlockSet, :getStringToSwapperFile, nil, false, true)
+      writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
+                            argBlockSet, :getStringOfStub, nil, false, false)
+      unless @stubOnly
+        writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
+                              argBlockSet, :getStringOfVariableDefinition, "a", false, false)
       end
 
+      classFilenameSet << classFilename
+      declFilenameSet << declFilename
+
+      index = 0
+      serial = 1
+
       blockSet = collectClassesToWrite(@block.children).flatten.compact
+      sizeOfSet = numberOfClassInFile ? numberOfClassInFile : blockSet.size
       index = 0
       while(index < blockSet.size)
         argBlockSet = blockSet.slice(index, sizeOfSet)
-        postfix = "_#{serial}"
+        postfix = (numberOfClassInFile.nil? || numberOfClassInFile > 1) ?
+                    "_#{serial}" : argBlockSet[0].getFilenamePostfix
 
         classFilename = addPostfixToBasename(argClassFilename, postfix)
         typeSwapperFilename = addPostfixToBasename(argTypeSwapperFilename, postfix)
@@ -3236,6 +3237,7 @@ module Mockgen
       @stubOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_STUB)
       @functionNameFilterSet = []
       @sourceFilenameSet = []
+      @numberOfClassInFile = nil
 
       while(!argSet.empty?)
         break if argSet.size < 2
@@ -3250,6 +3252,10 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER
           argSet.shift(2)
           @sourceFilenameSet << optionValue
+        when Mockgen::Constants::ARGUMENT_SPLIT_FILES_FILTER
+          argSet.shift(2)
+          value = optionValue.to_i
+          @numberOfClassInFile = value if value > 0
         else
           stopParsing = true
         end
@@ -3314,7 +3320,7 @@ module Mockgen
       parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                  stubOnly, filterSet, sourceFilenameSet)
       args = [@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename]
-      args.concat([@outDeclFilename, @outDefFilename])
+      args.concat([@outDeclFilename, @outDefFilename, @numberOfClassInFile])
       parser.writeToFiles(*args)
     end
   end

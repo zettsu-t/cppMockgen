@@ -2161,9 +2161,9 @@ class TestClassBlock < Test::Unit::TestCase
     innerBlockB = ClassBlock.new("class Name {")
     block.connect(innerBlockA)
     innerBlockA.connect(innerBlockB)
-    name = "Outer_inner_Inner"
+    name = "Outer_in_Inner"
     assert_equal(name, innerBlockA.instance_variable_get(:@uniqueName))
-    assert_equal("Outer_inner_Inner_inner_Name", innerBlockB.instance_variable_get(:@uniqueName))
+    assert_equal("Outer_in_Inner_in_Name", innerBlockB.instance_variable_get(:@uniqueName))
 
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_MOCK}", innerBlockA.mockName)
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", innerBlockA.decoratorName)
@@ -2177,17 +2177,25 @@ class TestClassBlock < Test::Unit::TestCase
     assert_false(block.isClass?)
   end
 
-  def test_setUniqueName
+  def test_setUniqueNameAndGetFilenamePostfix
     block = ClassBlock.new("class Name {")
     assert_equal("Name", block.setUniqueName)
+    assert_equal("_Name", block.getFilenamePostfix)
 
     blockA = ClassBlock.new("class A {")
     blockA.connect(block)
-    assert_equal("A_inner_Name", block.setUniqueName)
+    assert_equal("A_in_Name", block.setUniqueName)
+    assert_equal("_A_Name", block.getFilenamePostfix)
 
     blockB = ClassBlock.new("class B {")
     blockB.connect(blockA)
-    assert_equal("B_inner_A_inner_Name", block.setUniqueName)
+    assert_equal("B_in_A_in_Name", block.setUniqueName)
+    assert_equal("_B_A_Name", block.getFilenamePostfix)
+
+    nsBlock = NamespaceBlock.new("namespace NameSpace")
+    nsBlock.connect(blockB)
+    assert_equal("NameSpace_in_B_in_A_in_Name", block.setUniqueName)
+    assert_equal("_NameSpace_B_A_Name", block.getFilenamePostfix)
   end
 
   def test_parseChildrenClass
@@ -4583,6 +4591,21 @@ class TestMockGenLauncher < Test::Unit::TestCase
       target = MockGenLauncher.new(args)
       assert_equal(expected, target.instance_variable_get(:@sourceFilenameSet))
     end
+  end
+
+  data(
+    'each' => ["1", 1],
+    'bind' => ["2", 2],
+    'zero invalid' => ["0", nil],
+    'negative invalid' => ["-1", nil],
+    'empty' => ["", nil],
+    'not a number' => ["abc", nil])
+  def test_parseSplitFiles(data)
+    arg, expected = data
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_SPLIT_FILES_FILTER, arg]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_equal(expected, target.instance_variable_get(:@numberOfClassInFile))
   end
 
   # Test the generate and parse methods with .cpp files

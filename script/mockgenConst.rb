@@ -10,6 +10,7 @@ module Mockgen
     ARGUMENT_MODE_MOCK = "mock".freeze
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
+    ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
 
     # Hard coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
@@ -71,17 +72,18 @@ module Mockgen
     # The namespace which containts generated codes
     GENERATED_SYMBOL_NAMESPACE = "MyUnittest".freeze
 
-    # Split root .cpp into multiple files (not implemented completely)
-    GENERATED_BLOCKS_PER_SOURCE = 50
-
     # Fixed variable names
     VARNAME_INSTANCE_MOCK = "pMock_".freeze
     VARNAME_CLASS_MOCK = "pClassMock_".freeze
 
-    # Postfixes to generated symbols
+    # Middle name and Postfixes to generated symbols
+    CLASS_SPLITTER_NAME = "in".freeze
     CLASS_POSTFIX_DECORATOR = "_Decorator".freeze
     CLASS_POSTFIX_FORWARDER = "_Forwarder".freeze
+    CLASS_POSTFIX_STUB = "_Stub".freeze
     CLASS_POSTFIX_MOCK = "_Mock".freeze
+
+    # Mock for the top level
     CLASS_FREE_FUNCTION_SET = "All".freeze
 
     # To prohibit c++11 keywords, set false
