@@ -123,7 +123,9 @@ CPP_COMMON_FLAGS=$(CPP_STD_OPT)
 # with their default target set to x86_64-pc-windows-msvc
 CLANG_TARGET=x86_64-pc-windows-gnu
 ifeq ($(BUILD_ON_MINGW),yes)
+ifneq (,$(findstring clang,$(CXX)))
 CLANG_TARGET_CXX=-target $(CLANG_TARGET)
+endif
 CLANG_TARGET_CC1=-triple $(CLANG_TARGET)
 endif
 
