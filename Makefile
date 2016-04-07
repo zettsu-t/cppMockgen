@@ -1,8 +1,8 @@
 # Makefile of the mock generator for Google Mock
 #
 # To use clang++ instead of g++, set the environment variable CXX
-# bash : export CXX=g++
-# cmd  : set CXX=g++
+# bash : export CXX=clang++
+# cmd  : set CXX=clang++
 
 # Write error message in English
 export LC_ALL=C

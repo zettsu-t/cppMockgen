@@ -15,10 +15,11 @@ MINGW_GCC_INCLUDE_DIR=$(MINGW_DIR)\lib\gcc\x86_64-w64-mingw32\4.9.2\include
 ifeq ($(OS),Windows_NT)
 # Cygwin
   ifneq (,$(findstring cygwin,$(shell gcc -dumpmachine)))
-CLANG_CC1_ISYSTEM=$(addprefix -cxx-isystem,/usr/include /usr/include/w32api $(CYGWIN_GCC_INCLUDE_DIR) $(CYGWIN_GCC_INCLUDE_DIR)/c++ $(CYGWIN_GCC_INCLUDE_DIR)/c++/x86_64-pc-cygwin)
 BUILD_ON_CYGWIN=yes
+CLANG_CC1_ISYSTEM=$(addprefix -cxx-isystem,/usr/include /usr/include/w32api $(CYGWIN_GCC_INCLUDE_DIR) $(CYGWIN_GCC_INCLUDE_DIR)/c++ $(CYGWIN_GCC_INCLUDE_DIR)/c++/x86_64-pc-cygwin)
 # MinGW
   else
+BUILD_ON_MINGW=yes
 ISYSTEM_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_DIR))\x86_64-w64-mingw32\include
 GCC_INCLUDE_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_GCC_INCLUDE_DIR))
 # quote C:\Program Files\... paths to pass to cmd
@@ -118,6 +119,14 @@ CPP_COMMON_FLAGS=$(CPP_STD_OPT)
 # To test ignoring attributes, enable these options
 #CPP_COMMON_FLAGS+=-DTESTING_ATTRIBUTES -Wno-attributes
 
+# LLVM 3.8.0 and up pre-built binaries for Windows are distributed
+# with their default target set to x86_64-pc-windows-msvc
+CLANG_TARGET=x86_64-pc-windows-gnu
+ifeq ($(BUILD_ON_MINGW),yes)
+CLANG_TARGET_CXX=-target $(CLANG_TARGET)
+CLANG_TARGET_CC1=-triple $(CLANG_TARGET)
+endif
+
 # Compilation for gtest-filepath.cc with clang++ on Cygwin
 # causes errors because it cannot find _POSIX_PATH_MAX.
 # Force to include limits.h which contains a definition of _POSIX_PATH_MAX.
@@ -129,14 +138,14 @@ endif
 
 # Flags for g++/clang++
 INCLUDES= $(addprefix -I, $(TESTED_HEADER_DIR) $(GENERATED_FILE_DIR)) $(GTEST_GMOCK_INCLUDE)
-CXXFLAGS = -g -Wall -O0 $(CPP_COMMON_FLAGS) $(CLANG_OPT) $(INCLUDES)
+CXXFLAGS=$(CLANG_TARGET_CXX) -g -Wall -O0 $(CPP_COMMON_FLAGS) $(CLANG_OPT) $(INCLUDES)
 CXXFLAGS_TESTED=
 CXXFLAGS_TESTER=$(addprefix -I, $(TESTER_HEADER_DIR))
-CXXFLAGS_GTEST_GMOCK = -Wall -O2 $(CPP_COMMON_FLAGS) $(CLANG_OPT) $(GTEST_GMOCK_INCLUDE)
+CXXFLAGS_GTEST_GMOCK=$(CLANG_TARGET_CXX) -Wall -O2 $(CPP_COMMON_FLAGS) $(CLANG_OPT) $(GTEST_GMOCK_INCLUDE)
 
 # Flags for clang++ -cc1
 # -cxx-isystem must be at its tail to pass to the script
-CLANG_FLAGS=-cc1 -ast-print -fblocks -fgnu-keywords -x c++ $(CPP_COMMON_FLAGS) $(CLANG_CC1_ISYSTEM)
+CLANG_FLAGS=-cc1 -ast-print -fblocks -fgnu-keywords -x c++ $(CLANG_TARGET_CC1) $(CPP_COMMON_FLAGS) $(CLANG_CC1_ISYSTEM)
 
 LIBPATH=
 LDFLAGS=
@@ -144,7 +153,8 @@ LIBS=-lstdc++
 
 ALL_UPDATED_VARIABLES= \
 	CYGWIN_GCC_INCLUDE_DIR MINGW_DIR MINGW_GCC_INCLUDE_DIR \
-	ISYSTEM_DIR GCC_INCLUDE_DIR CLANG_CC1_ISYSTEM BUILD_ON_CYGWIN \
+	BUILD_ON_CYGWIN BUILD_ON_MINGW \
+	ISYSTEM_DIR GCC_INCLUDE_DIR CLANG_CC1_ISYSTEM \
 	GTEST_GMOCK_TOP_DIR GTEST_TOP_DIR GMOCK_TOP_DIR \
 	GTEST_GMOCK_INCLUDE GTEST_SOURCE GMOCK_SOURCE GTEST_OBJ GMOCK_OBJ \
 	TESTED_HEADER_DIR TESTER_HEADER_DIR TESTED_SRC_DIR TESTER_SRC_DIR GENERATED_FILE_DIR \
@@ -159,6 +169,7 @@ ALL_UPDATED_VARIABLES= \
 	ALL_OBJS DEPENDS PROCESSED_CPPS TARGETS \
 	CLANG CXX LD RUBY LS \
 	CPP_STD_OPT CLANG_OPT CPP_COMMON_FLAGS \
+	CLANG_TARGET CLANG_TARGET_CXX CLANG_TARGET_CC1 \
 	INCLUDES_CLANG_GTEST INCLUDES CXXFLAGS CXXFLAGS_TESTED CXXFLAGS_TESTER CXXFLAGS_GTEST_GMOCK \
 	CLANG_FLAGS \
 	LIBPATH LDFLAGS LIBS
