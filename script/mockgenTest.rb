@@ -11,6 +11,60 @@ include Mockgen
 TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
 TestMockRefClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
 
+class TestChompAfterDelimiter < Test::Unit::TestCase
+  data(
+    'not split' => ["Func()", ":", "Func()", nil],
+    'constructor' => ["Derived() : Base()", ":", "Derived()", ": Base()"],
+    'assignment' => ["int a = 1", "=", "int a", "= 1"],
+    'mixed' => ["int a = (int)1", "=", "int a", "= (int)1"])
+  def test_chompAfterDelimiter(data)
+    line, delimiter, expected, expectedTail  = data
+    splitter = Mockgen::Common::ChompAfterDelimiter.new(line, delimiter)
+    assert_equal(expected, splitter.str)
+    assert_equal(expectedTail, splitter.tailStr)
+  end
+end
+
+class TestStringOfParenthesis < Test::Unit::TestCase
+  data(
+    'empty' => ["", []],
+    'one' => ["()", [["()", ""]]],
+    'one+str1' => ["(a)", [["(a)", "a"]]],
+    'one+str2' => ["( a )", [["(a)", "a"]]],
+    'two' => ["()( )", [["()", ""], ["()", ""]]],
+    'two+str' => ["( a ) ( b )", [["(a)", "a"], ["(b)", "b"]]],
+    'nested' => ["((a))( ( ( b ) ) )", [["((a))", "(a)"], ["(((b)))", "((b))"]]],
+    'out1' => ["f()", [["f", nil], ["()", ""]]],
+    'out2' => ["f ()g", [["f", nil], ["()", ""], ["g", nil]]],
+    'funcPtr1' => [" result(*f)(arg)", [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]],
+    'funcPtr2' => [" const T* (*func) (void) const; ",
+                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]]])
+  def test_splitByOuterParenthesis(data)
+    line, expected = data
+    assert_equal(expected, Mockgen::Common::StringOfParenthesis.new(line).parse)
+  end
+end
+
+class TestStringOfAngleBrackets < Test::Unit::TestCase
+  data(
+    'empty' => ["", []],
+    'one' => ["<>", [["<>", ""]]],
+    'one+str1' => ["<typename T>", [["<typename T>", "typename T"]]],
+    'one+str2' => ["< typename T >", [["<typename T>", "typename T"]]],
+    'template empty' => ["template <>", [["template", nil], ["<>", ""]]],
+    'template one' => ["template <class T>", [["template", nil], ["<class T>", "class T"]]],
+    'template two' => ["template <class T, size_t S>",
+                       [["template", nil], ["<class T, size_t S>", "class T, size_t S"]]],
+    'specialized' => ["template <> class T<int>",
+                      [["template", nil], ["<>", ""], ["class", nil], ["T", nil], ["<int>", "int"]]],
+    'nested' => ["template <class T, class S = tmp<T>>",
+                 [["template", nil], ["<class T, class S = tmp<T>>", "class T, class S = tmp<T>"]]])
+  def test_splitByOuterAngleBrackets(data)
+    line, expected = data
+    assert_equal(expected, Mockgen::Common::StringOfAngleBrackets.new(line).parse)
+  end
+end
+
 class TestMockRefSetClass
   attr_reader :valid
 
@@ -602,46 +656,6 @@ class TestTypedefBlock < Test::Unit::TestCase
   end
 end
 
-class TestStringOfParenthesis < Test::Unit::TestCase
-  data(
-    'empty' => ["", []],
-    'one' => ["()", [["()", ""]]],
-    'one+str1' => ["(a)", [["(a)", "a"]]],
-    'one+str2' => ["( a )", [["(a)", "a"]]],
-    'two' => ["()( )", [["()", ""], ["()", ""]]],
-    'two+str' => ["( a ) ( b )", [["(a)", "a"], ["(b)", "b"]]],
-    'nested' => ["((a))( ( ( b ) ) )", [["((a))", "(a)"], ["(((b)))", "((b))"]]],
-    'out1' => ["f()", [["f", nil], ["()", ""]]],
-    'out2' => ["f ()g", [["f", nil], ["()", ""], ["g", nil]]],
-    'funcPtr1' => [" result(*f)(arg)", [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]],
-    'funcPtr2' => [" const T* (*func) (void) const; ",
-                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]]])
-  def test_splitByOuterParenthesis(data)
-    line, expected = data
-    assert_equal(expected, StringOfParenthesis.new(line).parse)
-  end
-end
-
-class TestStringOfAngleBrackets < Test::Unit::TestCase
-  data(
-    'empty' => ["", []],
-    'one' => ["<>", [["<>", ""]]],
-    'one+str1' => ["<typename T>", [["<typename T>", "typename T"]]],
-    'one+str2' => ["< typename T >", [["<typename T>", "typename T"]]],
-    'template empty' => ["template <>", [["template", nil], ["<>", ""]]],
-    'template one' => ["template <class T>", [["template", nil], ["<class T>", "class T"]]],
-    'template two' => ["template <class T, size_t S>",
-                       [["template", nil], ["<class T, size_t S>", "class T, size_t S"]]],
-    'specialized' => ["template <> class T<int>",
-                      [["template", nil], ["<>", ""], ["class", nil], ["T", nil], ["<int>", "int"]]],
-    'nested' => ["template <class T, class S = tmp<T>>",
-                 [["template", nil], ["<class T, class S = tmp<T>>", "class T, class S = tmp<T>"]]])
-  def test_splitByOuterAngleBrackets(data)
-    line, expected = data
-    assert_equal(expected, StringOfAngleBrackets.new(line).parse)
-  end
-end
-
 class TestTypedVariable < Test::Unit::TestCase
   data(
     'primitive1' => ["int a", "int", "a"],
@@ -1016,20 +1030,6 @@ class TestMemberVariableStatement < Test::Unit::TestCase
      assert_false(block.isNonMemberInstanceOfClass?)
      assert_equal(type, block.className)
      assert_equal(var, block.getFullname)
-  end
-end
-
-class TestChompAfterDelimiter < Test::Unit::TestCase
-  data(
-    'not split' => ["Func()", ":", "Func()", nil],
-    'constructor' => ["Derived() : Base()", ":", "Derived()", ": Base()"],
-    'assignment' => ["int a = 1", "=", "int a", "= 1"],
-    'mixed' => ["int a = (int)1", "=", "int a", "= (int)1"])
-  def test_chompAfterDelimiter(data)
-    line, delimiter, expected, expectedTail  = data
-    splitter = ChompAfterDelimiter.new(line, delimiter)
-    assert_equal(expected, splitter.str)
-    assert_equal(expectedTail, splitter.tailStr)
   end
 end
 
@@ -3906,11 +3906,57 @@ class TestUndefinedReferenceSet < Test::Unit::TestCase
   end
 end
 
-CppFileParserNilArgSet = [nil, nil, nil, false, [], []].freeze
+class TestCppFileParameterSet < Test::Unit::TestCase
+  def test_all
+    cppNameSpace = "a"
+    inputFilename = "b"
+    linkLogFilename = "c"
+    convertedFilename = "d"
+    stubOnly = true
+    filterSet = ["f"]
+    sourceFilenameSet = ["g"]
+
+    parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
+                                           stubOnly, filterSet, sourceFilenameSet)
+    assert_equal(cppNameSpace, parameterSet.cppNameSpace)
+    assert_equal(inputFilename, parameterSet.inputFilename)
+    assert_equal(linkLogFilename, parameterSet.linkLogFilename)
+    assert_equal(convertedFilename, parameterSet.convertedFilename)
+    assert_equal(stubOnly, parameterSet.stubOnly)
+    assert_equal(filterSet, parameterSet.filterSet)
+    assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
+  end
+end
+
+class TestCppIoFilenameSet < Test::Unit::TestCase
+  def test_all
+    classFilename = "a"
+    typeSwapperFilename = "b"
+    varSwapperFilename = "c"
+    declFilename = "d"
+    defFilename = "e"
+    numberOfClassInFile = 7
+
+    filenameSet = CppIoFilenameSet.new(classFilename, typeSwapperFilename, varSwapperFilename,
+                                       declFilename, defFilename, numberOfClassInFile)
+    assert_equal(classFilename, filenameSet.classFilename)
+    assert_equal(typeSwapperFilename, filenameSet.typeSwapperFilename)
+    assert_equal(varSwapperFilename, filenameSet.varSwapperFilename)
+    assert_equal(declFilename, filenameSet.declFilename)
+    assert_equal(defFilename, filenameSet.defFilename)
+    assert_equal(numberOfClassInFile, filenameSet.numberOfClassInFile)
+  end
+end
+
+class CppFileParserNilArgSet < CppFileParameterSet
+  def initialize(cppNameSpace)
+    super(cppNameSpace, nil, nil, nil, false, [], [])
+  end
+end
 
 class TestCppFileParser < Test::Unit::TestCase
   def test_parseLine
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
     originalBlock = parser.instance_variable_get(:@block)
     parser.parseLine("comment")
@@ -3949,7 +3995,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_parseTypedefAndStruct
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
     parser.parseLine("typedef class tagName {")
     block = parser.instance_variable_get(:@block)
@@ -3965,7 +4011,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_eliminateUnusedBlock
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parentBlock = BaseBlock.new("Parent")
     childBlock = BaseBlock.new("Child")
     parentBlock.connect(childBlock)
@@ -3979,7 +4025,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_eliminateAllUnusedBlock
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parentBlock = BaseBlock.new("Parent")
     childBlock = BaseBlock.new("Child")
     parentBlock.connect(childBlock)
@@ -3998,7 +4044,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_mergeFreeFunctionSetArray
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
     rootBlock = RootBlock.new("")
     ns1 = NamespaceBlock.new("namespace A {")
@@ -4035,7 +4081,7 @@ class TestCppFileParser < Test::Unit::TestCase
     'number' => [['Func\\d'], 1])
   def test_collectFreeFunctions(data)
     filterSet, expected = data
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     rootBlock = RootBlock.new("")
     nsBlock = NamespaceBlock.new("namespace A {")
     ecBlock = ExternCBlock.new('extern "C" {')
@@ -4080,7 +4126,7 @@ class TestCppFileParser < Test::Unit::TestCase
     'end with period' => ["base.", "_1", "base_1."])
   def test_addPostfixToBasename(data)
     name, postfix, expected = data
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal(expected, parser.addPostfixToBasename(name, postfix))
   end
 
@@ -4090,7 +4136,7 @@ class TestCppFileParser < Test::Unit::TestCase
       blockB = TestClassMock.new("B", "", [])
       blockC = TestClassMock.new("C", "", [blockB, blockA])
       blockSet = [blockA, blockB, blockC]
-      parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+      parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
       if (testBuild)
         blockD = TestClassMock.new("D", "", [blockC])
@@ -4109,7 +4155,7 @@ class TestCppFileParser < Test::Unit::TestCase
     block = TestClassMock.new("Base", "A::Base", [])
     blockV = ExternVariableStatement.new("extern Base varB_;")
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], nil, nil))
   end
 
@@ -4126,7 +4172,7 @@ class TestCppFileParser < Test::Unit::TestCase
       relativeClassName.include?("A")
     end
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parser.collectClasses([blockA, blockB], refSet, nil)
     assert_true(blockA.instance_variable_get(:@alreadyDefined))
     assert_false(blockB.instance_variable_get(:@alreadyDefined))
@@ -4136,7 +4182,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockA = FreeFunctionBlock.new("extern int FuncA(int a);")
     blockB = FreeFunctionBlock.new("extern int FuncB(int a);")
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
     defRefSet = Object.new
     def defRefSet.freeFunctionDefined?(name)
@@ -4166,7 +4212,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockD = ClassBlock.new("class Derived : public A::Base {")
     classSet = { "::A::Base" => blockB, "::Derived" => blockD }
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parser.connectClasses([blockB, blockD], classSet)
     assert_equal(["::A::Base"], blockD.instance_variable_get(:@baseClassNameSet))
   end
@@ -4179,7 +4225,7 @@ class TestCppFileParser < Test::Unit::TestCase
     ns.connect(varD)
 
     blockSet = [varB, varD]
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     expected = [["varB_", "::A::varB_", "Base"],["varD_", "::A::varD_", "Derived"]]
     assert_equal(expected, parser.collectVariables(blockSet))
   end
@@ -4209,7 +4255,7 @@ class TestCppFileParser < Test::Unit::TestCase
     aliasRoots = TypedefBlock.new("typedef long long LongCounter;")
     rootBlock.connect(aliasRoots)
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parser.collectTypedefs(rootBlock)
     assert_equal({"Counter"=>"long"}, ns.typeAliasSet.aliasSet)
     assert_equal({"StructName"=>"tagStructName"}, ec.typeAliasSet.aliasSet)
@@ -4230,7 +4276,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockSet = [blockB, blockD]
 
     nsName = "TestNameSpace"
-    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new(nsName))
 
     varNameB = "varB_"
     varNameC = "varC_"
@@ -4292,7 +4338,7 @@ class TestCppFileParser < Test::Unit::TestCase
     varFullname = useNamespace ? "::A::#{varName}" : "#{varName}"
 
     nsName = "NameSpace"
-    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new(nsName))
     postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
     tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliasElements(classSet, varName, varFullname, className)
     assert_equal("#define #{className} ::#{nsName}::#{className}#{postfix}\n", tsStr)
@@ -4328,7 +4374,7 @@ class TestCppFileParser < Test::Unit::TestCase
     varFullname = useNamespace ? "::A::#{varName}" : "#{varName}"
 
     nsName = "NameSpace"
-    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new(nsName))
     postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
     tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliasElements(classSet, varName, varFullname, className)
     assert_equal("#define #{className} ::#{nsName}::#{className}#{postfix}\n", tsStr)
@@ -4354,7 +4400,7 @@ class TestCppFileParser < Test::Unit::TestCase
     varName = "var_"
 
     nsName = "NameSpace"
-    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new(nsName))
     postfix = Mockgen::Constants::CLASS_POSTFIX_DECORATOR
     tsStr, vsStr, declStr, defStr = parser.makeTypeVarAliasElements(classSet, varName, varName, className)
     assert_equal("#define #{className} ::#{nsName}::#{className}#{postfix}\n", tsStr)
@@ -4374,7 +4420,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockE = TestClassMock.new("E", "", [blockD, blockB])
 
     log = ""
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     lambdaToBlock = lambda { |block| log = log + block.name }
     parser.doForAllBlocks([blockE], lambdaToBlock, :isClass?)
     assert_equal("EDBCA", log)
@@ -4395,7 +4441,7 @@ class TestCppFileParser < Test::Unit::TestCase
     ecBlock2.connect(ecTypedefBlock)
     ecBlock2.collectAliases
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal(1, parser.collectTopLevelTypedefSet(rootBlock).flatten.size)
   end
 
@@ -4413,7 +4459,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockB = mockClass.new(true, false, [blockE, blockF], "B")
     blockA = mockClass.new(true, false, [blockC, blockD], "A")
 
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     actual = parser.collectClassesToWrite([blockA, blockB])
     assert_equal([[[blockG, [], blockH, []]], [blockF, []]], actual)
     assert_equal("GHF", actual.flatten.map(&:name).join(""))
@@ -4427,7 +4473,7 @@ class TestCppFileParser < Test::Unit::TestCase
     inputFilename = "in.hpp"
     outClassFilename = "out.hpp"
     nsName = "MyTest"
-    parser = CppFileParser.new(nsName, *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new(nsName))
     actual = parser.getClassFileHeader(inputFilename, outClassFilename, writeMacro)
 
     assert_true(actual.include?("generated"))
@@ -4444,7 +4490,7 @@ class TestCppFileParser < Test::Unit::TestCase
     declFilename = "decl.hpp"
     swapperFilename = "swap.hpp"
     headWord = "Title"
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     actual = parser.getSwapperHeader(declFilename, swapperFilename, headWord)
 
     expected =  "// #{headWord} name swapper definition\n"
@@ -4459,7 +4505,7 @@ class TestCppFileParser < Test::Unit::TestCase
   def test_getDeclHeader
     classFilename = "class.hpp"
     declFilename = "decl.hpp"
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     expected = "// Variable declarations\n// This file is machine generated.\n\n"
     expected += "#ifndef DECL_HPP\n#define DECL_HPP\n\n"
     expected += "#include " + '"' + classFilename + '"' +"\n\n"
@@ -4468,7 +4514,7 @@ class TestCppFileParser < Test::Unit::TestCase
 
   def test_getDefHeader
     filename = "out.hpp"
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     expected = "// Variable definitions\n// This file is machine generated.\n\n"
     expected += "#include " + '"' + filename + '"' +"\n\n"
     assert_equal(expected, parser.getDefHeader("ifilename", "ofilename", filename))
@@ -4479,12 +4525,12 @@ class TestCppFileParser < Test::Unit::TestCase
     'dir'  => ["top/sub/HeaderImpl.hpp", "#ifndef HEADER_IMPL_HPP\n#define HEADER_IMPL_HPP\n\n"])
   def test_getIncludeGuardHeader(data)
     filename, expected = data
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal(expected, parser.getIncludeGuardHeader(filename))
   end
 
   def test_getIncludeGuardFooter
-    assert_equal("#endif\n", CppFileParser.new("NameSpace", *CppFileParserNilArgSet).getIncludeGuardFooter)
+    assert_equal("#endif\n",CppFileParser.new(CppFileParserNilArgSet.new("NameSpace")).getIncludeGuardFooter)
   end
 
   data(
@@ -4499,7 +4545,7 @@ class TestCppFileParser < Test::Unit::TestCase
     'dir2' => ["top/suB/headerImpl.hpp", "HEADER_IMPL_HPP"])
   def test_getIncludeGuardName(data)
     filename, expected = data
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal(expected, parser.getIncludeGuardName(filename))
   end
 
@@ -4511,7 +4557,7 @@ class TestCppFileParser < Test::Unit::TestCase
   def test_getIncludeDirective(data)
     filename = data
     expected = filename.empty? ? "" : "#include \"header.hpp\"\n"
-    parser = CppFileParser.new("NameSpace", *CppFileParserNilArgSet)
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_equal(expected, parser.getIncludeDirective(filename))
   end
 

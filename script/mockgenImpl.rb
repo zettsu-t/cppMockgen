@@ -492,54 +492,6 @@ module Mockgen
     end
   end
 
-  class StringOfBrackets
-    def initialize(line)
-      @line = line
-    end
-
-    def parse(splitRegex, spaceRegex)
-      # Recursive regular expresstion to split () (()) () ...
-      pattern = Regexp.new(splitRegex)
-      phraseSet = @line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
-
-      # Remove spaces between parenthesis
-      spacePattern = Regexp.new(spaceRegex)
-      phraseSet.map do |phrase, captured|
-        left = phrase ? phrase.gsub(spacePattern, '\1') : nil
-        right = captured ? captured.gsub(spacePattern, '\1')[1..-2] : nil
-        [left, right]
-      end
-    end
-  end
-
-  # Split "result( *f )( arg )" into [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]
-  class StringOfParenthesis
-    def initialize(line)
-      @line = line
-    end
-
-    def parse
-      pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
-      StringOfBrackets.new(@line).parse(pattern, '\s*(\(|\))\s*')
-    end
-  end
-
-  # Split "template <> class Name<T>" into
-  #   [["template ", nil], ["<>", ""], [" class Name", nil], ["<T>", "T"]]
-  # and "template <typename T, typename U = V<S>>" into
-  #   [["template ", nil], ["<typename T, typename U = V<S>>", "typename T, typename U = V<S>"]]
-  class StringOfAngleBrackets
-    def initialize(line)
-      # split >> into "> >"
-      @line = line.gsub(/([<>])/, ' \1 ')
-    end
-
-    def parse
-      pattern = '((?>[^\s<]+|(<(?>[^<>]+|\g<-1>)*>))+)'
-      StringOfBrackets.new(@line).parse(pattern, '\s*(<|>)\s*')
-    end
-  end
-
   # Extract type of a variable
   class TypedVariable
     def initialize(line)
@@ -550,14 +502,14 @@ module Mockgen
       # Remove default argument
       newArgStr = @line.dup
 
-      splitter = ChompAfterDelimiter.new(@line, "=")
+      splitter = Mockgen::Common::ChompAfterDelimiter.new(@line, "=")
       mainBlock = splitter.str
       defaultValueBlock = splitter.tailStr
       str, arrayBlock = splitArrayBlock(mainBlock)
 
       # Assume T(f)(args) as a pointer to a function
       # T(f[])(args) is not supported
-      phraseSet = StringOfParenthesis.new(str).parse
+      phraseSet = Mockgen::Common::StringOfParenthesis.new(str).parse
       if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
         return parseFuncPtrArg(phraseSet, defaultValueBlock, serial)
       end
@@ -689,7 +641,7 @@ module Mockgen
       postFuncSet = []
       funcName = ""
 
-      phraseSet = StringOfParenthesis.new(line).parse
+      phraseSet = Mockgen::Common::StringOfParenthesis.new(line).parse
       phraseSet.reverse.each do |phrase, inParenthesis|
         if inParenthesis
           if argSetStr
@@ -729,7 +681,7 @@ module Mockgen
         argNameSet << argName
         newArgStrSet << newArgStr
 
-        poststr = ChompAfterDelimiter.new(newArgStr, "=").str
+        poststr = Mockgen::Common::ChompAfterDelimiter.new(newArgStr, "=").str
         argSetWithoutDefaultSet << poststr
         serial += 1
       end
@@ -754,7 +706,7 @@ module Mockgen
 
     # Split template
     def parse(line)
-      phraseSet = StringOfAngleBrackets.new(line).parse
+      phraseSet = Mockgen::Common::StringOfAngleBrackets.new(line).parse
       return if (phraseSet.size < 3)
       return if phraseSet[0][0].strip != "template"
 
@@ -784,7 +736,7 @@ module Mockgen
       genericSet = []
       @varSet = generic.split(",").map do |str|
         # Delete default type if specified
-        phrase = ChompAfterDelimiter.new(str.strip, "=").str
+        phrase = Mockgen::Common::ChompAfterDelimiter.new(str.strip, "=").str
         genericSet << phrase
         wordSet = phrase.split(/[\s\.]+/)
         postfix = str.include?("...") ? "..." : ""
@@ -856,12 +808,12 @@ module Mockgen
       return if typeName.empty? || varName.empty?
 
       @varName = varName
-      varStr = ChompAfterDelimiter.new(varName, "[")
+      varStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[")
       @varNameNoCardinality = varStr.str
       @arrayStr = varStr.tailStr
       @arrayStr ||= ""
 
-      @className = ChompAfterDelimiter.new(typeName, "[").str.split(/[\*&\s]+/)[-1]
+      @className = Mockgen::Common::ChompAfterDelimiter.new(typeName, "[").str.split(/[\*&\s]+/)[-1]
       @typeStr = typeName
       @canTraverse = true
     end
@@ -888,17 +840,6 @@ module Mockgen
       super
       # Now use only static (class instance) variables
       @canTraverse = false unless line =~ /\bstatic\b/
-    end
-  end
-
-  # Remove unrelated trailing sentence
-  class ChompAfterDelimiter
-    attr_reader :str, :tailStr
-
-    def initialize(argStr, delimiter)
-      pos = argStr.index(delimiter)
-      @str = pos ? argStr[0..(pos-1)].rstrip : argStr.dup
-      @tailStr = pos ? argStr[pos..-1] : nil
     end
   end
 
@@ -997,7 +938,7 @@ module Mockgen
       # Accept Constructor<T>(T& arg)
       elementSet = []
       typeStr = ""
-      StringOfAngleBrackets.new(line).parse.each do |element, inBlacket|
+      Mockgen::Common::StringOfAngleBrackets.new(line).parse.each do |element, inBlacket|
         if inBlacket.nil?
           elementSet << element
         else
@@ -1027,7 +968,7 @@ module Mockgen
     end
 
     def removeInitializerList(line)
-      ChompAfterDelimiter.new(line, ":").str
+      Mockgen::Common::ChompAfterDelimiter.new(line, ":").str
     end
 
     def canTraverse?
@@ -1746,7 +1687,7 @@ module Mockgen
 
     # Accept Constructor<T>(T& arg)
     def isConstructor?(line)
-      str = StringOfAngleBrackets.new(line).parse.select do |element|
+      str = Mockgen::Common::StringOfAngleBrackets.new(line).parse.select do |element|
         element[1].nil?
       end.join(" ")
       str.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
@@ -1756,7 +1697,7 @@ module Mockgen
     def isPointerToFunction?(line)
       # Recursive regular expression
       pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
-      newline = ChompAfterDelimiter.new(ChompAfterDelimiter.new(line, ";").str, "{").str
+      newline = Mockgen::Common::ChompAfterDelimiter.new(Mockgen::Common::ChompAfterDelimiter.new(line, ";").str, "{").str
       phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
 
       return false unless phraseSet
@@ -1875,12 +1816,12 @@ module Mockgen
 
     def parseClassHeader(line, typenameStr)
       # Discard words between class/struct keyword and a class name
-      wordSet = ChompAfterDelimiter.new(line, ":").str.strip.split(" ")
+      wordSet = Mockgen::Common::ChompAfterDelimiter.new(line, ":").str.strip.split(" ")
       name = wordSet.empty? ? "" : wordSet[-1]
 
       classLine = line
       if line.include?("template")
-        param = TemplateParameter.new(ChompAfterDelimiter.new(line, ":").str)
+        param = TemplateParameter.new(Mockgen::Common::ChompAfterDelimiter.new(line, ":").str)
         # Ignore specialized classes
         return false if param.specialized || param.type.empty?
         classLine = param.type
@@ -2411,7 +2352,7 @@ module Mockgen
     def initialize(name)
       @name = nil
       if name
-        varname = ChompAfterDelimiter.new(name, "[").str
+        varname = Mockgen::Common::ChompAfterDelimiter.new(name, "[").str
         @name = (varname.size >= 2 && varname[0..1] == "::") ? varname[2..-1] : varname.dup
       end
     end
@@ -2528,7 +2469,7 @@ module Mockgen
         md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+([^\']+)/)
         body = md[1]
 
-        phraseSet = StringOfParenthesis.new(body.tr("`'","")).parse
+        phraseSet = Mockgen::Common::StringOfParenthesis.new(body.tr("`'","")).parse
         phraseSet.reverse.each do |phrase, inParenthesis|
           if inParenthesis
             argTypeStr = inParenthesis
@@ -2607,34 +2548,65 @@ module Mockgen
     end
   end
 
+  # Parameter set to handle input and output files
+  class CppFileParameterSet
+    # cppNameSpace      : namespace of generated codes
+    # inputFilename     : a file before processed by clang
+    # convertedFilename : a file after processed by clang
+    attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
+    attr_reader :stubOnly, :filterSet, :sourceFilenameSet
+
+    def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
+                   stubOnly, filterSet, sourceFilenameSet)
+      @cppNameSpace = cppNameSpace
+      @inputFilename = inputFilename
+      @linkLogFilename = linkLogFilename
+      @convertedFilename = convertedFilename
+      @stubOnly = stubOnly
+      @filterSet = filterSet
+      @sourceFilenameSet = sourceFilenameSet
+    end
+  end
+
+  # Input and output file name set
+  class CppIoFilenameSet
+    attr_reader :classFilename, :typeSwapperFilename, :varSwapperFilename
+    attr_reader :declFilename, :defFilename, :numberOfClassInFile
+
+    def initialize(classFilename, typeSwapperFilename, varSwapperFilename,
+                   declFilename, defFilename, numberOfClassInFile)
+      @classFilename = classFilename
+      @typeSwapperFilename = typeSwapperFilename
+      @varSwapperFilename = varSwapperFilename
+      @declFilename = declFilename
+      @defFilename = defFilename
+      @numberOfClassInFile = numberOfClassInFile
+    end
+  end
+
   # Parse input file lines and format output strings
   class CppFileParser
-    # cppNameSpace : namespace of generated codes
-    # originalFilename : a file before processed by clang
-    # convertedFilename : a file after processed by clang
-    def initialize(cppNameSpace, originalFilename, linkLogFilename, convertedFilename, stubOnly,
-                   filterSet, sourceFilenameSet)
-      abort if cppNameSpace.nil? || cppNameSpace.empty?
-      @cppNameSpace = cppNameSpace
-      @inputFilename = originalFilename
+    def initialize(parameterSet)
+      @cppNameSpace = parameterSet.cppNameSpace
+      @inputFilename = parameterSet.inputFilename
       @blockFactory = BlockFactory.new
-      @stubOnly = stubOnly
+      @stubOnly = parameterSet.stubOnly
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
       @classInstanceMap = ClassInstanceMap.new
 
       # Allow nil for testing
-      return unless originalFilename
-      return unless convertedFilename
+      return unless @inputFilename
+      return unless parameterSet.convertedFilename
 
-      File.open(convertedFilename, "r") { |file|
+      File.open(parameterSet.convertedFilename, "r") { |file|
         readAllLines(file)
       }
 
-      definedReferenceSet = parseSourceFileSet(sourceFilenameSet)
-      undefinedReferenceSet = parseLinkLog(linkLogFilename)
-      @functionSetArray = buildFreeFunctionSet(definedReferenceSet, undefinedReferenceSet, filterSet)
+      definedReferenceSet = parseSourceFileSet(parameterSet.sourceFilenameSet)
+      undefinedReferenceSet = parseLinkLog(parameterSet.linkLogFilename)
+      @functionSetArray = buildFreeFunctionSet(definedReferenceSet, undefinedReferenceSet, parameterSet.filterSet)
       makeFreeFunctionSet(@functionSetArray)
 
       buildClassTree(definedReferenceSet, undefinedReferenceSet)
@@ -2643,7 +2615,7 @@ module Mockgen
     end
 
     # Write generated codes to arg files
-    def writeToFiles(argClassFilename, argTypeSwapperFilename, argVarSwapperFilename, argDeclFilename, argDefFilename, numberOfClassInFile)
+    def writeToFiles(filenameSet)
       beginNamespace = "namespace #{@cppNameSpace} {\n\n"
       endNamespace = "} // namespace #{@cppNameSpace}\n\n"
       usingNamespace = "using namespace #{@cppNameSpace};\n"
@@ -2653,47 +2625,69 @@ module Mockgen
       varSwapperFilenameSet = []
       declFilenameSet = []
 
-      # Write all stubs to one file
-      argBlockSet = @functionSetArray
-      postfix = Mockgen::Constants::CLASS_POSTFIX_STUB
-
-      classFilename = addPostfixToBasename(argClassFilename, postfix)
-      varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
-      declFilename = addPostfixToBasename(argDeclFilename, postfix)
-      defFilename = addPostfixToBasename(argDefFilename, postfix)
-
-      writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                            argBlockSet, :getStringToClassFile, nil, true, true)
-      writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                            argBlockSet, :getStringToDeclFile, nil, false, true)
-      writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                            argBlockSet, :getStringToSwapperFile, nil, false, true)
-      writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
-                            argBlockSet, :getStringOfStub, nil, false, false)
-      unless @stubOnly
-        writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
-                              argBlockSet, :getStringOfVariableDefinition, "a", false, false)
-      end
-
+      classFilename, declFilename = writeStubSetToFile(filenameSet, beginNamespace, endNamespace, usingNamespace)
       classFilenameSet << classFilename
       declFilenameSet << declFilename
 
+      classSet, typeSwapperSet, varSwapperSet, declSet = writeMockSetToFile(filenameSet, beginNamespace, endNamespace, usingNamespace)
+      classFilenameSet.concat(classSet)
+      typeSwapperFilenameSet.concat(typeSwapperSet)
+      varSwapperFilenameSet.concat(varSwapperSet)
+      declFilenameSet.concat(declSet)
+
+      writeAggregatedFiles(filenameSet.classFilename, classFilenameSet)
+      writeAggregatedFiles(filenameSet.typeSwapperFilename, typeSwapperFilenameSet)
+      writeAggregatedFiles(filenameSet.varSwapperFilename, varSwapperFilenameSet)
+      writeAggregatedFiles(filenameSet.declFilename, declFilenameSet)
+      0
+    end
+
+    def writeStubSetToFile(filenameSet, beginNamespace, endNamespace, usingNamespace)
+      # Write all stubs to one file
+      blockSet = @functionSetArray
+      postfix = Mockgen::Constants::CLASS_POSTFIX_STUB
+
+      classFilename = addPostfixToBasename(filenameSet.classFilename, postfix)
+      varSwapperFilename = addPostfixToBasename(filenameSet.varSwapperFilename, postfix)
+      declFilename = addPostfixToBasename(filenameSet.declFilename, postfix)
+      defFilename = addPostfixToBasename(filenameSet.defFilename, postfix)
+
+      writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
+                            blockSet, :getStringToClassFile, nil, true, true)
+      writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
+                            blockSet, :getStringToDeclFile, nil, false, true)
+      writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
+                            blockSet, :getStringToSwapperFile, nil, false, true)
+      writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
+                            blockSet, :getStringOfStub, nil, false, false)
+      unless @stubOnly
+        writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
+                              blockSet, :getStringOfVariableDefinition, "a", false, false)
+      end
+
+      return classFilename, declFilename
+    end
+
+    def writeMockSetToFile(filenameSet, beginNamespace, endNamespace, usingNamespace)
+      blockSet = collectClassesToWrite(@block.children).flatten.compact
+      sizeOfSet = filenameSet.numberOfClassInFile ? filenameSet.numberOfClassInFile : blockSet.size
+      classFilenameSet = []
+      typeSwapperFilenameSet = []
+      varSwapperFilenameSet = []
+      declFilenameSet = []
+
       index = 0
       serial = 1
-
-      blockSet = collectClassesToWrite(@block.children).flatten.compact
-      sizeOfSet = numberOfClassInFile ? numberOfClassInFile : blockSet.size
-      index = 0
       while(index < blockSet.size)
         argBlockSet = blockSet.slice(index, sizeOfSet)
-        postfix = (numberOfClassInFile.nil? || numberOfClassInFile > 1) ?
+        postfix = (filenameSet.numberOfClassInFile.nil? || filenameSet.numberOfClassInFile > 1) ?
                     "_#{serial}" : argBlockSet[0].getFilenamePostfix
 
-        classFilename = addPostfixToBasename(argClassFilename, postfix)
-        typeSwapperFilename = addPostfixToBasename(argTypeSwapperFilename, postfix)
-        varSwapperFilename = addPostfixToBasename(argVarSwapperFilename, postfix)
-        declFilename = addPostfixToBasename(argDeclFilename, postfix)
-        defFilename = addPostfixToBasename(argDefFilename, postfix)
+        classFilename = addPostfixToBasename(filenameSet.classFilename, postfix)
+        typeSwapperFilename = addPostfixToBasename(filenameSet.typeSwapperFilename, postfix)
+        varSwapperFilename = addPostfixToBasename(filenameSet.varSwapperFilename, postfix)
+        declFilename = addPostfixToBasename(filenameSet.declFilename, postfix)
+        defFilename = addPostfixToBasename(filenameSet.defFilename, postfix)
 
         writeClassFile(classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
         writeTypeSwapperFile(typeSwapperFilename, classFilename, beginNamespace, endNamespace, usingNamespace, argBlockSet)
@@ -2715,11 +2709,7 @@ module Mockgen
         index += sizeOfSet
       end
 
-      writeAggregatedFiles(argClassFilename, classFilenameSet)
-      writeAggregatedFiles(argTypeSwapperFilename, typeSwapperFilenameSet)
-      writeAggregatedFiles(argVarSwapperFilename, varSwapperFilenameSet)
-      writeAggregatedFiles(argDeclFilename, declFilenameSet)
-      0
+      return classFilenameSet, typeSwapperFilenameSet, varSwapperFilenameSet, declFilenameSet
     end
 
     ## Implementation detail (public for testing)
@@ -2891,8 +2881,8 @@ module Mockgen
       return "", "", "", "" unless block
 
       # should move this to a parse phase...
-      varNameStr = ChompAfterDelimiter.new(varName, "[")
-      varFullnameStr = ChompAfterDelimiter.new(varFullname, "[")
+      varNameStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[")
+      varFullnameStr = Mockgen::Common::ChompAfterDelimiter.new(varFullname, "[")
 
       mockName = className + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
       actualClassName = block.decoratorName
@@ -3057,7 +3047,8 @@ module Mockgen
       end
     end
 
-    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace, blockSet, labelGetStr, mode, writeMacro, needGuard)
+    def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace,
+                              blockSet, labelGetStr, mode, writeMacro, needGuard)
       filemode = mode
       filemode ||= "w"
       File.open(filename, filemode) do |file|
@@ -3283,8 +3274,10 @@ module Mockgen
       # It is also useful to know how clang format .hpp files.
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
 
-      parseHeader(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
-                  @stubOnly, @functionNameFilterSet, @sourceFilenameSet)
+      parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
+                                             @stubOnly, @functionNameFilterSet, @sourceFilenameSet)
+      parseHeader(parameterSet)
+
       # Value to return as process status code
       0
     end
@@ -3315,13 +3308,10 @@ module Mockgen
       argSet.join(" ")
     end
 
-    def parseHeader(cppNameSpace, inputFilename, linkLogFilename, convertedFilename, stubOnly,
-                    filterSet, sourceFilenameSet)
-      parser = CppFileParser.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
-                                 stubOnly, filterSet, sourceFilenameSet)
-      args = [@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename]
-      args.concat([@outDeclFilename, @outDefFilename, @numberOfClassInFile])
-      parser.writeToFiles(*args)
+    def parseHeader(parameterSet)
+      parser = CppFileParser.new(parameterSet)
+      parser.writeToFiles(CppIoFilenameSet.new(@outClassFilename, @outTypeSwapperFilename, @outVarSwapperFilename,
+                                               @outDeclFilename, @outDefFilename, @numberOfClassInFile))
     end
   end
 end

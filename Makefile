@@ -17,15 +17,29 @@ MAKEFILE_PARALLEL=-j 5
 
 ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
-.PHONY: all runthrough check generate test_generate_each test_generate_bulk clean clean_generated rebuild show showall FORCE
+.PHONY: all runthrough runthrough_llvm runthrough_gcc runthrough_cxx
+.PHONY: check generate test_generate_each test_generate_bulk
+.PHONY: clean clean_generated rebuild show showall FORCE
 
 all: $(TARGETS)
 
 runthrough:
+	$(MAKE) runthrough_llvm
+	$(MAKE) runthrough_gcc
+	@$(ECHO) -e $(ECHO_START_FG)All tests have completed successfully.$(ECHO_END_FG)
+
+runthrough_llvm: export CXX=clang++
+runthrough_llvm: runthrough_cxx
+
+runthrough_gcc: export CXX=g++
+runthrough_gcc: runthrough_cxx
+
+runthrough_cxx:
 	-$(MAKE) clean
 	-$(MAKE)
 	$(MAKE)
 	$(MAKE) check
+	@$(ECHO) -e $(ECHO_START_BG)All tests have completed with $(CXX)$(ECHO_END_BG)
 
 check:
 	$(TARGET_EXE)

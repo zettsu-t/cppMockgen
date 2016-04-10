@@ -1,0 +1,18 @@
+## This is a directory/file filter for WinMerge
+name: Mock Generator
+desc: Suppresses executables, intermediate and generated files
+def: include
+
+f: \.exe$
+f: \.o$
+f: \.d$
+f: \.processed$
+f: \.lib$
+f: ^\.gitignore$
+f: ^#     ## Temporally
+f: ~$     ## backup
+f: \.bak$ ## backup
+
+d: \\generated$ ## Automatically generated files
+d: \\\.svn$     ## Subversion working copy
+d: \\\.git$     ## Git directory
