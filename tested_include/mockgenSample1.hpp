@@ -114,6 +114,11 @@ namespace Sample1 {
         extern ::Sample1::Types::ConstructorWithArg aCtorWithArg;
     }
 
+    class ClassNotMocked {
+    public:
+        virtual void Execute(void);
+    };
+
     const size_t g_SampleArrayIndex = 1;
     extern int SampleFunc(void);
     extern int SampleFuncArray(void);

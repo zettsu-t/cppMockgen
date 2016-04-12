@@ -66,6 +66,8 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_1.hpp
+	$(LS) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp
+	$(GREP) $(GENERATOR_FILTERED_OUT_CLASSNAME) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp | $(WC) | $(GREP) "  0  "
 
 # Write a mock class in an output class named by the class name
 test_generate_each: clean_generated

@@ -170,6 +170,21 @@ module Mockgen
     end
   end
 
+  # Filter to select functions and classes
+  class SymbolFilter
+    # definedReferenceSet : an instance of DefinedReferenceSet
+    # undefinedReferenceSet : an instance of UndefinedReferenceSet
+    # functionNameFilterSet, classNameFilterOutSet : an array of regrep strings
+    attr_reader :definedReferenceSet, :undefinedReferenceSet, :functionNameFilterSet, :classNameFilterOutSet
+
+    def initialize(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet)
+      @definedReferenceSet = definedReferenceSet
+      @undefinedReferenceSet = undefinedReferenceSet
+      @functionNameFilterSet = functionNameFilterSet
+      @classNameFilterOutSet = classNameFilterOutSet
+    end
+  end
+
   # Generic Block Structure
   class BaseBlock
     attr_reader :parent, :children, :typeAliasSet
@@ -316,7 +331,7 @@ module Mockgen
     end
 
     # To mock only undefined references
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+    def filterByReferenceSet(filter)
       true
     end
 
@@ -772,8 +787,8 @@ module Mockgen
       @canTraverse
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
-      undefinedReferenceSet.getReferenceSetByFullname(getFullname()).any? do |reference|
+    def filterByReferenceSet(filter)
+      filter.undefinedReferenceSet.getReferenceSetByFullname(getFullname()).any? do |reference|
         !reference.memberName.nil? && (reference.memberName == @varNameNoCardinality)
       end
     end
@@ -975,9 +990,9 @@ module Mockgen
       @valid
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+    def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@className)
-      undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
+      filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
         FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
       end
     end
@@ -1117,9 +1132,9 @@ module Mockgen
       @valid
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+    def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@funcName)
-      undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
+      filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
         FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc).compare
       end
     end
@@ -1324,8 +1339,8 @@ module Mockgen
       @alreadyDefined = false
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
-      @alreadyDefined = (!definedReferenceSet.nil? && definedReferenceSet.freeFunctionDefined?(@funcName))
+    def filterByReferenceSet(filter)
+      @alreadyDefined = (!filter.definedReferenceSet.nil? && filter.definedReferenceSet.freeFunctionDefined?(@funcName))
       super
     end
 
@@ -1375,9 +1390,9 @@ module Mockgen
       @block.getFullNamespace
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+    def filterByReferenceSet(filter)
       @funcSet.each do |func|
-        @undefinedFunctionSet << func if func.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        @undefinedFunctionSet << func if func.filterByReferenceSet(filter)
       end
     end
 
@@ -1547,6 +1562,7 @@ module Mockgen
       @filtered = false    # Filter undefined functions
       @destructor = nil    # None or one instance
       @alreadyDefined = false
+      @filteredOut = false
 
       # Remove trailing ; and {
       body = line
@@ -1611,7 +1627,7 @@ module Mockgen
 
     def canMock?
       # exclude PODs
-      @valid && (!@allConstructorSet.empty? || !@allMemberFunctionSet.empty?) || needStub?
+      @valid && !@filteredOut && (!@allConstructorSet.empty? || !@allMemberFunctionSet.empty? || needStub?)
     end
 
     def isClass?
@@ -1714,30 +1730,34 @@ module Mockgen
       @staticMockDef + @classDefInCpp
     end
 
-    def filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+    def filterByReferenceSet(filter)
       constructorBlockSet = []
       functionBlockSet = []
       variableBlockSet = []
       @filtered = false
 
-      @alreadyDefined = true if !definedReferenceSet.nil? && definedReferenceSet.classDefined?(getFullname(), definedReferenceSet.relativeNamespaceOnly)
-      return if undefinedReferenceSet.nil? || !undefinedReferenceSet.valid
+      fullname = getFullname()
+      @alreadyDefined = true if !filter.definedReferenceSet.nil? &&
+                                filter.definedReferenceSet.classDefined?(
+                                  fullname, filter.definedReferenceSet.relativeNamespaceOnly)
+      @filteredOut = filter.classNameFilterOutSet.any? { |pattern| fullname.match(/#{pattern}/) }
+      return if filter.undefinedReferenceSet.nil? || !filter.undefinedReferenceSet.valid
 
       # Create a default destructor if it does not exist
       @destructor ||= DestructorBlock.new(nil, @uniqueName)
-      @undefinedDestructor = @destructor if @destructor.filterByUndefinedReferenceSet(undefinedReferenceSet, getFullname())
+      @undefinedDestructor = @destructor if @destructor.filterByUndefinedReferenceSet(filter.undefinedReferenceSet, fullname)
 
       @allConstructorSet.each do |block|
-        constructorBlockSet << block if block.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        constructorBlockSet << block if block.filterByReferenceSet(filter)
       end
 
       @allMemberFunctionSet.each do |block|
-        functionBlockSet << block if block.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        functionBlockSet << block if block.filterByReferenceSet(filter)
       end
 
       # Assume instance variables do not appear in referenceSet
       @allMemberVariableSet.each do |block|
-        variableBlockSet << block if block.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        variableBlockSet << block if block.filterByReferenceSet(filter)
       end
 
       @undefinedConstructorSet = constructorBlockSet.uniq
@@ -2554,16 +2574,17 @@ module Mockgen
     # inputFilename     : a file before processed by clang
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
-    attr_reader :stubOnly, :filterSet, :sourceFilenameSet
+    attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
-                   stubOnly, filterSet, sourceFilenameSet)
+                   stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
       @convertedFilename = convertedFilename
       @stubOnly = stubOnly
-      @filterSet = filterSet
+      @functionNameFilterSet = functionNameFilterSet
+      @classNameFilterOutSet = classNameFilterOutSet
       @sourceFilenameSet = sourceFilenameSet
     end
   end
@@ -2606,10 +2627,12 @@ module Mockgen
 
       definedReferenceSet = parseSourceFileSet(parameterSet.sourceFilenameSet)
       undefinedReferenceSet = parseLinkLog(parameterSet.linkLogFilename)
-      @functionSetArray = buildFreeFunctionSet(definedReferenceSet, undefinedReferenceSet, parameterSet.filterSet)
+
+      filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet, parameterSet.classNameFilterOutSet)
+      @functionSetArray = buildFreeFunctionSet(filter)
       makeFreeFunctionSet(@functionSetArray)
 
-      buildClassTree(definedReferenceSet, undefinedReferenceSet)
+      buildClassTree(filter)
       makeClassSet
       @classInstanceMap.cleanUp
     end
@@ -2769,20 +2792,20 @@ module Mockgen
       end
     end
 
-    def parseLinkLog(linkLogFilename)
-      UndefinedReferenceSet.new(linkLogFilename)
-    end
-
     def parseSourceFileSet(sourceFilenameSet)
       DefinedReferenceSet.new(sourceFilenameSet)
     end
 
-    def buildFreeFunctionSet(definedReferenceSet, undefinedReferenceSet, filterSet)
+    def parseLinkLog(linkLogFilename)
+      UndefinedReferenceSet.new(linkLogFilename)
+    end
+
+    def buildFreeFunctionSet(filter)
       rootFreeFunctionSet = FreeFunctionSet.new(@block)
-      freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block, filterSet)
+      freeFunctionSetArray = collectFreeFunctions(rootFreeFunctionSet, @block, filter.functionNameFilterSet)
 
       freeFunctionSetArray.each do |funcSet|
-        funcSet.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        funcSet.filterByReferenceSet(filter)
       end
 
       mergeFreeFunctionSetArray(freeFunctionSetArray)
@@ -2807,11 +2830,11 @@ module Mockgen
       allSet
     end
 
-    def buildClassTree(definedReferenceSet, undefinedReferenceSet)
+    def buildClassTree(filter)
       # Resolve aliases before find undefined references
       collectTypedefs(@block)
       # classSet : class name => block
-      classSet = collectClasses(@block.children, definedReferenceSet, undefinedReferenceSet)
+      classSet = collectClasses(@block.children, filter)
       connectClasses(@block.children, classSet)
 
       varSet = collectVariables(@block.children)
@@ -2820,11 +2843,11 @@ module Mockgen
       eliminateAllUnusedBlock(@block)
     end
 
-    def collectClasses(rootBlockSet, definedReferenceSet, undefinedReferenceSet)
+    def collectClasses(rootBlockSet, filter)
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
         block.markMemberFunctionSetVirtual
-        block.filterByReferenceSet(definedReferenceSet, undefinedReferenceSet)
+        block.filterByReferenceSet(filter)
         fullname = block.getFullname
         classSet[fullname] = block unless fullname.empty?
       end
@@ -3227,6 +3250,7 @@ module Mockgen
       mode = argSet.shift
       @stubOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_STUB)
       @functionNameFilterSet = []
+      @classNameFilterOutSet = []
       @sourceFilenameSet = []
       @numberOfClassInFile = nil
 
@@ -3240,6 +3264,9 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_FUNCTION_NAME_FILTER
           argSet.shift(2)
           @functionNameFilterSet << optionValue
+        when Mockgen::Constants::ARGUMENT_CLASS_NAME_FILTER_OUT
+          argSet.shift(2)
+          @classNameFilterOutSet << optionValue
         when Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER
           argSet.shift(2)
           @sourceFilenameSet << optionValue
@@ -3275,7 +3302,7 @@ module Mockgen
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
-                                             @stubOnly, @functionNameFilterSet, @sourceFilenameSet)
+                                             @stubOnly, @functionNameFilterSet, @classNameFilterOutSet, @sourceFilenameSet)
       parseHeader(parameterSet)
 
       # Value to return as process status code

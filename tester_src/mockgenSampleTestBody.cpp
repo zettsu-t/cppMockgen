@@ -1,9 +1,7 @@
 // Declare forwarders
-#include "vardecl_mockgenSample1.hpp"
+#include "varDecl_mockgenSample1.hpp"
 // Swap class names used later to their decorator
 #include "typeSwapper_mockgenSample1.hpp"
-// Forwarder of the top level namespace
-#include "varDecl_mockgenSample1.hpp"
 
 #include "mockgenSample2.hpp"
 #include <gtest/gtest.h>

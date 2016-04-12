@@ -9,6 +9,7 @@ module Mockgen
     ARGUMENT_MODE_STUB = "stub".freeze
     ARGUMENT_MODE_MOCK = "mock".freeze
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
+    ARGUMENT_CLASS_NAME_FILTER_OUT = "-filterout".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
 

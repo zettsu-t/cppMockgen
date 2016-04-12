@@ -240,6 +240,27 @@ class TestTypeAliasSet < Test::Unit::TestCase
   end
 end
 
+class TestSymbolFilter < Test::Unit::TestCase
+  def test_all
+    definedReferenceSet = 1
+    undefinedReferenceSet = "b"
+    functionNameFilterSet = ["c", "d"]
+    classNameFilterOutSet = ["e", "f"]
+
+    filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet)
+    assert_equal(definedReferenceSet, filter.definedReferenceSet)
+    assert_equal(undefinedReferenceSet, filter.undefinedReferenceSet)
+    assert_equal(functionNameFilterSet, filter.functionNameFilterSet)
+    assert_equal(classNameFilterOutSet, filter.classNameFilterOutSet)
+  end
+end
+
+class MinimumSymbolFilter < SymbolFilter
+  def initialize(definedReferenceSet, undefinedReferenceSet)
+    super(definedReferenceSet, undefinedReferenceSet, [], [])
+  end
+end
+
 class TestBaseBlock < Test::Unit::TestCase
   data(
     'word' => "Varname",
@@ -982,14 +1003,14 @@ class TestExternVariableStatement < Test::Unit::TestCase
     reference = referenceClass.new("a")
     nilReference = referenceClass.new(nil)
 
-    assert_true(varBlockA.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
-    assert_true(arrayBlock.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
-    assert_false(varBlockA.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(nilReference)))
-    assert_false(varBlockB.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
+    assert_true(varBlockA.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
+    assert_true(arrayBlock.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
+    assert_false(varBlockA.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(nilReference))))
+    assert_false(varBlockB.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
 
     refSet = TestMockRefSetClass.new(true, [reference, referenceClass.new("b")])
-    assert_true(varBlockA.filterByReferenceSet(nil, refSet))
-    assert_true(varBlockB.filterByReferenceSet(nil, refSet))
+    assert_true(varBlockA.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
+    assert_true(varBlockB.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
   end
 
   def test_makeStubDef
@@ -1260,19 +1281,18 @@ class TestConstructorBlock < Test::Unit::TestCase
 
     className = "NameC"
     block = ConstructorBlock.new("NameC(int);", className)
-    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
 
     otherLine = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE
     otherLine += " `NameC::Func()'"
     referenceOther = UndefinedReference.new(otherLine)
     refSet = TestMockRefSetClass.new(true, [referenceOther, reference])
-    assert_true(block.filterByReferenceSet(nil, refSet))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
 
     block = ConstructorBlock.new("NameC();", className)
-    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
+    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
     block = ConstructorBlock.new("~NameC();", className)
-    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(reference)))
-
+    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
   end
 
   def test_makeStubDef
@@ -1458,13 +1478,13 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     refUnmatched2 = TestMockRefClass.new("", "Func1", "Func1", "int*", "const")
 
     block = MemberFunctionBlock.new("void Func1(int) const")
-    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refMatched1)))
-    assert_true(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refMatched2)))
-    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refUnmatched1)))
-    assert_false(block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(refUnmatched2)))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refMatched1))))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refMatched2))))
+    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refUnmatched1))))
+    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refUnmatched2))))
 
     refSet = TestMockRefSetClass.new(true, [refUnmatched1, refMatched1])
-    assert_true(block.filterByReferenceSet(nil, refSet))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
   end
 
   def test_override?
@@ -1787,7 +1807,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     end
 
     ref = UndefinedReference.new("")
-    block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref))
+    block.filterByReferenceSet(MinimumSymbolFilter.new(defRefSet, TestMockRefMonoSetClass.new(ref)))
     assert_true(block.instance_variable_get(:@alreadyDefined))
 
     assert_equal("", block.makeMockDef("", ""))
@@ -1808,13 +1828,13 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
     prefix = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE + " "
     ref = UndefinedReference.new(prefix + "`Func(int)'")
-    assert_true(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(defRefSet, TestMockRefMonoSetClass.new(ref))))
 
     ref = UndefinedReference.new(prefix + "`Func'")
-    assert_true(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
+    assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(defRefSet, TestMockRefMonoSetClass.new(ref))))
 
     ref = UndefinedReference.new(prefix + "`A::Func'")
-    assert_false(block.filterByReferenceSet(defRefSet, TestMockRefMonoSetClass.new(ref)))
+    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(defRefSet, TestMockRefMonoSetClass.new(ref))))
   end
 
   data(
@@ -2041,7 +2061,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     end
 
     refSet = TestMockRefSetClass.new(true, refArray)
-    funcSet.filterByReferenceSet(nil, refSet)
+    funcSet.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
     assert_true(funcSet.needStub?)
 
     expectedStub =  "void FuncA(int a) {\n    return;\n}\n\n"
@@ -2072,7 +2092,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
 
     ref = TestMockRefClass.new("", "A::B::Func", "Func", nil, "")
     refSet = TestMockRefSetClass.new(true, [ref])
-    funcSet.filterByReferenceSet(nil, refSet)
+    funcSet.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
     assert_true(funcSet.needStub?)
 
     expectedStub = "namespace A {\nnamespace B {\nvoid Func() {\n    return;\n}\n\n}\n}\n"
@@ -2091,7 +2111,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     ["extern int Func(int a);",
      "extern int Func(int b);"].each do |line|
       func = FreeFunctionBlock.new(line)
-      def func.filterByReferenceSet(dRef, uDef)
+      def func.filterByReferenceSet(filter)
         true
       end
       block.connect(func)
@@ -2099,7 +2119,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     end
 
     refSet = TestMockRefSetClass.new(true, [1])
-    funcSet.filterByReferenceSet(nil, refSet)
+    funcSet.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
 
     assert_equal(2, funcSet.funcSet.size)
     assert_equal(2, funcSet.undefinedFunctionSet.size)
@@ -2328,6 +2348,7 @@ class TestClassBlock < Test::Unit::TestCase
     classname = "NameC"
     block = ClassBlock.new("class " + classname)
     assert_false(block.instance_variable_get(:@alreadyDefined))
+    assert_false(block.instance_variable_get(:@filteredOut))
 
     def block.formatStub
       "a"
@@ -2359,7 +2380,7 @@ class TestClassBlock < Test::Unit::TestCase
       true
     end
 
-    block.filterByReferenceSet(refSet, nil)
+    block.filterByReferenceSet(MinimumSymbolFilter.new(refSet, nil))
     assert_true(block.instance_variable_get(:@alreadyDefined))
     block.makeClassSet
     assert_true(block.getStringToClassFile.empty?)
@@ -2386,10 +2407,34 @@ class TestClassBlock < Test::Unit::TestCase
     ref = TestMockRefClass.new(classname, funcname, funcname, "int", "const")
     refSet = TestMockRefSetClass.new(true, [ref])
 
-    block.filterByReferenceSet(nil, refSet)
+    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
     assert_equal([childBlockU], block.instance_variable_get(:@undefinedFunctionSet))
     assert_true(block.canTraverse?)
     assert_true(block.needStub?)
+  end
+
+  data(
+    'empty' => [[], true],
+    'exact matching name' => [["NameC"], false],
+    'partial matching name' => [["Name"], false],
+    'no matching name' => [["NameD"], true],
+    'exact matching namespace' => [["Utility::NameC"], false],
+    'partial matching namespace' => [["lity::Name"], false],
+    'no matching namespace' => [["CommpnUtility::NameD"], true])
+  def test_filterByName(data)
+    arg, expected = data
+    classname = "NameC"
+    block = ClassBlock.new("class " + classname)
+    assert_nil(block.parseChildren("public :"))
+    funcLineDef = "void FuncDefined();"
+    childBlockD = block.parseChildren(funcLineDef)
+    block.connect(childBlockD)
+    nsBlock = NamespaceBlock.new("namespace Utility")
+    nsBlock.connect(block)
+
+    assert_true(block.canMock?)
+    block.filterByReferenceSet(SymbolFilter.new(nil, nil, [], arg))
+    assert_equal(expected, block.canMock?)
   end
 
   data(
@@ -2411,14 +2456,14 @@ class TestClassBlock < Test::Unit::TestCase
         true
       end
     else
-      def memberBlock.filterByReferenceSet(dRef, uRef)
+      def memberBlock.filterByReferenceSet(filter)
         true
       end
     end
 
     ref = TestMockRefClass.new(classname, "#{classname}::#{memberName}", memberName, "", "")
 
-    block.filterByReferenceSet(nil, TestMockRefMonoSetClass.new(ref))
+    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(ref)))
     assert_true(block.needStub?)
     assert_true(block.canMock?)
   end
@@ -2965,7 +3010,7 @@ class TestClassBlock < Test::Unit::TestCase
     refDestructor = TestMockRefClass.new(testedName, "#{testedName}::~#{testedName}", "~#{testedName}", "", postFunc)
     refVar = TestMockRefClass.new(testedName, "#{testedName}::varStub", "varStub", "", "")
     refSet = TestMockRefSetClass.new(true, [refFunc, refDestructor, refVar])
-    block.filterByReferenceSet(nil, refSet)
+    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
 
     actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_equal(expectedStub, block.formatStub)
@@ -3010,7 +3055,7 @@ class TestClassBlock < Test::Unit::TestCase
     assert_true(block.canTraverse?)
 
     # Do not filter the base class
-    blockBase.filterByReferenceSet(nil, refSet)
+    blockBase.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
     actualDecl, actualHpp, actualCpp = blockBase.formatMockClass(mockName, decoratorName, forwarderName, baseName)
     assert_equal(2, actualDecl.scan("FuncStub").size)
     assert_equal(1, actualDecl.scan("FuncOther").size)
@@ -3030,7 +3075,7 @@ class TestClassBlock < Test::Unit::TestCase
     block, blockBase = getClassBlockWithDefault(testedName, baseName)
     refFunc = TestMockRefClass.new(testedName, "FuncStub", "FuncStub", "NameSpace::Enum", "")
     refSet = TestMockRefSetClass.new(true, [refFunc])
-    block.filterByReferenceSet(nil, refSet)
+    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_true(actualDecl.include?("MOCK_METHOD1(FuncStub,void(NameSpace::Enum e));\n"))
@@ -3050,7 +3095,7 @@ class TestClassBlock < Test::Unit::TestCase
     ["FuncStub", "FuncOther"].each do |funcname|
       ref = TestMockRefClass.new(testedName, funcname, funcname, "", "const")
       refSet = TestMockRefSetClass.new(true, [ref])
-      block.filterByReferenceSet(nil, refSet)
+      block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
     end
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
@@ -3913,17 +3958,19 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     linkLogFilename = "c"
     convertedFilename = "d"
     stubOnly = true
-    filterSet = ["f"]
-    sourceFilenameSet = ["g"]
+    functionNameFilterSet = ["f"]
+    classNameFilterOutSet = ["g"]
+    sourceFilenameSet = ["h"]
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
-                                           stubOnly, filterSet, sourceFilenameSet)
+                                           stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
     assert_equal(convertedFilename, parameterSet.convertedFilename)
     assert_equal(stubOnly, parameterSet.stubOnly)
-    assert_equal(filterSet, parameterSet.filterSet)
+    assert_equal(functionNameFilterSet, parameterSet.functionNameFilterSet)
+    assert_equal(classNameFilterOutSet, parameterSet.classNameFilterOutSet)
     assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
   end
 end
@@ -3950,7 +3997,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [])
+    super(cppNameSpace, nil, nil, nil, false, [], [], [])
   end
 end
 
@@ -4141,9 +4188,9 @@ class TestCppFileParser < Test::Unit::TestCase
       if (testBuild)
         blockD = TestClassMock.new("D", "", [blockC])
         parser.instance_variable_set(:@block, blockD)
-        parser.buildClassTree(nil, nil)
+        parser.buildClassTree(MinimumSymbolFilter.new(nil, nil))
       else
-        classSet = parser.collectClasses([blockC], nil, nil)
+        classSet = parser.collectClasses([blockC], MinimumSymbolFilter.new(nil, nil))
         assert_equal({ "ClassA" => blockA }, classSet)
         parser.connectClasses([blockC], classSet)
       end
@@ -4156,7 +4203,7 @@ class TestCppFileParser < Test::Unit::TestCase
     blockV = ExternVariableStatement.new("extern Base varB_;")
 
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
-    assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], nil, nil))
+    assert_equal({"A::Base" => block}, parser.collectClasses([block, blockV], MinimumSymbolFilter.new(nil, nil)))
   end
 
   def test_filterOutClassInSourceFile
@@ -4173,7 +4220,7 @@ class TestCppFileParser < Test::Unit::TestCase
     end
 
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
-    parser.collectClasses([blockA, blockB], refSet, nil)
+    parser.collectClasses([blockA, blockB], MinimumSymbolFilter.new(refSet, nil))
     assert_true(blockA.instance_variable_get(:@alreadyDefined))
     assert_false(blockB.instance_variable_get(:@alreadyDefined))
   end
@@ -4202,7 +4249,7 @@ class TestCppFileParser < Test::Unit::TestCase
     def parser.mergeFreeFunctionSetArray(a)
     end
 
-    parser.buildFreeFunctionSet(defRefSet, undefRefSet, [])
+    parser.buildFreeFunctionSet(MinimumSymbolFilter.new(defRefSet, undefRefSet))
     assert_true(blockA.instance_variable_get(:@alreadyDefined))
     assert_false(blockB.instance_variable_get(:@alreadyDefined))
   end
@@ -4611,7 +4658,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
      "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"]
   end
 
-  def test_parseFilter
+  def test_parseFilterFunction
     filterSet = ["Utility", '"Utility"', "write_.*"]
     0.upto(filterSet.size) do |i|
       expected = ((i > 0) ? filterSet[0..(i-1)] : []).map { |word| word.tr('"','') }
@@ -4622,6 +4669,20 @@ class TestMockGenLauncher < Test::Unit::TestCase
       args.concat(getOptionSet())
       target = MockGenLauncher.new(args)
       assert_equal(expected, target.instance_variable_get(:@functionNameFilterSet))
+    end
+  end
+
+  def test_parseFilterOutClass
+    filterSet = ["Impl", '"Impl"', "impl_.*"]
+    0.upto(filterSet.size) do |i|
+      expected = ((i > 0) ? filterSet[0..(i-1)] : []).map { |word| word.tr('"','') }
+      filterArgs = expected.map { |filter| [Mockgen::Constants::ARGUMENT_CLASS_NAME_FILTER_OUT, filter] }.flatten
+
+      args = [Mockgen::Constants::ARGUMENT_MODE_MOCK]
+      args.concat(filterArgs)
+      args.concat(getOptionSet())
+      target = MockGenLauncher.new(args)
+      assert_equal(expected, target.instance_variable_get(:@classNameFilterOutSet))
     end
   end
 
