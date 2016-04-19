@@ -11,6 +11,21 @@ include Mockgen
 TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
 TestMockRefClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
 
+def getTestSwitchMockVarname(funcname)
+  "    #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} " +
+    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX} " +
+    "{#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT}};\n"
+end
+
+def getTestSwitchMockStaticVarname(funcname)
+  "    static #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} " +
+    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX};\n"
+end
+
+def getTestSwitchMockCondition(funcname, varname)
+  "#{varname} && !#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX}"
+end
+
 class TestChompAfterDelimiter < Test::Unit::TestCase
   data(
     'not split' => ["Func()", ":", "Func()", nil],
@@ -1411,30 +1426,35 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     ["void Func()",
      "void Func()",
      "Func()",
-     false, false, "void", true, "", "Func", "", "", false],
+     false, false, "void", true, "", "Func", "Func_", "", "", false],
+    'end with _' =>
+    ["void Func_()",
+     "void Func_()",
+     "Func_()",
+     false, false, "void", true, "", "Func_", "Func_", "", "", false],
     'one word type and function post modifier' =>
     ["int Func2(long a) const override {",
      "int Func2(long a) const override",
      "Func2(long)const",
-     true, false, "int", false, "a", "Func2", "long a", "const override", false],
+     true, false, "int", false, "a", "Func2", "Func2_", "long a", "const override", false],
     'static and attribute' =>
     ['static int Func(long b)',
      "int Func(long b)",
      "Func(long)",
-     false, true, "int", false, "b", "Func", "long b", "", false],
+     false, true, "int", false, "b", "Func", "Func_", "long b", "", false],
     'multiple word type and poset modifier' =>
     ["virtual const void* Func(int a, const T* p);",
      "const void * Func(int a,const T* p)",
      "Func(int,const T *)",
-     false, false, "const void *", false, "a,p", "Func", "int a,const T* p", "", true],
+     false, false, "const void *", false, "a,p", "Func", "Func_", "int a,const T* p", "", true],
     'inline and reference' =>
     ["inline T&* Func(T& a) const",
      "T & * Func(T& a) const",
      "Func(T &)const",
-     true, false, "T & *", false, "a", "Func", "T& a", "const", false])
+     true, false, "T & *", false, "a", "Func", "Func_", "T& a", "const", false])
   def test_initializeAndParse(data)
-    line, decl, argSignature, constMemfunc, staticMemfunc,
-    returnType, returnVoid, argSet, funcName, typedArgSet, postFunc, virtual = data
+    line, decl, argSignature, constMemfunc, staticMemfunc, returnType, returnVoid,
+    argSet, funcName, switchName, typedArgSet, postFunc, virtual = data
 
     ["", "{", " {", ";", " ;"].each do |suffix|
       block = MemberFunctionBlock.new(line + suffix)
@@ -1447,11 +1467,17 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(decl, block.instance_variable_get(:@decl))
       assert_equal(argSet, block.instance_variable_get(:@argSet))
       assert_equal(funcName, block.funcName)
+      assert_equal(switchName + Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX, block.instance_variable_get(:@switchName))
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
       assert_equal(argSignature, block.argSignature)
       assert_equal(postFunc, block.instance_variable_get(:@postFunc))
       assert_equal([], block.instance_variable_get(:@superMemberSet))
       assert_equal(virtual, block.virtual?)
+
+      assert_nil(block.instance_variable_get(:@templateParam))
+      templateParam = 1
+      block.setTemplateParameter(templateParam)
+      assert_equal(templateParam, block.instance_variable_get(:@templateParam))
     end
   end
 
@@ -1545,49 +1571,61 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     ["void Func(void)",
      "    MOCK_METHOD0(Func,void())",
      "void Super::Func() {\n    return;\n}\n",
-     "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+     "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { pMock_->Func(); return; } " +
      "Super::Func(); }\n",
-     "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+     "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { pMock_->Func(); return; } " +
      "static_cast<Super*>(pActual_)->Func(); }\n"],
     'no args const' =>
-    ["void Func2() const override",
-     "    MOCK_CONST_METHOD0(Func2,void())",
-     "void Super::Func2() const {\n    return;\n}\n",
-     "    void Func2() const override { if (pMock_) { pMock_->Func2(); return; } " +
-     "Super::Func2(); }\n",
-     "    void Func2() const override { if (pMock_) { pMock_->Func2(); return; } " +
-     "static_cast<Super*>(pActual_)->Func2(); }\n"],
+    ["void Func() const override",
+     "    MOCK_CONST_METHOD0(Func,void())",
+     "void Super::Func() const {\n    return;\n}\n",
+     "    void Func() const override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { pMock_->Func(); return; } " +
+     "Super::Func(); }\n",
+     "    void Func() const override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { pMock_->Func(); return; } " +
+     "static_cast<Super*>(pActual_)->Func(); }\n"],
     'one arg return primitive' =>
     ["int Func()",
      "    MOCK_METHOD0(Func,int())",
      "int Super::Func() {\n    int result = 0;\n    return result;\n}\n",
-     "    int Func() { if (pMock_) { return pMock_->Func(); } " +
+     "    int Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(); } " +
      "return Super::Func(); }\n",
-     "    int Func() { if (pMock_) { return pMock_->Func(); } " +
+     "    int Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(); } " +
      "return static_cast<Super*>(pActual_)->Func(); }\n"],
     'one arg return struct' =>
     ["StructT Func()",
      "    MOCK_METHOD0(Func,StructT())",
      "StructT Super::Func() {\n    StructT result;\n    return result;\n}\n",
-     "    StructT Func() { if (pMock_) { return pMock_->Func(); } " +
+     "    StructT Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(); } " +
      "return Super::Func(); }\n",
-     "    StructT Func() { if (pMock_) { return pMock_->Func(); } " +
+     "    StructT Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(); } " +
      "return static_cast<Super*>(pActual_)->Func(); }\n"],
     'one arg return pointer' =>
     ["const void* Func(int a)",
      "    MOCK_METHOD1(Func,const void *(int a))",
      "const void * Super::Func(int a) {\n    const void * result = 0;\n    return result;\n}\n",
-     "    const void * Func(int a) { if (pMock_) { return pMock_->Func(a); } " +
+     "    const void * Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(a); } " +
      "return Super::Func(a); }\n",
-     "    const void * Func(int a) { if (pMock_) { return pMock_->Func(a); } " +
+     "    const void * Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { return pMock_->Func(a); } " +
      "return static_cast<Super*>(pActual_)->Func(a); }\n"],
     'two args return reference' =>
      ["T& Func(int a, const void* p)",
       "    MOCK_METHOD2(Func,T &(int a,const void* p))",
       "T & Super::Func(int a,const void* p) {\n    T result;\n    return result;\n}\n",
-      "    T & Func(int a,const void* p) { if (pMock_) { return pMock_->Func(a,p); } " +
+      "    T & Func(int a,const void* p) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+      ") { return pMock_->Func(a,p); } " +
       "return Super::Func(a,p); }\n",
-      "    T & Func(int a,const void* p) { if (pMock_) { return pMock_->Func(a,p); } " +
+      "    T & Func(int a,const void* p) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+      ") { return pMock_->Func(a,p); } " +
       "return static_cast<Super*>(pActual_)->Func(a,p); }\n"])
   def test_makeDefSet(data)
      line, mock, stub, decorator, forwarder = data
@@ -1598,8 +1636,64 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      expectedMock = mock + ";\n"
      assert_equal(expectedMock, block.makeMockDef(className, ""))
      assert_equal(stub, block.makeStubDef(className))
-     assert_equal(decorator, block.makeDecoratorDef(className))
-     assert_equal(forwarder, block.makeForwarderDef(className))
+
+     switchToMock = getTestSwitchMockVarname("Func")
+     switchToMockStatic = getTestSwitchMockStaticVarname("Func")
+     assert_equal(switchToMock, block.makeSwitchToMock(false))
+     assert_equal(switchToMockStatic, block.makeSwitchToMock(true))
+
+     definedNameSet = {}
+     definedStaticNameSet = {}
+     assert_equal(switchToMockStatic + decorator, block.makeDecoratorDef(className, definedNameSet, definedStaticNameSet))
+     assert_equal(1, definedNameSet.size)
+     assert_true(definedNameSet.key?("Func"))
+     assert_true(definedStaticNameSet.key?("Func"))
+
+     definedNameSet = {}
+     assert_equal(switchToMock + forwarder, block.makeForwarderDef(className, definedNameSet))
+     assert_equal(1, definedNameSet.size)
+     assert_true(definedNameSet.key?("Func"))
+
+     expected = expectedMock.gsub(/(METHOD\d)/, '\1_T')
+     assert_equal(expected, block.makeMockDef(className, "_T"))
+  end
+
+  data(
+    'no args' =>
+    ["void Func(void)",
+     "    MOCK_METHOD0(Func,void())",
+     "void Super::Func() {\n    return;\n}\n",
+     "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
+     "Super::Func(); }\n",
+     "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+     ") { pMock_->Func(); return; } " +
+     "static_cast<Super*>(pActual_)->Func(); }\n"])
+  def test_makeDefSetForTemplate(data)
+     line, mock, stub, decorator, forwarder = data
+     className = "Super"
+     block = MemberFunctionBlock.new(line + ";")
+     block.setTemplateParameter(TemplateParameter.new("template <typename T>"))
+
+     assert_true(block.valid)
+     expectedMock = mock + ";\n"
+     assert_equal(expectedMock, block.makeMockDef(className, ""))
+     assert_equal(stub, block.makeStubDef(className))
+
+     switchToMock = getTestSwitchMockVarname("Func")
+     switchToMockStatic = getTestSwitchMockStaticVarname("Func")
+     assert_equal(switchToMock, block.makeSwitchToMock(false))
+     assert_equal(switchToMockStatic, block.makeSwitchToMock(true))
+
+     definedNameSet = {}
+     definedStaticNameSet = {}
+     assert_equal(decorator, block.makeDecoratorDef(className, definedNameSet, definedStaticNameSet))
+     assert_true(definedNameSet.empty?)
+     assert_true(definedStaticNameSet.empty?)
+
+     definedNameSet = {}
+     assert_equal(switchToMock + forwarder, block.makeForwarderDef(className, definedNameSet))
+     assert_equal(1, definedNameSet.size)
+     assert_true(definedNameSet.key?("Func"))
 
      expected = expectedMock.gsub(/(METHOD\d)/, '\1_T')
      assert_equal(expected, block.makeMockDef(className, "_T"))
@@ -1622,7 +1716,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
   data(
     'no args' =>
     ["static int Func(long a)",
-     "    static int Func(long a) { if (pClassMock_) " +
+     getTestSwitchMockStaticVarname("Func") +
+     "    static int Func(long a) { if (" + getTestSwitchMockCondition("Func", "pClassMock_") + ") " +
      "{ return pClassMock_->Func(a); } return Super::Func(a); }\n"])
   def test_makeDecoratorDef(data)
      line, decorator = data
@@ -1630,7 +1725,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      block = MemberFunctionBlock.new(line + ";")
 
      assert_true(block.valid)
-     assert_equal(decorator, block.makeDecoratorDef(className))
+     assert_equal(decorator, block.makeDecoratorDef(className, {}, {}))
   end
 
   data(
@@ -1799,7 +1894,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
     assert_false(block.makeMockDef("", "").empty?)
     assert_false(block.makeStubDef("").empty?)
-    assert_false(block.makeForwarderDef("").empty?)
+    assert_false(block.makeForwarderDef("", {}).empty?)
 
     defRefSet = Object.new()
     def defRefSet.freeFunctionDefined?(arg)
@@ -1812,7 +1907,7 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
     assert_equal("", block.makeMockDef("", ""))
     assert_equal("", block.makeStubDef(""))
-    assert_equal("", block.makeForwarderDef(""))
+    assert_equal("", block.makeForwarderDef("", {}))
   end
 
   def test_filterByUndefinedReferenceSet
@@ -1857,13 +1952,17 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
   def test_makeForwarderDef
     block = FreeFunctionBlock.new("extern int Func(int a);")
-    expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return ::Func(a); }\n"
-    assert_equal(expected, block.makeForwarderDef(""))
+    expected = getTestSwitchMockVarname("Func")
+    expected += "    int Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_")
+    expected += ") { return pMock_->Func(a); } return ::Func(a); }\n"
+    assert_equal(expected, block.makeForwarderDef("", {}))
 
     nsBlock = NamespaceBlock.new("namespace A")
     nsBlock.connect(block)
-    expected = "    int Func(int a) { if (pMock_) { return pMock_->Func(a); } return ::A::Func(a); }\n"
-    assert_equal(expected, block.makeForwarderDef(""))
+    expected = getTestSwitchMockVarname("Func")
+    expected += "    int Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_")
+    expected += ") { return pMock_->Func(a); } return ::A::Func(a); }\n"
+    assert_equal(expected, block.makeForwarderDef("", {}))
   end
 
   def test_getSwapperDef
@@ -1984,8 +2083,10 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "class All_Forwarder {\n"
     expected += "public:\n"
     expected += "    All_Forwarder(void) : pMock_(0) {}\n"
-    expected += "    void FuncA() { if (pMock_) { pMock_->FuncA(); return; } ::FuncA(); }\n"
-    expected += "    int FuncB(int a) { if (pMock_) { return pMock_->FuncB(a); } return ::FuncB(a); }\n"
+    expected += getTestSwitchMockVarname("FuncA")
+    expected += "    void FuncA() { if (" + getTestSwitchMockCondition("FuncA", "pMock_") + ") { pMock_->FuncA(); return; } ::FuncA(); }\n"
+    expected += getTestSwitchMockVarname("FuncB")
+    expected += "    int FuncB(int a) { if (" + getTestSwitchMockCondition("FuncB", "pMock_") + ") { return pMock_->FuncB(a); } return ::FuncB(a); }\n"
     expected += "    All_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
@@ -2026,7 +2127,9 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expected += "class All_A_Forwarder {\n"
     expected += "public:\n"
     expected += "    All_A_Forwarder(void) : pMock_(0) {}\n"
-    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } ::A::Func(); }\n"
+    expected += getTestSwitchMockVarname("Func")
+    expected += "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_")
+    expected += ") { pMock_->Func(); return; } ::A::Func(); }\n"
     expected += "    All_A_Mock* pMock_;\n"
     expected += "};\n\n"
     assert_equal(expected, funcSet.getStringToClassFile)
@@ -2355,15 +2458,15 @@ class TestClassBlock < Test::Unit::TestCase
     end
 
     def block.formatMockClass(a,b,c,d)
-      return "b", "B"
+      return "b", "B", "bB"
     end
 
     def block.formatDecoratorClass(a,b,c)
-      "c"
+      return "c", "d"
     end
 
     def block.formatForwarderClass(a,b,c)
-      "d"
+      return "e"
     end
 
     block.makeClassSet
@@ -3169,22 +3272,30 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
     block = getClassBlockToFormat(baseName, true)
 
-    actual = block.formatDecoratorClass(decoratorName, mockName, testedName)
+    actualDef, actualCpp = block.formatDecoratorClass(decoratorName, mockName, testedName)
     expected  = "class #{decoratorName} : public #{testedName} {\n"
     expected += "public:\n"
     expected += "    #{decoratorName}(void) : pMock_(0) {}\n"
     expected += "    virtual ~#{decoratorName}(void) {}\n"
-    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
-                "#{testedName}::Func(); }\n"
-    expected += "    void Func() const override { if (pMock_) { pMock_->Func(); return; } " +
-                "#{baseName}::Func(); }\n"
-    expected += "    void Func(int a) { if (pMock_) { pMock_->Func(a); return; } #{baseName}::Func(a); }\n"
-    expected += "    int Other(long a,T* b) { if (pMock_) { return pMock_->Other(a,b); } " +
-                "return #{baseName}::Other(a,b); }\n"
+    expected += getTestSwitchMockStaticVarname("Func")
+    expected += "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(); return; } #{testedName}::Func(); }\n"
+    expected += "    void Func() const override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(); return; } #{baseName}::Func(); }\n"
+    expected += "    void Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(a); return; } #{baseName}::Func(a); }\n"
+    expected += getTestSwitchMockStaticVarname("Other")
+    expected += "    int Other(long a,T* b) { if (" + getTestSwitchMockCondition("Other", "pMock_") +
+                ") { return pMock_->Other(a,b); } return #{baseName}::Other(a,b); }\n"
     expected += "    #{mockName}* pMock_;\n"
     expected += "    static Mock* pClassMock_;\n"
     expected += "};\n\n"
-    assert_equal(expected, actual)
+    assert_equal(expected, actualDef)
+
+    expected =  "namespace #{Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE} {\n"
+    expected += "    bool Decorator::Func_mock_ = false;\n"
+    expected += "    bool Decorator::Other_mock_ = false;\n}\n"
+    assert_equal(expected, actualCpp)
   end
 
   def test_formatDecoratorClassWithArgs
@@ -3195,13 +3306,13 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
 
     block = getClassBlockWithConstructorArgs(name)
-    actual = block.formatDecoratorClass(decoratorName, mockName, testedName)
+    actualDef, actualCpp = block.formatDecoratorClass(decoratorName, mockName, testedName)
 
     ["#{decoratorName}(void) : #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n",
      "#{decoratorName}(int a) : #{name}(a), #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n",
      "#{decoratorName}(int a,int b = 0) : #{name}(a,b), #{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
     ].each do |expected|
-      assert_true(actual.include?(expected))
+      assert_true(actualDef.include?(expected))
      end
   end
 
@@ -3211,18 +3322,18 @@ class TestClassBlock < Test::Unit::TestCase
     testedName = "Tested"
     block = getTemplateClassBlock(testedName)
 
-    actual = block.formatDecoratorClass(decoratorName, mockName, testedName)
+    actualDef, actualCpp = block.formatDecoratorClass(decoratorName, mockName, testedName)
     expected  = "template <typename T> class #{decoratorName} : public #{testedName}<T> {\n"
     expected += "public:\n"
     expected += "    #{decoratorName}(void) : pMock_(0) {}\n"
     expected += "    #{decoratorName}(int a) : #{testedName}<T>(a), pMock_(0) {}\n"
     expected += "    virtual ~#{decoratorName}(void) {}\n"
-    expected += "    void Func() override { if (pMock_) { pMock_->Func(); return; } " +
-                "#{testedName}<T>::Func(); }\n"
+    expected += "    void Func() override { if (pMock_) { pMock_->Func(); return; } #{testedName}<T>::Func(); }\n"
     expected += "    #{mockName}<T>* pMock_;\n"
     expected += "    static Mock<T>* pClassMock_;\n"
     expected += "};\n\n"
-    assert_equal(expected, actual)
+    assert_equal(expected, actualDef)
+    assert_equal("", actualCpp)
   end
 
   def test_formatForwarderClass
@@ -3240,14 +3351,16 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    #{forwarderName}(#{testedName}& actual) : pActual_(&actual), pMock_(0) {}\n"
     expected += "    #{forwarderName}(#{testedName}& actual,int a) : Tested(a), pActual_(&actual), pMock_(0) {}\n"
     expected += "    virtual ~#{forwarderName}(void) {}\n"
-    expected += "    void Func() { if (pMock_) { pMock_->Func(); return; } " +
-                "static_cast<#{testedName}*>(pActual_)->Func(); }\n"
-    expected += "    void Func() const override { if (pMock_) { pMock_->Func(); return; } " +
-                "static_cast<#{baseName}*>(pActual_)->Func(); }\n"
-    expected += "    void Func(int a) { if (pMock_) { pMock_->Func(a); return; } " +
-                "static_cast<#{baseName}*>(pActual_)->Func(a); }\n"
-    expected += "    int Other(long a,T* b) { if (pMock_) { return pMock_->Other(a,b); } " +
-                "return static_cast<#{baseName}*>(pActual_)->Other(a,b); }\n"
+    expected += getTestSwitchMockVarname("Func")
+    expected += "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(); return; } static_cast<#{testedName}*>(pActual_)->Func(); }\n"
+    expected += "    void Func() const override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(); return; } static_cast<#{baseName}*>(pActual_)->Func(); }\n"
+    expected += "    void Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(a); return; } static_cast<#{baseName}*>(pActual_)->Func(a); }\n"
+    expected += getTestSwitchMockVarname("Other")
+    expected += "    int Other(long a,T* b) { if (" + getTestSwitchMockCondition("Other", "pMock_") +
+                ") { return pMock_->Other(a,b); } return static_cast<#{baseName}*>(pActual_)->Other(a,b); }\n"
     expected += "    #{testedName}* pActual_;\n"
     expected += "    #{mockName}* pMock_;\n"
     expected += "};\n\n"
@@ -3268,8 +3381,9 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "    #{forwarderName}(#{testedName}<T>& actual) : pActual_(&actual), pMock_(0) {}\n"
     expected += "    #{forwarderName}(#{testedName}<T>& actual,int a) : Tested<T>(a), pActual_(&actual), pMock_(0) {}\n"
     expected += "    virtual ~#{forwarderName}(void) {}\n"
-    expected += "    void Func() override { if (pMock_) { pMock_->Func(); return; } " +
-                "static_cast<#{testedName}<T>*>(pActual_)->Func(); }\n"
+    expected += getTestSwitchMockVarname("Func")
+    expected += "    void Func() override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
+                ") { pMock_->Func(); return; } static_cast<#{testedName}<T>*>(pActual_)->Func(); }\n"
     expected += "    #{testedName}<T>* pActual_;\n"
     expected += "    #{mockName}<T>* pMock_;\n"
     expected += "};\n\n"
@@ -3322,9 +3436,9 @@ class TestClassBlock < Test::Unit::TestCase
     addMemberFunction(blockBase, funcOverriden)
   end
 
-  def connectFuncNotOverriden(block, blockBase, testedMethod, funcLine)
+  def connectFuncNotOverriden(block, blockBase, testedMethod, funcLine, argSet)
     funcNotOverriden = MemberFunctionBlock.new(funcLine + " const")
-    assert_not_equal("", block.send(testedMethod, [funcNotOverriden]))
+    assert_not_equal("", block.send(testedMethod, [funcNotOverriden], *argSet))
     blockBase.connect(funcNotOverriden)
     addMemberFunction(blockBase, funcNotOverriden)
   end
@@ -3333,31 +3447,6 @@ class TestClassBlock < Test::Unit::TestCase
     funcNotOverriden = MemberFunctionBlock.new("void Func(int a)")
     blockBase.connect(funcNotOverriden)
     addMemberFunction(blockBase, funcNotOverriden)
-  end
-
-  def checkCollectDef(testedMethod, lambdaCheck1, lambdaCheck2)
-    block, func, funcLine = getClassBlockToCollect
-    actual = block.send(testedMethod, [])
-    assert_equal(1, actual.lines.count)
-    assert_true(lambdaCheck1.call(actual, funcLine))
-    assert_equal("", block.send(testedMethod, [func]))
-
-    blockBase, funcBaseLine = connectFunctionBlockToCollect(block)
-    actual = block.send(testedMethod, [])
-    assert_equal(2, actual.lines.count)
-    assert_true(lambdaCheck2.call(actual, funcBaseLine))
-
-    connectMemberFunctionBlockToCollect(blockBase, funcLine)
-    actual = block.send(testedMethod, [])
-    assert_equal(2, actual.lines.count)
-
-    connectFuncNotOverriden(block, blockBase, testedMethod, funcLine)
-    actual = block.send(testedMethod, [])
-    assert_equal(3, actual.lines.count)
-
-    connectFuncConstNotOverriden(blockBase)
-    actual = block.send(testedMethod, [])
-    assert_equal(4, actual.lines.count)
   end
 
   def test_collectMockDef
@@ -3396,13 +3485,61 @@ class TestClassBlock < Test::Unit::TestCase
   def test_collectDecoratorDef
     lambdaCheck1 = lambda { |actual, funcLine| actual.include?(funcLine) }
     lambdaCheck2 = lambda { |actual, funcBaseLine| actual.include?(funcBaseLine) }
-    checkCollectDef(:collectDecoratorDef, lambdaCheck1, lambdaCheck2)
+
+    block, func, funcLine = getClassBlockToCollect
+    actual = block.collectDecoratorDef([], {}, {})
+    assert_equal(2, actual.lines.count)
+    assert_true(lambdaCheck1.call(actual, funcLine))
+    assert_equal("", block.collectDecoratorDef([func], {}, {}))
+
+    blockBase, funcBaseLine = connectFunctionBlockToCollect(block)
+    actual = block.collectDecoratorDef([], {}, {})
+
+    assert_equal(4, actual.lines.count)
+    assert_true(lambdaCheck2.call(actual, funcBaseLine))
+
+    connectMemberFunctionBlockToCollect(blockBase, funcLine)
+    actual = block.collectDecoratorDef([], {}, {})
+    assert_equal(4, actual.lines.count)
+
+    # Generate one mock and no new switch varaiable
+    connectFuncNotOverriden(block, blockBase, :collectDecoratorDef, funcLine, [{}, {}])
+    actual = block.collectDecoratorDef([], {}, {})
+    assert_equal(5, actual.lines.count)
+
+    connectFuncConstNotOverriden(blockBase)
+    actual = block.collectDecoratorDef([], {}, {})
+    assert_equal(6, actual.lines.count)
   end
 
   def test_collectForwarderDef
     lambdaCheck1 = lambda { |actual, funcLine| actual.include?("Func") }
     lambdaCheck2 = lambda { |actual, funcBaseLine| actual.include?("Other") }
-    checkCollectDef(:collectForwarderDef, lambdaCheck1, lambdaCheck2)
+
+    block, func, funcLine = getClassBlockToCollect
+    actual = block.collectForwarderDef([], {})
+    assert_equal(2, actual.lines.count)
+    assert_true(lambdaCheck1.call(actual, funcLine))
+    assert_equal("", block.collectForwarderDef([func], {}))
+
+    blockBase, funcBaseLine = connectFunctionBlockToCollect(block)
+    actual = block.collectForwarderDef([], {})
+
+    assert_equal(4, actual.lines.count)
+    assert_true(lambdaCheck2.call(actual, funcBaseLine))
+
+    connectMemberFunctionBlockToCollect(blockBase, funcLine)
+    actual = block.collectForwarderDef([], {})
+    assert_equal(4, actual.lines.count)
+
+    # Generate one mock and no new switch varaiable
+    connectFuncNotOverriden(block, blockBase, :collectForwarderDef, funcLine, [{}])
+    actual = block.collectForwarderDef([], {})
+    assert_equal(5, actual.lines.count)
+
+    connectFuncConstNotOverriden(blockBase)
+    actual = block.collectForwarderDef([], {})
+    assert_equal(6, actual.lines.count)
   end
 
   def test_collectFunctionAll
@@ -3414,18 +3551,18 @@ class TestClassBlock < Test::Unit::TestCase
         "a"
       end
 
-      def funcBlock.makeDecoratorDef(name)
-        "b"
+      def funcBlock.makeDecoratorDef(name, definedNameSet, definedStaticNameSet)
+        return "b"
       end
 
-      def funcBlock.makeForwarderDef(name)
+      def funcBlock.makeForwarderDef(name, definedNameSet)
         "c"
       end
     end
 
     assert_equal(3, block.collectMockDef([], "").size)
-    assert_equal(2, block.collectDecoratorDef([]).size)
-    assert_equal(1, block.collectForwarderDef([]).size)
+    assert_equal(2, block.collectDecoratorDef([], {}, {}).size)
+    assert_equal(1, block.collectForwarderDef([], {}).size)
   end
 
   def test_collectBaseFunctionDef
@@ -3448,7 +3585,7 @@ class TestClassBlock < Test::Unit::TestCase
     end
 
     lambdaCheck = lambda { |n| true }
-    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck, :checkFunc, "")
+    str = block.collectFunctionDef([], :collectMockDef, lambdaCheck, :checkFunc, "", nil)
     assert_equal("    MOCK_METHOD0(FuncBase,void());\n", str)
   end
 

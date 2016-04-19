@@ -61,6 +61,12 @@ module Mockgen
     MEMFUNC_WORD_COMPARED_SET = ["const", "&", "&&"].map(&:freeze).freeze
     MEMFUNC_WORD_COMPARED_MAP = Hash[*(MEMFUNC_WORD_COMPARED_SET.map{ |word| [word, true] }.flatten)].freeze
 
+    # Forward a function or not
+    MEMFUNC_FORWARD_SWITCH_POSTFIX = "mock_"
+    MEMFUNC_FORWARD_SWITCH_TYPE = "bool"
+    # Must be same as default value for global variables
+    MEMFUNC_FORWARD_SWITCH_DEFAULT = "false"
+
     # Keywords which are qualifiers for member functions, do not appear in member variables
     MEMVAR_FIRST_WORD_REJECTED_SET = ["using", "typedef"].map(&:freeze).freeze
     MEMVAR_FIRST_WORD_EXCLUDED_SET = ["extern", "static", "struct", "class"].map(&:freeze).freeze

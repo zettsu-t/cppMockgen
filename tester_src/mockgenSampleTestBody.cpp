@@ -131,6 +131,58 @@ TEST_F(TestSample, SwapTypeCtorWithArg) {
     ASSERT_FALSE(localCtorWithArg.pMock_);
 }
 
+TEST_F(TestSample, ForwardSelective) {
+    {
+        EXPECT_EQ(0, SampleFunc());
+        MOCK_OF(DerivedClass) mock(INSTANCE_OF(anObject));
+        {
+            // Prohibit forwarding to the mock Func()
+            INSTANCE_OF(anObject).Func_mock_ = true;
+            {
+                EXPECT_CALL(mock, Func(0, 0)).Times(0);
+                EXPECT_EQ(0, SampleFunc());
+            }
+            {
+                const int expected = 1;
+                EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
+                EXPECT_EQ(expected, INSTANCE_OF(anObject).StaticFunc());
+            }
+        }
+        {
+            // Forward to the mock Func()
+            INSTANCE_OF(anObject).Func_mock_ = false;
+            INSTANCE_OF(anObject).StaticFunc_mock_ = true;
+            {
+                const int expected = 2;
+                EXPECT_CALL(mock, Func(0, 0)).Times(1).WillOnce(::testing::Return(expected));
+                EXPECT_EQ(expected, SampleFunc());
+            }
+            {
+                EXPECT_CALL(mock, StaticFunc()).Times(0);
+                // Prohibit forwarding to the mock
+                EXPECT_EQ(0, INSTANCE_OF(anObject).StaticFunc());
+            }
+        }
+    }
+
+    {
+        EXPECT_EQ(0, SampleFunc());
+        MOCK_OF(DerivedClass) mock(localObject);
+        DECORATOR(DerivedClass)::pClassMock_ = &mock;
+        {
+            DECORATOR(DerivedClass)::StaticFunc_mock_ = true;
+            EXPECT_CALL(mock, StaticFunc()).Times(0);
+            EXPECT_EQ(0, localObject.StaticFunc());
+        }
+        {
+            DECORATOR(DerivedClass)::StaticFunc_mock_ = false;
+            constexpr int expected = 3;
+            EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_EQ(expected, localObject.StaticFunc());
+        }
+    }
+}
+
 class TestMemFnPointerSample : public ::testing::Test{};
 
 TEST_F(TestMemFnPointerSample, All) {

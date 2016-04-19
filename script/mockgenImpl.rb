@@ -1113,6 +1113,7 @@ module Mockgen
       @argTypeStr = ""
       @argSet = ""
       @funcName = ""
+      @switchName = ""
       @typedArgSet = ""
       @typedArgSetWithoutDefault = ""
       @argSignature = ""
@@ -1191,6 +1192,10 @@ module Mockgen
       @argTypeStr = argVariableSet.argTypeStr
       @argSet  = argVariableSet.argNameStr
 
+      return false if funcName.empty?
+      # Avoid __ in variable names
+      switchName = funcName + ((funcName[-1] == "_") ? "" : "_") + Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX
+
       # Exclude destructors
       return false if funcName.include?("~")
       # Skip pure virtual functions
@@ -1206,6 +1211,7 @@ module Mockgen
       @argSignature = extractArgSignature(funcName, @argTypeStr, @constMemfunc)
 
       @funcName = funcName
+      @switchName = switchName
       @postFunc = postFunc
       # va_arg is not supported
       @valid = true unless @argSignature.include?("...")
@@ -1248,10 +1254,22 @@ module Mockgen
       phrase.gsub(/([\*&])/, ' \1 ').split(/\s+/).reject { |w| w =~ /^\s*$/ }
     end
 
+    def makeSwitchToMock(isStatic)
+      # C++11 initializer
+      prefix = isStatic ? "static " : ""
+      init = isStatic ? "" : " {#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT}}"
+      str = "    #{prefix}#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} #{@switchName}#{init};\n"
+      str
+    end
+
     protected
-    def makeForwarderDefImpl(forwardingTarget, overrideStr)
+    def makeForwarderDefImpl(forwardingTarget, overrideStr, definedNameSet)
+      # One variable per function and switch all overloaded functions
+      str = definedNameSet.key?(@funcName) ? "" : makeSwitchToMock(false)
+      definedNameSet[@funcName] = true
+
       # Leave override keyword
-      str = "    #{@decl} #{overrideStr}{ if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}) { "
+      str += "    #{@decl} #{overrideStr}{ if (#{Mockgen::Constants::VARNAME_INSTANCE_MOCK} && !#{@switchName}) { "
 
       if (@returnVoid)
         str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}->#{@funcName}(#{@argSet}); return; } "
@@ -1275,9 +1293,14 @@ module Mockgen
       super
       @virtual = (@preFunc && @preFunc.match(/\bvirtual\b/)) ? true : false
       @superMemberSet = []
+      @templateParam = nil
     end
 
     ## Public methods added on the base class
+    def setTemplateParameter(templateParam)
+      @templateParam = templateParam
+    end
+
     def override?(block)
       @argSignature == block.argSignature
     end
@@ -1292,11 +1315,26 @@ module Mockgen
       @virtual || @superMemberSet.any?(&:virtual?)
     end
 
-    def makeDecoratorDef(className)
+    def makeDecoratorDef(className, definedNameSet, definedStaticNameSet)
       mockVarname = @staticMemfunc ? Mockgen::Constants::VARNAME_CLASS_MOCK : Mockgen::Constants::VARNAME_INSTANCE_MOCK
       decl = @staticMemfunc ? "static #{@decl}" : @decl
       overrideStr = getOverrideStr(@decl)
-      str = "    #{decl} #{overrideStr}{ if (#{mockVarname}) { "
+
+      # One variable per function and switch all overloaded functions
+      str = ""
+      # This script cannot make switch variables for template classes
+      # because this script does not know which types the classes are
+      # specialized for.
+      if @templateParam.nil?
+        # Switches to mock methods of the decorator need to be class instances
+        # because test cases cannot access decorator instance variables.
+        str += definedNameSet.key?(@funcName) ? "" : makeSwitchToMock(true)
+        str += "    #{decl} #{overrideStr}{ if (#{mockVarname} && !#{@switchName}) { "
+        definedNameSet[@funcName] = @switchName
+        definedStaticNameSet[@funcName] = @switchName
+      else
+        str += "    #{decl} #{overrideStr}{ if (#{mockVarname}) { "
+      end
 
       if (@returnVoid)
         str += "#{mockVarname}->#{@funcName}(#{@argSet}); return; } "
@@ -1310,8 +1348,8 @@ module Mockgen
       str
     end
 
-    def makeForwarderDef(className)
-      makeForwarderDefImpl("static_cast<#{className}*>(pActual_)->", getOverrideStr(@decl))
+    def makeForwarderDef(className, definedNameSet)
+      makeForwarderDefImpl("static_cast<#{className}*>(pActual_)->", getOverrideStr(@decl), definedNameSet)
     end
 
     def getOverrideStr(decl)
@@ -1365,10 +1403,10 @@ module Mockgen
       @alreadyDefined ? "" : super
     end
 
-    def makeForwarderDef(className)
+    def makeForwarderDef(className, definedNameSet)
       # Add :: to call a free function and prevent infinite calling
       # to a member function itself
-      @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)), "")
+      @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)), "", definedNameSet)
     end
 
     def getSwapperDef(varName)
@@ -1522,8 +1560,9 @@ module Mockgen
       str += "    #{forwarderName}(void) : "
       str += "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0) {}\n"
 
+      definedNameSet = {}
       str += @funcSet.map do |func|
-        func.makeForwarderDef("")
+        func.makeForwarderDef("", definedNameSet)
       end.join("")
 
       str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
@@ -1667,6 +1706,7 @@ module Mockgen
           @allMemberVariableSet << newBlock
         else
           newBlock = MemberFunctionBlock.new(line)
+          newBlock.setTemplateParameter(@templateParam)
           if newBlock.canTraverse?
             @allMemberFunctionSet << newBlock
             @publicMemberFunctionSet << newBlock if @pub
@@ -1810,7 +1850,8 @@ module Mockgen
       unless @alreadyDefined
         fullname = getNonTypedFullname(@name)
         @mockClassDef, @classDefInHpp, @classDefInCpp = formatMockClass(@mockName, @decoratorName, @forwarderName, fullname)
-        @decoratorClassDef = formatDecoratorClass(@decoratorName, @mockName, fullname)
+        @decoratorClassDef, classDefInCpp = formatDecoratorClass(@decoratorName, @mockName, fullname)
+        @classDefInCpp += classDefInCpp
         @decoratorClassDef += formatForwarderClass(@forwarderName, @mockName, fullname)
         @staticMockDef = getVariableDefinitionExample(@templateParam, @mockName, @decoratorName, @forwarderName, fullname)
       end
@@ -2048,13 +2089,26 @@ module Mockgen
       initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
       mockType = getTypedTemplate(@templateParam, mockClassName)
 
+      definedStaticNameSet = {}
       str += formatConstrutorSet(baseName, decoratorName, "", initMember)
       str += "    virtual ~#{decoratorName}(void) {}\n"
-      str += collectDecoratorDef([])
+      str += collectDecoratorDef([], {}, definedStaticNameSet)
       str += "    #{mockType}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "    static #{mockType}* #{Mockgen::Constants::VARNAME_CLASS_MOCK};\n"
       str += "};\n\n"
-      str
+
+      varStr = ""
+      unless definedStaticNameSet.empty?
+        varStr += "namespace #{Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE} {\n"
+        definedStaticNameSet.each do |funcName, switchName|
+          varStr += "    #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} "
+          varStr += "#{decoratorName}::#{switchName} = "
+          varStr += "#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT};\n"
+        end
+        varStr += "}\n"
+      end
+
+      return str, varStr
     end
 
     def formatForwarderClass(forwarderName, mockClassName, baseName)
@@ -2072,7 +2126,7 @@ module Mockgen
 
       mockType = getTypedTemplate(@templateParam, mockClassName)
       str += "    virtual ~#{forwarderName}(void) {}\n"
-      str += collectForwarderDef([])
+      str += collectForwarderDef([], {})
       str += "    #{baseType}* pActual_;\n"
       str += "    #{mockType}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "};\n\n"
@@ -2093,20 +2147,22 @@ module Mockgen
     end
 
     def collectMockDef(derivedSet, postfix)
-      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction, postfix)
+      collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction, postfix, nil)
     end
 
-    def collectDecoratorDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction, nil)
+    def collectDecoratorDef(derivedSet, definedNameSet, definedStaticNameSet)
+      collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction,
+                         definedNameSet, definedStaticNameSet)
     end
 
-    def collectForwarderDef(derivedSet)
-      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef, :canForwardToFunction, nil)
+    def collectForwarderDef(derivedSet, definedNameSet)
+      collectFunctionDef(derivedSet, :collectForwarderDef, :makeForwarderDef, :canForwardToFunction,
+                         definedNameSet, nil)
     end
 
     # If find an overriding function (which has same name, args and const
     # modifier as of its base class), call the most subclass definition.
-    def collectFunctionDef(derivedSet, methodClass, methodFunc, filterFunc, extraArg)
+    def collectFunctionDef(derivedSet, methodClass, methodFunc, filterFunc, extraArg1, extraArg2)
       str = ""
       name = getTypedTemplate(@templateParam, getNonTypedFullname(@name))
 
@@ -2116,7 +2172,8 @@ module Mockgen
 
         # Add member
         argSet = [methodFunc, name]
-        argSet << extraArg unless extraArg.nil?
+        argSet << extraArg1 unless extraArg1.nil?
+        argSet << extraArg2 unless extraArg2.nil?
         str += member.send(*argSet)
         derivedSet << member
       end
@@ -2129,7 +2186,8 @@ module Mockgen
         # Though calling D:f is ambiguous in this case,
         # it is practical to create exactly one Mock(D)::f.
         argSet = [methodClass, derivedSet]
-        argSet << extraArg unless extraArg.nil?
+        argSet << extraArg1 unless extraArg1.nil?
+        argSet << extraArg2 unless extraArg2.nil?
         str += block.send(*argSet)
       end
 
