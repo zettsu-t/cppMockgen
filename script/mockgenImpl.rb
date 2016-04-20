@@ -1297,10 +1297,6 @@ module Mockgen
     end
 
     ## Public methods added on the base class
-    def setTemplateParameter(templateParam)
-      @templateParam = templateParam
-    end
-
     def override?(block)
       @argSignature == block.argSignature
     end
@@ -1315,6 +1311,8 @@ module Mockgen
       @virtual || @superMemberSet.any?(&:virtual?)
     end
 
+    # Let definedStaticNameSet a Hash to make switches,
+    # false not to make them
     def makeDecoratorDef(className, definedNameSet, definedStaticNameSet)
       mockVarname = @staticMemfunc ? Mockgen::Constants::VARNAME_CLASS_MOCK : Mockgen::Constants::VARNAME_INSTANCE_MOCK
       decl = @staticMemfunc ? "static #{@decl}" : @decl
@@ -1325,7 +1323,7 @@ module Mockgen
       # This script cannot make switch variables for template classes
       # because this script does not know which types the classes are
       # specialized for.
-      if @templateParam.nil?
+      if definedStaticNameSet.kind_of?(Hash)
         # Switches to mock methods of the decorator need to be class instances
         # because test cases cannot access decorator instance variables.
         str += definedNameSet.key?(@funcName) ? "" : makeSwitchToMock(true)
@@ -1706,7 +1704,6 @@ module Mockgen
           @allMemberVariableSet << newBlock
         else
           newBlock = MemberFunctionBlock.new(line)
-          newBlock.setTemplateParameter(@templateParam)
           if newBlock.canTraverse?
             @allMemberFunctionSet << newBlock
             @publicMemberFunctionSet << newBlock if @pub
@@ -2089,7 +2086,7 @@ module Mockgen
       initMember = "#{Mockgen::Constants::VARNAME_INSTANCE_MOCK}(0)"
       mockType = getTypedTemplate(@templateParam, mockClassName)
 
-      definedStaticNameSet = {}
+      definedStaticNameSet = @templateParam ? false : {}
       str += formatConstrutorSet(baseName, decoratorName, "", initMember)
       str += "    virtual ~#{decoratorName}(void) {}\n"
       str += collectDecoratorDef([], {}, definedStaticNameSet)
@@ -2098,7 +2095,7 @@ module Mockgen
       str += "};\n\n"
 
       varStr = ""
-      unless definedStaticNameSet.empty?
+      if definedStaticNameSet.kind_of?(Hash) && !definedStaticNameSet.empty?
         varStr += "namespace #{Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE} {\n"
         definedStaticNameSet.each do |funcName, switchName|
           varStr += "    #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} "
@@ -2150,6 +2147,8 @@ module Mockgen
       collectFunctionDef(derivedSet, :collectMockDef, :makeMockDef, :canMockFunction, postfix, nil)
     end
 
+    # Let definedStaticNameSet a Hash to make switches,
+    # false not to make them
     def collectDecoratorDef(derivedSet, definedNameSet, definedStaticNameSet)
       collectFunctionDef(derivedSet, :collectDecoratorDef, :makeDecoratorDef, :canDecorateFunction,
                          definedNameSet, definedStaticNameSet)

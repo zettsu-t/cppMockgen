@@ -1471,13 +1471,9 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
       assert_equal(argSignature, block.argSignature)
       assert_equal(postFunc, block.instance_variable_get(:@postFunc))
-      assert_equal([], block.instance_variable_get(:@superMemberSet))
       assert_equal(virtual, block.virtual?)
-
+      assert_equal([], block.instance_variable_get(:@superMemberSet))
       assert_nil(block.instance_variable_get(:@templateParam))
-      templateParam = 1
-      block.setTemplateParameter(templateParam)
-      assert_equal(templateParam, block.instance_variable_get(:@templateParam))
     end
   end
 
@@ -1672,7 +1668,6 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      line, mock, stub, decorator, forwarder = data
      className = "Super"
      block = MemberFunctionBlock.new(line + ";")
-     block.setTemplateParameter(TemplateParameter.new("template <typename T>"))
 
      assert_true(block.valid)
      expectedMock = mock + ";\n"
@@ -1685,10 +1680,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      assert_equal(switchToMockStatic, block.makeSwitchToMock(true))
 
      definedNameSet = {}
-     definedStaticNameSet = {}
-     assert_equal(decorator, block.makeDecoratorDef(className, definedNameSet, definedStaticNameSet))
+     assert_equal(decorator, block.makeDecoratorDef(className, definedNameSet, false))
      assert_true(definedNameSet.empty?)
-     assert_true(definedStaticNameSet.empty?)
 
      definedNameSet = {}
      assert_equal(switchToMock + forwarder, block.makeForwarderDef(className, definedNameSet))

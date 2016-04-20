@@ -87,14 +87,31 @@ namespace Sample1 {
             std::function<void(void)> pFunc_;
         };
 
+        class NonTypedBaseClass : private boost::noncopyable {
+        public:
+            NonTypedBaseClass(void) = default;
+            virtual ~NonTypedBaseClass(void) = default;
+            virtual void GetAtBase(void) {}
+        };
+
         template <typename T=unsigned long long>
-        class TypedClass : private boost::noncopyable {
+        class TypedClass : public NonTypedBaseClass {
         public:
             TypedClass(const T& arg) : data_(arg) {}
-            T Get(void) const { return data_; }
+            virtual ~TypedClass(void) = default;
+            virtual T Get(void) const { return data_; }
         private:
             T data_;
         };
+
+        // Not support non-template classes that inherit a template class
+        // clang creates "template <typename T = int> class TypedClass"
+        // for the code shown below and it causes compile errors.
+//      class NonTypedDerivedClass : public TypedClass<int> {
+//      public:
+//          NonTypedDerivedClass(const int& arg) : TypedClass<int>(arg) {}
+//          virtual ~NonTypedDerivedClass(void) = default;
+//      };
 
         template <size_t S, size_t V, typename... Ts>
         class VariadicClass : private boost::noncopyable {
