@@ -17,11 +17,14 @@ MAKEFILE_PARALLEL=-j 5
 
 ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
-.PHONY: all runthrough runthrough_llvm runthrough_gcc runthrough_cxx
+.PHONY: all mockSwitchOnly runthrough runthrough_llvm runthrough_gcc runthrough_cxx
 .PHONY: check generate test_generate_each test_generate_bulk
 .PHONY: clean clean_generated rebuild show showall FORCE
 
 all: $(TARGETS)
+
+mockSwitchOnly:
+	$(CXX) $(CXXFLAGS) -o $(OBJ_DIR)/mockgenSampleTestBody.o -c tester_src/mockgenSampleTestBody.cpp
 
 runthrough:
 	$(MAKE) runthrough_llvm

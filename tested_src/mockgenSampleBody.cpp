@@ -67,6 +67,34 @@ int TopLevelClass::FuncPtrDefaultArgument(void(*funcptr)(int)) { return 0; }
 
 ClassNotInstanciated ClassNotInstanciated::instance_;
 
+FuncPtrWithoutArgType  g_funcPtrWithoutArg = &funcWithoutArg1;
+FuncPtrWithOneArgType  g_funcPtrWithOneArg = &funcWithOneArg1;
+FuncPtrWithTwoArgsType g_funcPtrWithTwoArgs = &funcWithTwoArgs1;
+
+int funcWithoutArg1(void) {
+    return g_returnValueWithoutArg1;
+}
+
+int funcWithoutArg2(void) {
+    return g_returnValueWithoutArg2;
+}
+
+long funcWithOneArg1(int arg1) {
+    return g_returnValueWithOneArg1;
+}
+
+long funcWithOneArg2(int arg1) {
+    return g_returnValueWithOneArg2;
+}
+
+void funcWithTwoArgs1(int arg1, char& arg2) {
+    arg2 = g_returnValueWithTwoArgs1;
+}
+
+void funcWithTwoArgs2(int arg1, char& arg2) {
+    arg2 = g_returnValueWithTwoArgs2;
+}
+
 /*
 Local Variables:
 mode: c++

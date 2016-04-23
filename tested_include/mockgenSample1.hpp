@@ -143,7 +143,7 @@ namespace Sample1 {
     extern int MissingFuncInNamespace(void);
 }
 
-// Default argument ass a pointer to a function
+// Default argument as a pointer to a function
 extern void defaultCallback(int a);
 
 typedef int64_t MyInt64;
@@ -202,6 +202,28 @@ namespace {
     const int CTOR_VALUE_localCtorWithArg = 200;
     const int CTOR_VALUE_SUM = CTOR_VALUE_aCtorWithArg + CTOR_VALUE_localCtorWithArg;
 }
+
+// Testing to switch pointers to free functions
+using FuncPtrWithoutArgType   = int(*)(void);
+using FuncPtrWithOneArgType   = long(*)(int arg1);
+using FuncPtrWithTwoArgsType  = void(*)(int arg1, char& arg2);
+extern FuncPtrWithoutArgType  g_funcPtrWithoutArg;
+extern FuncPtrWithOneArgType  g_funcPtrWithOneArg;
+extern FuncPtrWithTwoArgsType g_funcPtrWithTwoArgs;
+
+extern int  funcWithoutArg1(void);
+extern int  funcWithoutArg2(void);
+extern long funcWithOneArg1(int arg1);
+extern long funcWithOneArg2(int arg1);
+extern void funcWithTwoArgs1(int arg1, char& arg2);
+extern void funcWithTwoArgs2(int arg1, char& arg2);
+
+static constexpr int g_returnValueWithoutArg1 = 1;
+static constexpr int g_returnValueWithoutArg2 = 2;
+static constexpr long g_returnValueWithOneArg1 = 11;
+static constexpr long g_returnValueWithOneArg2 = 22;
+static constexpr char g_returnValueWithTwoArgs1 = 'a';
+static constexpr char g_returnValueWithTwoArgs2 = 'b';
 
 #endif // MOCKGEN_SAMPLE1_HPP
 
