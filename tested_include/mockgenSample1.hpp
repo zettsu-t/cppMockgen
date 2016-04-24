@@ -204,26 +204,50 @@ namespace {
 }
 
 // Testing to switch pointers to free functions
-using FuncPtrWithoutArgType   = int(*)(void);
-using FuncPtrWithOneArgType   = long(*)(int arg1);
-using FuncPtrWithTwoArgsType  = void(*)(int arg1, char& arg2);
-extern FuncPtrWithoutArgType  g_funcPtrWithoutArg;
-extern FuncPtrWithOneArgType  g_funcPtrWithOneArg;
-extern FuncPtrWithTwoArgsType g_funcPtrWithTwoArgs;
+using FuncPtrWithoutArgType    = int(*)(void);
+using FuncPtrWithOneArgType    = long(*)(int arg1);
+using FuncPtrWithTwoArgsType   = void(*)(int arg1, char& arg2);
+using FuncPtrWithThreeArgsType = void(*)(int arg1, int arg2, long long* arg3);
+using FuncPtrWith4ArgsType = size_t(*)(int, int, int, int);
+using FuncPtrWith5ArgsType = size_t(*)(int, int, int, int, int);
+using FuncPtrWith6ArgsType = size_t(*)(int, int, int, int, int, int);
+using FuncPtrWith7ArgsType = size_t(*)(int, int, int, int, int, int, int);
+using FuncPtrWith8ArgsType = size_t(*)(int, int, int, int, int, int, int, int);
+using FuncPtrWith9ArgsType = size_t(*)(int, int, int, int, int, int, int, int, int);
+
+extern FuncPtrWithoutArgType    g_funcPtrWithoutArg;
+extern FuncPtrWithOneArgType    g_funcPtrWithOneArg;
+extern FuncPtrWithTwoArgsType   g_funcPtrWithTwoArgs;
+extern FuncPtrWithThreeArgsType g_funcPtrWithThreeArgs;
+extern FuncPtrWith4ArgsType g_funcPtrWith4Args;
+extern FuncPtrWith5ArgsType g_funcPtrWith5Args;
+extern FuncPtrWith6ArgsType g_funcPtrWith6Args;
+extern FuncPtrWith7ArgsType g_funcPtrWith7Args;
+extern FuncPtrWith8ArgsType g_funcPtrWith8Args;
+extern FuncPtrWith9ArgsType g_funcPtrWith9Args;
+
+namespace {
+    constexpr int g_returnValueWithoutArg1 = 11;
+    constexpr int g_returnValueWithoutArg2 = 12;
+    constexpr long g_returnValueWithOneArg1 = 21;
+    constexpr long g_returnValueWithOneArg2 = 22;
+    constexpr char g_returnValueWithTwoArgs = 'a';
+    constexpr long long g_returnValueWithThreeArgs = 3;
+}
 
 extern int  funcWithoutArg1(void);
 extern int  funcWithoutArg2(void);
 extern long funcWithOneArg1(int arg1);
 extern long funcWithOneArg2(int arg1);
-extern void funcWithTwoArgs1(int arg1, char& arg2);
-extern void funcWithTwoArgs2(int arg1, char& arg2);
-
-static constexpr int g_returnValueWithoutArg1 = 1;
-static constexpr int g_returnValueWithoutArg2 = 2;
-static constexpr long g_returnValueWithOneArg1 = 11;
-static constexpr long g_returnValueWithOneArg2 = 22;
-static constexpr char g_returnValueWithTwoArgs1 = 'a';
-static constexpr char g_returnValueWithTwoArgs2 = 'b';
+extern void funcWithTwoArgs(int arg1, char& arg2);
+extern void funcWithThreeArgs(int arg1, int arg2, long long* arg3);
+// Return their arity
+extern size_t funcWith4Args(int arg1, int arg2, int arg3, int arg4);
+extern size_t funcWith5Args(int arg1, int arg2, int arg3, int arg4, int arg5);
+extern size_t funcWith6Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6);
+extern size_t funcWith7Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7);
+extern size_t funcWith8Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8);
+extern size_t funcWith9Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9);
 
 #endif // MOCKGEN_SAMPLE1_HPP
 

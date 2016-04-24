@@ -4,10 +4,8 @@
 #include "typeSwapper_mockgenSample1.hpp"
 
 #include "mockgenSample2.hpp"
+#include "mockgenTesterUtility.hpp"
 
-#include <functional>
-#include <memory>
-#include <type_traits>
 #include <gtest/gtest.h>
 
 using namespace MyUnittest;
@@ -307,213 +305,212 @@ TEST_F(TestVariadicTemplate, Get) {
     }
 }
 
-// Switch from a tested free function to a mocks via a pointer to a function.
-// Abstract base without template
-class FreeFunctionSwitchBase {
-protected:
-    FreeFunctionSwitchBase() = default;
-public:
-    virtual ~FreeFunctionSwitchBase() = default;
-    virtual void SwitchToMock(void) = 0;
-    virtual void SwitchToOriginal(void) = 0;
-};
+class TestFreeFunctionSwitch : public ::testing::Test{};
 
-// Common base for all arity of free functions
-template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
-          typename Result, typename... Args>
-class FreeFunctionSwitch : public FreeFunctionSwitchBase {
-protected:
-    using Caller = std::function<Func>;  // callable object to a free funtion or a mock method
-
-private:
-    static Caller caller_;       // caller to a mock
-    FuncPtr& functionSwitch_;    // pointer to a function in tested code
-    FuncPtr  originalFunction_;  // original pointer in the tested code
-
-    // Entry function that pointers in tested code call directly
-    static Result CallToMock(Args... args) {
-        return caller_(args...);
-    }
-
-protected:
-    FreeFunctionSwitch(FuncPtr& functionSwitch) :
-        functionSwitch_(functionSwitch), originalFunction_(functionSwitch) {
-    }
-
-    // Only derived classes can define concrete binding
-    void setCaller(Caller caller) {
-        caller_ = caller;
-    }
-
-public:
-    virtual ~FreeFunctionSwitch(void) {
-        // restore the function pointer in tested code
-        functionSwitch_ = originalFunction_;
-    }
-
-    virtual void SwitchToMock(void) override {
-        functionSwitch_ = static_cast<FuncPtr>(&CallToMock);
-    }
-
-    // When you switch the function pointer to other functions in tested code,
-    // Set it to the pointer directly, not via this class.
-    virtual void SwitchToOriginal(void) override {
-        functionSwitch_ = originalFunction_;
-    }
-};
-
-// Class (not instance) variable(s)
-template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
-          typename Result, typename... Args>
-std::function<Func> FreeFunctionSwitch
-<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::caller_;
-
-// Each arity requires the number of std::placeholders::_*
-template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
-          typename Result, typename... Args>
-class FreeFunctionSwitch0 : public FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...> {
-public:
-    FreeFunctionSwitch0(FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr) :
-        FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(functionSwitch) {
-        this->setCaller(std::bind(mockMethodPtr, &mock));
-    }
-};
-
-template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
-          typename Result, typename... Args>
-class FreeFunctionSwitch1 : public FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...> {
-public:
-    FreeFunctionSwitch1(FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr) :
-        FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(functionSwitch) {
-        this->setCaller(std::bind(mockMethodPtr, &mock, std::placeholders::_1));
-    }
-};
-
-template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
-          typename Result, typename... Args>
-class FreeFunctionSwitch2 : public FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...> {
-public:
-    FreeFunctionSwitch2(FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr) :
-        FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(functionSwitch) {
-        this->setCaller(std::bind(mockMethodPtr, &mock, std::placeholders::_1, std::placeholders::_2));
-    }
-};
-
-// Factory of the switch for each arity
-template <size_t Arity, typename FuncPtr, typename Mock, typename MockMethodPtr, typename Result, typename... Args>
-typename std::enable_if<Arity == 0>::type GetFreeFunctionSwitchImpl(
-    FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr, Result(*)(Args...),
-    std::unique_ptr<FreeFunctionSwitchBase>& pSwitch) {
-    using Func = typename std::remove_pointer<FuncPtr>::type;
-    pSwitch = std::unique_ptr<FreeFunctionSwitchBase>(
-        // Change this classname along with the arity of a mocked function
-        new FreeFunctionSwitch0<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(
-            functionSwitch, mock, mockMethodPtr));
-}
-
-template <size_t Arity, typename FuncPtr, typename Mock, typename MockMethodPtr, typename Result, typename... Args>
-typename std::enable_if<Arity == 1>::type GetFreeFunctionSwitchImpl(
-    FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr, Result(*)(Args...),
-    std::unique_ptr<FreeFunctionSwitchBase>& pSwitch) {
-    using Func = typename std::remove_pointer<FuncPtr>::type;
-    pSwitch = std::unique_ptr<FreeFunctionSwitchBase>(
-        new FreeFunctionSwitch1<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(
-            functionSwitch, mock, mockMethodPtr));
-}
-
-template <size_t Arity, typename FuncPtr, typename Mock, typename MockMethodPtr, typename Result, typename... Args>
-typename std::enable_if<Arity == 2>::type GetFreeFunctionSwitchImpl(
-    FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr, Result(*)(Args...),
-    std::unique_ptr<FreeFunctionSwitchBase>& pSwitch) {
-    using Func = typename std::remove_pointer<FuncPtr>::type;
-    pSwitch = std::unique_ptr<FreeFunctionSwitchBase>(
-        new FreeFunctionSwitch2<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>(
-            functionSwitch, mock, mockMethodPtr));
-}
-
-// Extract result and args of given function
-template <typename FuncPtr, typename Mock, typename MockMethodPtr, typename Result, typename... Args>
-std::unique_ptr<FreeFunctionSwitchBase> GetFreeFunctionSwitchMatcher(
-    FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr, Result(*)(Args...)) {
-    std::unique_ptr<FreeFunctionSwitchBase> pSwitch;
-    GetFreeFunctionSwitchImpl<
-        sizeof...(Args), FuncPtr, Mock, MockMethodPtr, Result, Args...>
-        (functionSwitch, mock, mockMethodPtr, functionSwitch, pSwitch);
-    return pSwitch;
-}
-
-// Generic factory of the switch
-template <typename FuncPtr, typename Mock, typename MockMethodPtr>
-std::unique_ptr<FreeFunctionSwitchBase> GetFreeFunctionSwitch(
-    FuncPtr& functionSwitch, Mock& mock, MockMethodPtr mockMethodPtr) {
-    std::unique_ptr<FreeFunctionSwitchBase> pSwitch;
-    return GetFreeFunctionSwitchMatcher(functionSwitch, mock, mockMethodPtr, functionSwitch);
-}
-
-class TestSwapPointerToFunction : public ::testing::Test{};
-
-TEST_F(TestSwapPointerToFunction, SW) {
+TEST_F(TestFreeFunctionSwitch, NoArguments) {
     MOCK_OF(All) mock(all_Forwarder);
     {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithOneArg, mock, &All_Mock::funcWithOneArg1);
-        {
-            EXPECT_CALL(mock, funcWithOneArg1(0)).Times(0);
-            EXPECT_EQ(g_returnValueWithOneArg1, g_funcPtrWithOneArg(0));
-        }
-        {
-            EXPECT_CALL(mock, funcWithOneArg1(0)).Times(0);
-            g_funcPtrWithOneArg = &funcWithOneArg2;
-            EXPECT_EQ(g_returnValueWithOneArg2, g_funcPtrWithOneArg(0));
-        }
-        {
-            pSwitch->SwitchToMock();
-            constexpr long expected = 100;
-            EXPECT_CALL(mock, funcWithOneArg1(0)).Times(1).WillOnce(::testing::Return(expected));
-            EXPECT_EQ(expected, g_funcPtrWithOneArg(0));
-        }
-        {
-            pSwitch->SwitchToOriginal();
-            EXPECT_CALL(mock, funcWithOneArg1(0)).Times(0);
-            EXPECT_EQ(g_returnValueWithOneArg1, g_funcPtrWithOneArg(0));
-        }
-    }
-    EXPECT_EQ(&funcWithOneArg1, g_funcPtrWithOneArg);
-
-    {
         auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithoutArg, mock, &All_Mock::funcWithoutArg1);
+        // Switch between free functions and a mock
         {
             EXPECT_CALL(mock, funcWithoutArg1()).Times(0);
+            EXPECT_CALL(mock, funcWithoutArg2()).Times(0);
             EXPECT_EQ(g_returnValueWithoutArg1, g_funcPtrWithoutArg());
+        }
+        {
+            EXPECT_CALL(mock, funcWithoutArg1()).Times(0);
+            EXPECT_CALL(mock, funcWithoutArg2()).Times(0);
+            g_funcPtrWithoutArg = &funcWithoutArg2;
+            EXPECT_EQ(g_returnValueWithoutArg2, g_funcPtrWithoutArg());
         }
         {
             pSwitch->SwitchToMock();
             constexpr int expected = 200;
             EXPECT_CALL(mock, funcWithoutArg1()).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_CALL(mock, funcWithoutArg2()).Times(0);
             EXPECT_EQ(expected, g_funcPtrWithoutArg());
+        }
+        {
+            pSwitch->SwitchToOriginal();
+            EXPECT_CALL(mock, funcWithoutArg1()).Times(0);
+            EXPECT_CALL(mock, funcWithoutArg2()).Times(0);
+            EXPECT_EQ(g_returnValueWithoutArg1, g_funcPtrWithoutArg());
         }
     }
     EXPECT_EQ(&funcWithoutArg1, g_funcPtrWithoutArg);
+}
 
+TEST_F(TestFreeFunctionSwitch, OneArgument) {
+    MOCK_OF(All) mock(all_Forwarder);
     {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithTwoArgs, mock, &All_Mock::funcWithTwoArgs1);
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithOneArg, mock, &All_Mock::funcWithOneArg1);
+        constexpr int arg1 = 101;
+        {
+            EXPECT_CALL(mock, funcWithOneArg1(::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWithOneArg2(::testing::_)).Times(0);
+            EXPECT_EQ(g_returnValueWithOneArg1, g_funcPtrWithOneArg(arg1));
+        }
+        {
+            EXPECT_CALL(mock, funcWithOneArg1(::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWithOneArg2(::testing::_)).Times(0);
+            g_funcPtrWithOneArg = &funcWithOneArg2;
+            EXPECT_EQ(g_returnValueWithOneArg2, g_funcPtrWithOneArg(arg1));
+        }
+        {
+            pSwitch->SwitchToMock();
+            constexpr long expected = 200;
+            EXPECT_CALL(mock, funcWithOneArg1(arg1)).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_CALL(mock, funcWithOneArg2(::testing::_)).Times(0);
+            EXPECT_EQ(expected, g_funcPtrWithOneArg(arg1));
+        }
+        {
+            pSwitch->SwitchToOriginal();
+            EXPECT_CALL(mock, funcWithOneArg1(::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWithOneArg2(::testing::_)).Times(0);
+            EXPECT_EQ(g_returnValueWithOneArg1, g_funcPtrWithOneArg(arg1));
+        }
+    }
+    EXPECT_EQ(&funcWithOneArg1, g_funcPtrWithOneArg);
+}
+
+TEST_F(TestFreeFunctionSwitch, TwoArguments) {
+    MOCK_OF(All) mock(all_Forwarder);
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithTwoArgs, mock, &All_Mock::funcWithTwoArgs);
+        constexpr int arg1 = 101;
+        // Return value via a reference argument
         constexpr char initial = 'Y';
         constexpr char expected= 'Z';
         {
             char arg2 = initial;
-            EXPECT_CALL(mock, funcWithTwoArgs1(0, ::testing::_)).Times(0);
-            g_funcPtrWithTwoArgs(0, arg2);
-            EXPECT_EQ(g_returnValueWithTwoArgs1, arg2);
+            EXPECT_CALL(mock, funcWithTwoArgs(::testing::_, ::testing::_)).Times(0);
+            g_funcPtrWithTwoArgs(arg1, arg2);
+            EXPECT_EQ(g_returnValueWithTwoArgs, arg2);
         }
         {
-            char arg2 = initial;
             pSwitch->SwitchToMock();
-            EXPECT_CALL(mock, funcWithTwoArgs1(0, ::testing::_)).Times(1).
+            char arg2 = initial;
+            EXPECT_CALL(mock, funcWithTwoArgs(arg1, ::testing::_)).Times(1).
                 WillOnce(::testing::SetArgReferee<1>(expected));
-            g_funcPtrWithTwoArgs(0, arg2);
+            g_funcPtrWithTwoArgs(arg1, arg2);
             EXPECT_EQ(expected, arg2);
         }
     }
-    EXPECT_EQ(&funcWithTwoArgs1, g_funcPtrWithTwoArgs);
+    EXPECT_EQ(&funcWithTwoArgs, g_funcPtrWithTwoArgs);
+}
+
+TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
+    MOCK_OF(All) mock(all_Forwarder);
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithThreeArgs, mock, &All_Mock::funcWithThreeArgs);
+        constexpr int arg1 = 101;
+        constexpr int arg2 = 102;
+        // Return value via a reference argument
+        {
+            long long arg3 = 0;
+            EXPECT_CALL(mock, funcWithThreeArgs(::testing::_, ::testing::_, ::testing::_)).Times(0);
+            g_funcPtrWithThreeArgs(arg1, arg2, &arg3);
+            EXPECT_EQ(g_returnValueWithThreeArgs, arg3);
+        }
+        {
+            pSwitch->SwitchToMock();
+            long long arg3 = 0;
+            constexpr int expected = 200;
+            EXPECT_CALL(mock, funcWithThreeArgs(arg1, arg2, ::testing::_)).Times(1).
+                WillOnce(::testing::SetArgPointee<2>(expected));
+            g_funcPtrWithThreeArgs(arg1, arg2, &arg3);
+            EXPECT_EQ(expected, arg3);
+        }
+    }
+    EXPECT_EQ(&funcWithThreeArgs, g_funcPtrWithThreeArgs);
+}
+
+TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
+    MOCK_OF(All) mock(all_Forwarder);
+    {
+        auto pSwitch4 = GetFreeFunctionSwitch(g_funcPtrWith4Args, mock, &All_Mock::funcWith4Args);
+        auto pSwitch5 = GetFreeFunctionSwitch(g_funcPtrWith5Args, mock, &All_Mock::funcWith5Args);
+        auto pSwitch6 = GetFreeFunctionSwitch(g_funcPtrWith6Args, mock, &All_Mock::funcWith6Args);
+        auto pSwitch7 = GetFreeFunctionSwitch(g_funcPtrWith7Args, mock, &All_Mock::funcWith7Args);
+        auto pSwitch8 = GetFreeFunctionSwitch(g_funcPtrWith8Args, mock, &All_Mock::funcWith8Args);
+        auto pSwitch9 = GetFreeFunctionSwitch(g_funcPtrWith9Args, mock, &All_Mock::funcWith9Args);
+
+        using SharedSwitch = std::shared_ptr<std::remove_pointer<decltype(pSwitch4.get())>::type>;
+        std::vector<SharedSwitch> switchSet { std::move(pSwitch4), std::move(pSwitch5),
+                std::move(pSwitch6), std::move(pSwitch7), std::move(pSwitch8), std::move(pSwitch9)};
+
+        constexpr int arg1 = 101;
+        constexpr int arg2 = 102;
+        constexpr int arg3 = 103;
+        constexpr int arg4 = 104;
+        constexpr int arg5 = 105;
+        constexpr int arg6 = 106;
+        constexpr int arg7 = 107;
+        constexpr int arg8 = 108;
+        constexpr int arg9 = 109;
+        {
+            EXPECT_CALL(mock, funcWith4Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWith5Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWith6Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_, ::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWith7Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWith8Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_)).Times(0);
+            EXPECT_CALL(mock, funcWith9Args(::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_, ::testing::_,
+                                            ::testing::_, ::testing::_, ::testing::_)).Times(0);
+            EXPECT_EQ(4, g_funcPtrWith4Args(arg1, arg2, arg3, arg4));
+            EXPECT_EQ(5, g_funcPtrWith5Args(arg1, arg2, arg3, arg4, arg5));
+            EXPECT_EQ(6, g_funcPtrWith6Args(arg1, arg2, arg3, arg4, arg5, arg6));
+            EXPECT_EQ(7, g_funcPtrWith7Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7));
+            EXPECT_EQ(8, g_funcPtrWith8Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8));
+            EXPECT_EQ(9, g_funcPtrWith9Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9));
+        }
+        {
+            constexpr size_t expected4 = 204;
+            constexpr size_t expected5 = 205;
+            constexpr size_t expected6 = 206;
+            constexpr size_t expected7 = 207;
+            constexpr size_t expected8 = 208;
+            constexpr size_t expected9 = 209;
+
+            for(auto pSwitch : switchSet) {
+                pSwitch->SwitchToMock();
+            }
+
+            ::testing::Sequence seq;
+            EXPECT_CALL(mock, funcWith4Args(arg1, arg2, arg3, arg4)).
+                Times(1).WillOnce(::testing::Return(expected4));
+            EXPECT_CALL(mock, funcWith5Args(arg1, arg2, arg3, arg4, arg5)).
+                Times(1).WillOnce(::testing::Return(expected5));
+            EXPECT_CALL(mock, funcWith6Args(arg1, arg2, arg3, arg4, arg5, arg6)).
+                Times(1).WillOnce(::testing::Return(expected6));
+            EXPECT_CALL(mock, funcWith7Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7)).
+                Times(1).WillOnce(::testing::Return(expected7));
+            EXPECT_CALL(mock, funcWith8Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8)).
+                Times(1).WillOnce(::testing::Return(expected8));
+            EXPECT_CALL(mock, funcWith9Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9)).
+                Times(1).WillOnce(::testing::Return(expected9));
+
+            EXPECT_EQ(expected4, g_funcPtrWith4Args(arg1, arg2, arg3, arg4));
+            EXPECT_EQ(expected5, g_funcPtrWith5Args(arg1, arg2, arg3, arg4, arg5));
+            EXPECT_EQ(expected6, g_funcPtrWith6Args(arg1, arg2, arg3, arg4, arg5, arg6));
+            EXPECT_EQ(expected7, g_funcPtrWith7Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7));
+            EXPECT_EQ(expected8, g_funcPtrWith8Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8));
+            EXPECT_EQ(expected9, g_funcPtrWith9Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9));
+        }
+    }
+    EXPECT_EQ(&funcWith4Args, g_funcPtrWith4Args);
+    EXPECT_EQ(&funcWith5Args, g_funcPtrWith5Args);
+    EXPECT_EQ(&funcWith6Args, g_funcPtrWith6Args);
+    EXPECT_EQ(&funcWith7Args, g_funcPtrWith7Args);
+    EXPECT_EQ(&funcWith8Args, g_funcPtrWith8Args);
+    EXPECT_EQ(&funcWith9Args, g_funcPtrWith9Args);
 }
 
 /*

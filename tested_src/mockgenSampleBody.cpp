@@ -69,7 +69,14 @@ ClassNotInstanciated ClassNotInstanciated::instance_;
 
 FuncPtrWithoutArgType  g_funcPtrWithoutArg = &funcWithoutArg1;
 FuncPtrWithOneArgType  g_funcPtrWithOneArg = &funcWithOneArg1;
-FuncPtrWithTwoArgsType g_funcPtrWithTwoArgs = &funcWithTwoArgs1;
+FuncPtrWithTwoArgsType g_funcPtrWithTwoArgs = &funcWithTwoArgs;
+FuncPtrWithThreeArgsType g_funcPtrWithThreeArgs = &funcWithThreeArgs;
+FuncPtrWith4ArgsType g_funcPtrWith4Args = &funcWith4Args;
+FuncPtrWith5ArgsType g_funcPtrWith5Args = &funcWith5Args;
+FuncPtrWith6ArgsType g_funcPtrWith6Args = &funcWith6Args;
+FuncPtrWith7ArgsType g_funcPtrWith7Args = &funcWith7Args;
+FuncPtrWith8ArgsType g_funcPtrWith8Args = &funcWith8Args;
+FuncPtrWith9ArgsType g_funcPtrWith9Args = &funcWith9Args;
 
 int funcWithoutArg1(void) {
     return g_returnValueWithoutArg1;
@@ -87,12 +94,38 @@ long funcWithOneArg2(int arg1) {
     return g_returnValueWithOneArg2;
 }
 
-void funcWithTwoArgs1(int arg1, char& arg2) {
-    arg2 = g_returnValueWithTwoArgs1;
+void funcWithTwoArgs(int arg1, char& arg2) {
+    arg2 = g_returnValueWithTwoArgs;
+    return;
 }
 
-void funcWithTwoArgs2(int arg1, char& arg2) {
-    arg2 = g_returnValueWithTwoArgs2;
+void funcWithThreeArgs(int arg1, int arg2, long long* arg3) {
+    *arg3 = g_returnValueWithThreeArgs;
+    return;
+}
+
+size_t funcWith4Args(int arg1, int arg2, int arg3, int arg4) {
+    return 4;
+}
+
+size_t funcWith5Args(int arg1, int arg2, int arg3, int arg4, int arg5) {
+    return 5;
+}
+
+size_t funcWith6Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6) {
+    return 6;
+}
+
+size_t funcWith7Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7) {
+    return 7;
+}
+
+size_t funcWith8Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8) {
+    return 8;
+}
+
+size_t funcWith9Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9) {
+    return 9;
 }
 
 /*
