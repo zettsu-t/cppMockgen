@@ -3,9 +3,11 @@
 #ifndef MOCKGEN_TESTER_UTILITY_HPP
 #define MOCKGEN_TESTER_UTILITY_HPP
 
+#include <assert.h>
 #include <functional>
 #include <memory>
 #include <type_traits>
+#include <vector>
 #include <gtest/gtest.h>
 
 // Switch from a tested free function to a mock via a pointer to a function.
@@ -20,7 +22,17 @@ public:
     virtual void SwitchToOriginal(void) = 0;
 };
 
+// CallToMock* : entry function that pointers in tested code call directly.
+// caller* : callable object to a method class CallToMock* .
+#define MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(suffix) \
+    static Result CallToMock##suffix(Args... args) { \
+        return caller##suffix##_(args...); \
+    } \
+    static Caller caller##suffix##_; \
+
 // Common base for all arity of free functions
+// This code defines a class per function signature and
+// test code can set number of SizeOfCallerSet mock functions.
 template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
           typename Result, typename... Args>
 class FreeFunctionSwitch : public FreeFunctionSwitchBase {
@@ -28,34 +40,81 @@ protected:
     using Caller = std::function<Func>;  // callable object to a free function or a mock method
 
 private:
-    static Caller caller_;       // call a mock
+    // all and for Nth instance
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER()
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(1)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(2)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(3)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(4)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(5)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(6)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(7)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(8)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(9)
+    MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_MEMBER(10)
+
+    using CallerPtrSetType       = std::vector<Caller*>;
+    using CallToMockSetType      = std::vector<decltype(&CallToMock)>;
+    using CallToMockOccupiedType = std::vector<int>;
+    using CallToMockSizeType     = CallToMockOccupiedType::size_type;
+    static CallerPtrSetType       callerPtrSet_;
+    static CallToMockSetType      callToMockSet_;
+    static CallToMockOccupiedType callToMockOccupied_;
+    static constexpr CallToMockSizeType SizeOfCallerSet = 10;
+
     FuncPtr& functionSwitch_;    // pointer to a function in tested code
     FuncPtr  originalFunction_;  // original pointer in the tested code
-
-    // Entry function that pointers in tested code call directly
-    static Result CallToMock(Args... args) {
-        return caller_(args...);
-    }
+    // if callToMockIndex_ < SizeOfCallerSet, call CallToMock-callToMockIndex_
+    // otherwise call CallToMock(not numbered)
+    CallToMockSizeType callToMockIndex_;
 
 protected:
     FreeFunctionSwitch(FuncPtr& functionSwitch) :
-        functionSwitch_(functionSwitch), originalFunction_(functionSwitch) {
+        functionSwitch_(functionSwitch), originalFunction_(functionSwitch), callToMockIndex_(SizeOfCallerSet) {
+        assert(SizeOfCallerSet == callerPtrSet_.size());
+        assert(SizeOfCallerSet == callToMockSet_.size());
+        assert(SizeOfCallerSet == callToMockOccupied_.size());
+
+        // Find an available mock
+        CallToMockSizeType index = 0;
+        for(auto p : callToMockOccupied_) {
+            if (!p) {
+                callToMockIndex_ = index;
+                callToMockOccupied_[index] = 1;
+                break;
+            }
+            ++index;
+        }
     }
 
     // Only derived classes can define concrete binding
     // Do not set this virtual because constructors of derived classes call this
     void setCaller(Caller caller) {
-        caller_ = caller;
+        if (callToMockIndex_ < callerPtrSet_.size()) {
+            auto pCaller = callerPtrSet_.at(callToMockIndex_);
+            *pCaller = caller;
+        } else {
+            caller_ = caller;
+        }
     }
 
 public:
     virtual ~FreeFunctionSwitch(void) {
         // restore the function pointer in tested code
         functionSwitch_ = originalFunction_;
+
+        // release the occupied mock
+        if (callToMockIndex_ < callToMockOccupied_.size()) {
+            callToMockOccupied_[callToMockIndex_] = 0;
+        }
     }
 
     virtual void SwitchToMock(void) override {
-        functionSwitch_ = static_cast<FuncPtr>(&CallToMock);
+        if (callToMockIndex_ < callToMockSet_.size()) {
+            functionSwitch_ = static_cast<FuncPtr>(callToMockSet_.at(callToMockIndex_));
+        } else {
+            functionSwitch_ = static_cast<FuncPtr>(&CallToMock);
+        }
     }
 
     // When you switch the function pointer to other functions in tested code,
@@ -66,10 +125,42 @@ public:
 };
 
 // Class (not instance) variable(s)
+#define MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(suffix) \
+template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr, \
+          typename Result, typename... Args> \
+std::function<Func> FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::caller##suffix##_; \
+
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE()
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(1)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(2)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(3)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(4)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(5)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(6)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(7)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(8)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(9)
+MACRO_CLASS_FREEFUNCTIONSWITCH_CALLER_INSTANCE(10)
+
 template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
           typename Result, typename... Args>
-std::function<Func> FreeFunctionSwitch
-<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::caller_;
+typename FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::CallerPtrSetType
+FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::callerPtrSet_ {
+    &caller1_, &caller2_, &caller3_, &caller4_, &caller5_,
+        &caller6_, &caller7_, &caller8_, &caller9_, &caller10_};
+
+template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
+          typename Result, typename... Args>
+typename FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::CallToMockSetType
+FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::callToMockSet_ {
+    CallToMock1, CallToMock2, CallToMock3, CallToMock4, CallToMock5,
+        CallToMock6, CallToMock7, CallToMock8, CallToMock9, CallToMock10};
+
+template <typename FuncPtr, typename Func, typename Mock, typename MockMethodPtr,
+          typename Result, typename... Args>
+typename FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::CallToMockOccupiedType
+FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::callToMockOccupied_(
+    FreeFunctionSwitch<FuncPtr, Func, Mock, MockMethodPtr, Result, Args...>::SizeOfCallerSet, 0);
 
 // Each arity requires the number of std::placeholders::_*
 // No arguments is special case to expand variadic macros

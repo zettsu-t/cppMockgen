@@ -139,7 +139,7 @@ TEST_F(TestSample, ForwardSelective) {
         MOCK_OF(DerivedClass) mock(INSTANCE_OF(anObject));
         {
             // Prohibit forwarding to the mock Func()
-            INSTANCE_OF(anObject).Func_mock_ = true;
+            INSTANCE_OF(anObject).Func_nomock_ = true;
             {
                 EXPECT_CALL(mock, Func(0, 0)).Times(0);
                 EXPECT_EQ(0, SampleFunc());
@@ -152,8 +152,8 @@ TEST_F(TestSample, ForwardSelective) {
         }
         {
             // Forward to the mock Func()
-            INSTANCE_OF(anObject).Func_mock_ = false;
-            INSTANCE_OF(anObject).StaticFunc_mock_ = true;
+            INSTANCE_OF(anObject).Func_nomock_ = false;
+            INSTANCE_OF(anObject).StaticFunc_nomock_ = true;
             {
                 const int expected = 2;
                 EXPECT_CALL(mock, Func(0, 0)).Times(1).WillOnce(::testing::Return(expected));
@@ -172,12 +172,12 @@ TEST_F(TestSample, ForwardSelective) {
         MOCK_OF(DerivedClass) mock(localObject);
         DECORATOR(DerivedClass)::pClassMock_ = &mock;
         {
-            DECORATOR(DerivedClass)::StaticFunc_mock_ = true;
+            DECORATOR(DerivedClass)::StaticFunc_nomock_ = true;
             EXPECT_CALL(mock, StaticFunc()).Times(0);
             EXPECT_EQ(0, localObject.StaticFunc());
         }
         {
-            DECORATOR(DerivedClass)::StaticFunc_mock_ = false;
+            DECORATOR(DerivedClass)::StaticFunc_nomock_ = false;
             constexpr int expected = 3;
             EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
             EXPECT_EQ(expected, localObject.StaticFunc());
@@ -511,6 +511,78 @@ TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
     EXPECT_EQ(&funcWith7Args, g_funcPtrWith7Args);
     EXPECT_EQ(&funcWith8Args, g_funcPtrWith8Args);
     EXPECT_EQ(&funcWith9Args, g_funcPtrWith9Args);
+}
+
+TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
+    MOCK_OF(All) mock(all_Forwarder);
+    {
+        // Switch1 to 10 have their unique entry function FreeFunctionSwitch::CallToMock1 and CallToMock10
+        auto pSwitch1 = GetFreeFunctionSwitch(g_switchedFuncPtr1, mock, &All_Mock::switchedFunc1);
+        auto pSwitch2 = GetFreeFunctionSwitch(g_switchedFuncPtr2, mock, &All_Mock::switchedFunc2);
+        auto pSwitch3 = GetFreeFunctionSwitch(g_switchedFuncPtr3, mock, &All_Mock::switchedFunc3);
+        auto pSwitch4 = GetFreeFunctionSwitch(g_switchedFuncPtr4, mock, &All_Mock::switchedFunc4);
+        auto pSwitch5 = GetFreeFunctionSwitch(g_switchedFuncPtr5, mock, &All_Mock::switchedFunc5);
+        auto pSwitch6 = GetFreeFunctionSwitch(g_switchedFuncPtr6, mock, &All_Mock::switchedFunc6);
+        auto pSwitch7 = GetFreeFunctionSwitch(g_switchedFuncPtr7, mock, &All_Mock::switchedFunc7);
+        auto pSwitch8 = GetFreeFunctionSwitch(g_switchedFuncPtr8, mock, &All_Mock::switchedFunc8);
+        auto pSwitch9 = GetFreeFunctionSwitch(g_switchedFuncPtr9, mock, &All_Mock::switchedFunc9);
+        auto pSwitch10 = GetFreeFunctionSwitch(g_switchedFuncPtr10, mock, &All_Mock::switchedFunc10);
+        // Switch11 and 12 shares FreeFunctionSwitch::CallToMock
+        auto pSwitch11 = GetFreeFunctionSwitch(g_switchedFuncPtr11, mock, &All_Mock::switchedFunc11);
+        auto pSwitch12 = GetFreeFunctionSwitch(g_switchedFuncPtr12, mock, &All_Mock::switchedFunc12);
+
+        pSwitch1->SwitchToMock();
+        pSwitch2->SwitchToMock();
+        pSwitch3->SwitchToMock();
+        pSwitch4->SwitchToMock();
+        pSwitch5->SwitchToMock();
+        pSwitch6->SwitchToMock();
+        pSwitch7->SwitchToMock();
+        pSwitch8->SwitchToMock();
+        pSwitch9->SwitchToMock();
+        pSwitch10->SwitchToMock();
+        pSwitch11->SwitchToMock();
+        pSwitch12->SwitchToMock();
+
+        EXPECT_CALL(mock, switchedFunc1()).Times(1).WillOnce(::testing::Return(101));
+        EXPECT_CALL(mock, switchedFunc2()).Times(1).WillOnce(::testing::Return(102));
+        EXPECT_CALL(mock, switchedFunc3()).Times(1).WillOnce(::testing::Return(103));
+        EXPECT_CALL(mock, switchedFunc4()).Times(1).WillOnce(::testing::Return(104));
+        EXPECT_CALL(mock, switchedFunc5()).Times(1).WillOnce(::testing::Return(105));
+        EXPECT_CALL(mock, switchedFunc6()).Times(1).WillOnce(::testing::Return(106));
+        EXPECT_CALL(mock, switchedFunc7()).Times(1).WillOnce(::testing::Return(107));
+        EXPECT_CALL(mock, switchedFunc8()).Times(1).WillOnce(::testing::Return(108));
+        EXPECT_CALL(mock, switchedFunc9()).Times(1).WillOnce(::testing::Return(109));
+        EXPECT_CALL(mock, switchedFunc10()).Times(1).WillOnce(::testing::Return(110));
+        EXPECT_CALL(mock, switchedFunc11()).Times(0);
+        EXPECT_CALL(mock, switchedFunc12()).Times(2).WillOnce(::testing::Return(111)).WillOnce(::testing::Return(112));
+
+        EXPECT_EQ(101, g_switchedFuncPtr1());
+        EXPECT_EQ(102, g_switchedFuncPtr2());
+        EXPECT_EQ(103, g_switchedFuncPtr3());
+        EXPECT_EQ(104, g_switchedFuncPtr4());
+        EXPECT_EQ(105, g_switchedFuncPtr5());
+        EXPECT_EQ(106, g_switchedFuncPtr6());
+        EXPECT_EQ(107, g_switchedFuncPtr7());
+        EXPECT_EQ(108, g_switchedFuncPtr8());
+        EXPECT_EQ(109, g_switchedFuncPtr9());
+        EXPECT_EQ(110, g_switchedFuncPtr10());
+        EXPECT_EQ(111, g_switchedFuncPtr11());  // the 12th GetFreeFunctionSwitch overwrote the 11th
+        EXPECT_EQ(112, g_switchedFuncPtr12());
+    }
+
+    EXPECT_EQ(&switchedFunc1, g_switchedFuncPtr1);
+    EXPECT_EQ(&switchedFunc2, g_switchedFuncPtr2);
+    EXPECT_EQ(&switchedFunc3, g_switchedFuncPtr3);
+    EXPECT_EQ(&switchedFunc4, g_switchedFuncPtr4);
+    EXPECT_EQ(&switchedFunc5, g_switchedFuncPtr5);
+    EXPECT_EQ(&switchedFunc6, g_switchedFuncPtr6);
+    EXPECT_EQ(&switchedFunc7, g_switchedFuncPtr7);
+    EXPECT_EQ(&switchedFunc8, g_switchedFuncPtr8);
+    EXPECT_EQ(&switchedFunc9, g_switchedFuncPtr9);
+    EXPECT_EQ(&switchedFunc10, g_switchedFuncPtr10);
+    EXPECT_EQ(&switchedFunc11, g_switchedFuncPtr11);
+    EXPECT_EQ(&switchedFunc12, g_switchedFuncPtr12);
 }
 
 /*

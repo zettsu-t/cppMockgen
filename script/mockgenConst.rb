@@ -23,7 +23,7 @@ module Mockgen
     # Reserved for compiler internal use
     NAMESPACE_COMPILER_INTERNAL = "__".freeze
     # Excluded class names (practically, they should be specified in command line options)
-    CLASS_NAME_EXCLUDED_SET = ["$$$"]
+    CLASS_NAME_EXCLUDED_SET = ["$$$"].map(&:freeze).freeze
     CLASS_NAME_EXCLUDED_MAP = Hash[*(CLASS_NAME_EXCLUDED_SET.map{ |word| [word, true] }.flatten)].freeze
 
     KEYWORD_USER_DEFINED_TYPE_SET = ["struct", "class", "enum", "union"].map(&:freeze).freeze
@@ -40,9 +40,10 @@ module Mockgen
     KEYWORD_UNDEFINED_REFERENCE = "undefined reference to".freeze
 
     # Pattern to exclude free function mocks and stubs
-    FREE_FUNCTION_FILTER_OUT_PATTERN = "^[\da-z_]+$"
+    FREE_FUNCTION_FILTER_OUT_STD_PATTERN = "^[\da-z_]+$".freeze
+    FREE_FUNCTION_FILTER_OUT_SYSTEM_PATTERN = "^_[A-Z]".freeze
     # Tentative workaround for MinGW pthread
-    FREE_FUNCTION_FILTER_OUT_WORD_SET = ["_pthread_key_dest"]
+    FREE_FUNCTION_FILTER_OUT_WORD_SET = ["_pthread_key_dest"].map(&:freeze).freeze
 
     # Keywords which are excluded to make mocks in class member functions
     MEMFUNC_WORD_SKIPPED_SET = ["virtual", "inline", "explicit", "static"].map(&:freeze).freeze
@@ -62,10 +63,10 @@ module Mockgen
     MEMFUNC_WORD_COMPARED_MAP = Hash[*(MEMFUNC_WORD_COMPARED_SET.map{ |word| [word, true] }.flatten)].freeze
 
     # Forward a function or not
-    MEMFUNC_FORWARD_SWITCH_POSTFIX = "mock_"
-    MEMFUNC_FORWARD_SWITCH_TYPE = "bool"
+    MEMFUNC_FORWARD_SWITCH_POSTFIX = "nomock_".freeze
+    MEMFUNC_FORWARD_SWITCH_TYPE = "bool".freeze
     # Must be same as default value for global variables
-    MEMFUNC_FORWARD_SWITCH_DEFAULT = "false"
+    MEMFUNC_FORWARD_SWITCH_DEFAULT = "false".freeze
 
     # Keywords which are qualifiers for member functions, do not appear in member variables
     MEMVAR_FIRST_WORD_REJECTED_SET = ["using", "typedef"].map(&:freeze).freeze

@@ -249,6 +249,32 @@ extern size_t funcWith7Args(int arg1, int arg2, int arg3, int arg4, int arg5, in
 extern size_t funcWith8Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8);
 extern size_t funcWith9Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6, int arg7, int arg8, int arg9);
 
+extern FuncPtrWithoutArgType g_switchedFuncPtr1;
+extern FuncPtrWithoutArgType g_switchedFuncPtr2;
+extern FuncPtrWithoutArgType g_switchedFuncPtr3;
+extern FuncPtrWithoutArgType g_switchedFuncPtr4;
+extern FuncPtrWithoutArgType g_switchedFuncPtr5;
+extern FuncPtrWithoutArgType g_switchedFuncPtr6;
+extern FuncPtrWithoutArgType g_switchedFuncPtr7;
+extern FuncPtrWithoutArgType g_switchedFuncPtr8;
+extern FuncPtrWithoutArgType g_switchedFuncPtr9;
+extern FuncPtrWithoutArgType g_switchedFuncPtr10;
+extern FuncPtrWithoutArgType g_switchedFuncPtr11;
+extern FuncPtrWithoutArgType g_switchedFuncPtr12;
+// Return their suffix number
+extern int switchedFunc1(void);
+extern int switchedFunc2(void);
+extern int switchedFunc3(void);
+extern int switchedFunc4(void);
+extern int switchedFunc5(void);
+extern int switchedFunc6(void);
+extern int switchedFunc7(void);
+extern int switchedFunc8(void);
+extern int switchedFunc9(void);
+extern int switchedFunc10(void);
+extern int switchedFunc11(void);
+extern int switchedFunc12(void);
+
 #endif // MOCKGEN_SAMPLE1_HPP
 
 /*

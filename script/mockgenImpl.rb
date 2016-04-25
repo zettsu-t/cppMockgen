@@ -1370,7 +1370,8 @@ module Mockgen
       super(body)
 
       # Exclude standard header
-      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_PATTERN}/)
+      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_STD_PATTERN}/)
+      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_SYSTEM_PATTERN}/)
       @valid = false if Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_WORD_SET.any? { |word| line.include?(word) }
       @alreadyDefined = false
     end

@@ -128,6 +128,67 @@ size_t funcWith9Args(int arg1, int arg2, int arg3, int arg4, int arg5, int arg6,
     return 9;
 }
 
+FuncPtrWithoutArgType g_switchedFuncPtr1 = &switchedFunc1;
+FuncPtrWithoutArgType g_switchedFuncPtr2 = &switchedFunc2;
+FuncPtrWithoutArgType g_switchedFuncPtr3 = &switchedFunc3;
+FuncPtrWithoutArgType g_switchedFuncPtr4 = &switchedFunc4;
+FuncPtrWithoutArgType g_switchedFuncPtr5 = &switchedFunc5;
+FuncPtrWithoutArgType g_switchedFuncPtr6 = &switchedFunc6;
+FuncPtrWithoutArgType g_switchedFuncPtr7 = &switchedFunc7;
+FuncPtrWithoutArgType g_switchedFuncPtr8 = &switchedFunc8;
+FuncPtrWithoutArgType g_switchedFuncPtr9 = &switchedFunc9;
+FuncPtrWithoutArgType g_switchedFuncPtr10 = &switchedFunc10;
+FuncPtrWithoutArgType g_switchedFuncPtr11 = &switchedFunc11;
+FuncPtrWithoutArgType g_switchedFuncPtr12 = &switchedFunc12;
+
+int switchedFunc1(void) {
+    return 1;
+}
+
+int switchedFunc2(void) {
+    return 2;
+}
+
+int switchedFunc3(void) {
+    return 3;
+}
+
+int switchedFunc4(void) {
+    return 4;
+}
+
+int switchedFunc5(void) {
+    return 5;
+}
+
+int switchedFunc6(void) {
+    return 6;
+}
+
+int switchedFunc7(void) {
+    return 7;
+}
+
+int switchedFunc8(void) {
+    return 8;
+}
+
+int switchedFunc9(void) {
+    return 9;
+}
+
+int switchedFunc10(void) {
+    return 10;
+}
+
+int switchedFunc11(void) {
+    return 11;
+}
+
+int switchedFunc12(void) {
+    return 12;
+}
+
 /*
 Local Variables:
 mode: c++

@@ -1874,7 +1874,8 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     'empty' => "",
     'libc' => "time",
     'thread' => "pthread_create",
-    'number' => "bin2hex")
+    'number' => "bin2hex",
+    'system' => "_IO")
   def test_invalid(data)
     line = data
     block = FreeFunctionBlock.new(line)
@@ -3286,8 +3287,8 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(expected, actualDef)
 
     expected =  "namespace #{Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE} {\n"
-    expected += "    bool Decorator::Func_mock_ = false;\n"
-    expected += "    bool Decorator::Other_mock_ = false;\n}\n"
+    expected += "    bool Decorator::Func_nomock_ = false;\n"
+    expected += "    bool Decorator::Other_nomock_ = false;\n}\n"
     assert_equal(expected, actualCpp)
   end
 
