@@ -14,6 +14,10 @@
 #define PACKED_ATTRIBUTE
 #endif
 
+// In a platform clang cannot resolve unqualified size_t and treat
+// size_t as int without warnings
+using std::size_t;
+
 // Nested namespaces
 namespace Sample1 {
     namespace Types {
