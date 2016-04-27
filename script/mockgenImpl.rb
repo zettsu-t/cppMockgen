@@ -1118,6 +1118,7 @@ module Mockgen
       @typedArgSetWithoutDefault = ""
       @argSignature = ""
       @postFunc = ""
+      @defaultNoForwardingToMock = false
 
       # Remove trailing ; and {
       body = line
@@ -1254,10 +1255,16 @@ module Mockgen
       phrase.gsub(/([\*&])/, ' \1 ').split(/\s+/).reject { |w| w =~ /^\s*$/ }
     end
 
+    def setDefaultNoForwardingToMock(defaultNoForwardingToMock)
+      @defaultNoForwardingToMock = defaultNoForwardingToMock
+    end
+
     def makeSwitchToMock(isStatic)
       # C++11 initializer
       prefix = isStatic ? "static " : ""
-      init = isStatic ? "" : " {#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT}}"
+      value = @defaultNoForwardingToMock ? Mockgen::Constants::MEMFUNC_FORWARDING_ON_VALUE :
+                Mockgen::Constants::MEMFUNC_FORWARDING_OFF_VALUE
+      init = isStatic ? "" : " {#{value}}"
       str = "    #{prefix}#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} #{@switchName}#{init};\n"
       str
     end
@@ -1601,6 +1608,7 @@ module Mockgen
       @destructor = nil    # None or one instance
       @alreadyDefined = false
       @filteredOut = false
+      @defaultNoForwardingToMock = false
 
       # Remove trailing ; and {
       body = line
@@ -1971,6 +1979,11 @@ module Mockgen
       end
     end
 
+    def setDefaultNoForwardingToMock(defaultNoForwardingToMock)
+      @defaultNoForwardingToMock = defaultNoForwardingToMock
+      @allMemberFunctionSet.each { |block| block.setDefaultNoForwardingToMock(defaultNoForwardingToMock) }
+    end
+
     # A function needs to be public to be forwarded from outside of its class
     def canForwardToFunction(func)
       return false unless func.canTraverse?
@@ -2096,12 +2109,13 @@ module Mockgen
       str += "};\n\n"
 
       varStr = ""
+      value = @defaultNoForwardingToMock ? Mockgen::Constants::MEMFUNC_FORWARDING_ON_VALUE :
+                Mockgen::Constants::MEMFUNC_FORWARDING_OFF_VALUE
       if definedStaticNameSet.kind_of?(Hash) && !definedStaticNameSet.empty?
         varStr += "namespace #{Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE} {\n"
         definedStaticNameSet.each do |funcName, switchName|
           varStr += "    #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} "
-          varStr += "#{decoratorName}::#{switchName} = "
-          varStr += "#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT};\n"
+          varStr += "#{decoratorName}::#{switchName} = #{value};\n"
         end
         varStr += "}\n"
       end
@@ -2633,9 +2647,11 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
+    attr_reader :defaultNoForwardingToMock
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
-                   stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet)
+                   stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
+                   defaultNoForwardingToMock)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -2644,6 +2660,7 @@ module Mockgen
       @functionNameFilterSet = functionNameFilterSet
       @classNameFilterOutSet = classNameFilterOutSet
       @sourceFilenameSet = sourceFilenameSet
+      @defaultNoForwardingToMock = defaultNoForwardingToMock
     end
   end
 
@@ -2670,6 +2687,7 @@ module Mockgen
       @inputFilename = parameterSet.inputFilename
       @blockFactory = BlockFactory.new
       @stubOnly = parameterSet.stubOnly
+      @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
@@ -2905,6 +2923,7 @@ module Mockgen
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
         block.markMemberFunctionSetVirtual
+        block.setDefaultNoForwardingToMock(@defaultNoForwardingToMock)
         block.filterByReferenceSet(filter)
         fullname = block.getFullname
         classSet[fullname] = block unless fullname.empty?
@@ -3082,6 +3101,7 @@ module Mockgen
 
         if block.isFreeFunction?
           currentSet.add(block) if block.valid
+          block.setDefaultNoForwardingToMock(@defaultNoForwardingToMock)
         elsif block.isNamespace?
           # Depth first
           innerSet = FreeFunctionSet.new(block)
@@ -3311,8 +3331,15 @@ module Mockgen
       @classNameFilterOutSet = []
       @sourceFilenameSet = []
       @numberOfClassInFile = nil
+      @defaultNoForwardingToMock = false
 
       while(!argSet.empty?)
+        if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
+          @defaultNoForwardingToMock = true
+          argSet.shift
+          next
+        end
+
         break if argSet.size < 2
         optionWord = argSet[0]
         optionValue = argSet[1].tr('"','')
@@ -3360,7 +3387,8 @@ module Mockgen
       system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
-                                             @stubOnly, @functionNameFilterSet, @classNameFilterOutSet, @sourceFilenameSet)
+                                             @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
+                                             @sourceFilenameSet, @defaultNoForwardingToMock)
       parseHeader(parameterSet)
 
       # Value to return as process status code

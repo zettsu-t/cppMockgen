@@ -4,12 +4,16 @@
 # Google Mock Generator from C++ header files
 #
 # Usage:
-# $ mockgen.rb [stub|mock] [-filter pattern]* [-filterout pattern]*
+# $ mockgen.rb [stub|mock] [-nomock] [-filter pattern]* [-filterout pattern]*
 #     [-source filename] [-split num] 8-filenames clang-options
 #
 # - String "stub" or "mock"
 #   stub : generate stubs
 #   mock : generate stubs and mocks
+# - optional "-nomock"
+#   If the option is set, this script does not call a mock unless
+#   specified to call the mock. Default behavior is calling a mock
+#   unless specified not to call the mock.
 # - None or more sets of -filter pattern
 #   Regular expression to filter free functions to mock.
 #   No filters mean to handle all free functions including system headers.

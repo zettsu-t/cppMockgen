@@ -11,15 +11,22 @@ include Mockgen
 TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
 TestMockRefClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
 
-def getTestSwitchMockVarname(funcname)
+def getTestSwitchMockVarnameWithValue(funcname, value)
   "    #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} " +
-    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX} " +
-    "{#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_DEFAULT}};\n"
+    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX} {#{value}};\n"
+end
+
+def getTestSwitchMockVarname(funcname)
+  getTestSwitchMockVarnameWithValue(funcname, Mockgen::Constants::MEMFUNC_FORWARDING_OFF_VALUE)
+end
+
+def getTestSwitchMockStaticVarnameWithValue(funcname, value)
+  "    static #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} " +
+    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX};\n"
 end
 
 def getTestSwitchMockStaticVarname(funcname)
-  "    static #{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} " +
-    "#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX};\n"
+  getTestSwitchMockStaticVarnameWithValue(funcname, Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX)
 end
 
 def getTestSwitchMockCondition(funcname, varname)
@@ -1471,6 +1478,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
       assert_equal(argSignature, block.argSignature)
       assert_equal(postFunc, block.instance_variable_get(:@postFunc))
+      assert_false(block.instance_variable_get(:@defaultNoForwardingToMock))
+
       assert_equal(virtual, block.virtual?)
       assert_equal([], block.instance_variable_get(:@superMemberSet))
       assert_nil(block.instance_variable_get(:@templateParam))
@@ -1560,6 +1569,22 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     # Ignore an already binded block
     subBlock.addSuperMember(middleBlock)
     assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+  end
+
+  data('off instance' => [false, false, "", " {false}"],
+       'off class' => [false, true, "static ", ""],
+       'on instance' => [true, false, "", " {true}"],
+       'on class' => [true, true, "static ", ""])
+  def test_setDefaultNoForwardingToMock(data)
+    arg, isStatic, prefix, init = data
+    line = (isStatic ? "static " : "") + "void Func(void);"
+    block = MemberFunctionBlock.new(line)
+    block.setDefaultNoForwardingToMock(arg)
+    assert_equal(arg, block.instance_variable_get(:@defaultNoForwardingToMock))
+
+    name = "Func_" + Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX
+    expected = "    #{prefix}#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_TYPE} #{name}#{init};\n"
+    assert_equal(expected, block.makeSwitchToMock(isStatic))
   end
 
   data(
@@ -2446,6 +2471,7 @@ class TestClassBlock < Test::Unit::TestCase
     block = ClassBlock.new("class " + classname)
     assert_false(block.instance_variable_get(:@alreadyDefined))
     assert_false(block.instance_variable_get(:@filteredOut))
+    assert_false(block.instance_variable_get(:@defaultNoForwardingToMock))
 
     def block.formatStub
       "a"
@@ -2840,6 +2866,18 @@ class TestClassBlock < Test::Unit::TestCase
       assert_equal(expected[i][0], func.funcName)
       assert_equal(expected[i][1], func.virtual?)
     end
+  end
+
+  data(false, true)
+  def test_setDefaultNoForwardingToMock(data)
+    arg = data
+    block = ClassBlock.new("class NameC")
+    block.parseChildren("public:")
+    funcBlock = block.parseChildren("void Func();")
+
+    block.setDefaultNoForwardingToMock(arg)
+    assert_equal(arg, block.instance_variable_get(:@defaultNoForwardingToMock))
+    assert_equal(arg, funcBlock.instance_variable_get(:@defaultNoForwardingToMock))
   end
 
   def test_canForwardToDecorateMockFunction
@@ -3259,7 +3297,10 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("", actualCpp)
   end
 
-  def test_formatDecoratorClass
+  data(false, true)
+  def test_formatDecoratorClass(data)
+    switchValue = data ? "true" : "false"
+
     baseName = "BaseClass"
     mockName = "Mock"
     decoratorName = "Decorator"
@@ -3271,14 +3312,14 @@ class TestClassBlock < Test::Unit::TestCase
     expected += "public:\n"
     expected += "    #{decoratorName}(void) : pMock_(0) {}\n"
     expected += "    virtual ~#{decoratorName}(void) {}\n"
-    expected += getTestSwitchMockStaticVarname("Func")
+    expected += getTestSwitchMockStaticVarnameWithValue("Func", switchValue)
     expected += "    void Func() { if (" + getTestSwitchMockCondition("Func", "pMock_") +
                 ") { pMock_->Func(); return; } #{testedName}::Func(); }\n"
     expected += "    void Func() const override { if (" + getTestSwitchMockCondition("Func", "pMock_") +
                 ") { pMock_->Func(); return; } #{baseName}::Func(); }\n"
     expected += "    void Func(int a) { if (" + getTestSwitchMockCondition("Func", "pMock_") +
                 ") { pMock_->Func(a); return; } #{baseName}::Func(a); }\n"
-    expected += getTestSwitchMockStaticVarname("Other")
+    expected += getTestSwitchMockStaticVarnameWithValue("Other", switchValue)
     expected += "    int Other(long a,T* b) { if (" + getTestSwitchMockCondition("Other", "pMock_") +
                 ") { return pMock_->Other(a,b); } return #{baseName}::Other(a,b); }\n"
     expected += "    #{mockName}* pMock_;\n"
@@ -3753,6 +3794,7 @@ class TestClassMock < Mockgen::BaseBlock
     @children = children
     @visited = false
     @typeAliasSet = TypeAliasSet.new
+    @defaultNoForwardingToMock = false
   end
 
   def isClass?
@@ -3769,6 +3811,10 @@ class TestClassMock < Mockgen::BaseBlock
 
   def markMemberFunctionSetVirtual
     false
+  end
+
+  def setDefaultNoForwardingToMock(defaultNoForwardingToMock)
+    @defaultNoForwardingToMock = defaultNoForwardingToMock
   end
 end
 
@@ -4092,9 +4138,11 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     functionNameFilterSet = ["f"]
     classNameFilterOutSet = ["g"]
     sourceFilenameSet = ["h"]
+    defaultNoForwardingToMock = "i"
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
-                                           stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet)
+                                           stubOnly, functionNameFilterSet, classNameFilterOutSet,
+                                           sourceFilenameSet, defaultNoForwardingToMock)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -4103,6 +4151,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(functionNameFilterSet, parameterSet.functionNameFilterSet)
     assert_equal(classNameFilterOutSet, parameterSet.classNameFilterOutSet)
     assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
+    assert_equal(defaultNoForwardingToMock, parameterSet.defaultNoForwardingToMock)
   end
 end
 
@@ -4128,7 +4177,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [])
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false)
   end
 end
 
@@ -4781,12 +4830,22 @@ class TestMockGenLauncher < Test::Unit::TestCase
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++" '
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++/x86_64-w64-mingw32"'
     assert_equal(expected.tr("/", "\\"), target.instance_variable_get(:@clangArgs))
-  end
+
+    assert_false(target.instance_variable_get(:@defaultNoForwardingToMock))
+end
 
   def getOptionSet
     ["input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
      "varSwapper.hpp", "swapper.hpp", "swapper.hpp",
      "-cc1", "-ast-print", "-fblocks", "-fgnu-keywords", "-x", "c++"]
+  end
+
+  def test_defaultNoForwardingToMock
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB,
+            Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@defaultNoForwardingToMock))
   end
 
   def test_parseFilterFunction

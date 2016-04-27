@@ -12,9 +12,11 @@ module Mockgen
     ARGUMENT_CLASS_NAME_FILTER_OUT = "-filterout".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
+    ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze
 
     # Hard coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
+    MODE_DEFAULT_NO_FORWARDING_TO_MOCK = false.freeze
 
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze
@@ -66,7 +68,8 @@ module Mockgen
     MEMFUNC_FORWARD_SWITCH_POSTFIX = "nomock_".freeze
     MEMFUNC_FORWARD_SWITCH_TYPE = "bool".freeze
     # Must be same as default value for global variables
-    MEMFUNC_FORWARD_SWITCH_DEFAULT = "false".freeze
+    MEMFUNC_FORWARDING_ON_VALUE = "true".freeze
+    MEMFUNC_FORWARDING_OFF_VALUE = "false".freeze
 
     # Keywords which are qualifiers for member functions, do not appear in member variables
     MEMVAR_FIRST_WORD_REJECTED_SET = ["using", "typedef"].map(&:freeze).freeze

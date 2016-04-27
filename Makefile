@@ -26,6 +26,7 @@ all: $(TARGETS)
 runthrough:
 	$(MAKE) runthrough_llvm
 	$(MAKE) runthrough_gcc
+	$(MAKE) runthrough_default_no_mocks
 	@$(ECHO) -e $(ECHO_START_FG)All tests have completed successfully.$(ECHO_END_FG)
 
 runthrough_llvm: export CXX=clang++
@@ -33,6 +34,11 @@ runthrough_llvm: runthrough_cxx
 
 runthrough_gcc: export CXX=g++
 runthrough_gcc: runthrough_cxx
+
+runthrough_default_no_mocks: export CXX=g++
+runthrough_default_no_mocks: export GENERATOR_NO_FORWARDING_TO_MOCK=-nomock
+runthrough_default_no_mocks: export CXX_MOCK_FLAGS=-DNO_FORWARDING_TO_MOCK_IS_DEFAULT
+runthrough_default_no_mocks: runthrough_cxx
 
 runthrough_cxx:
 	-$(MAKE) clean
@@ -63,7 +69,7 @@ $(PROCESSED_CPPS) : ;
 $(GENERATED_FILES): generate
 
 generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
-	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
+	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_1.hpp
 	$(LS) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp
@@ -71,14 +77,14 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 
 # Write a mock class in an output class named by the class name
 test_generate_each: clean_generated
-	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_SPLIT_EACH_CLASS) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
+	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_SPLIT_EACH_CLASS) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_IObject.cpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_TopLevelClass.cpp
 
 # Write a number of mock classes in an output class
 test_generate_bulk: clean_generated
-	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_SPLIT_BULK_CLASSES) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
+	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_SPLIT_BULK_CLASSES) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_2.hpp
 

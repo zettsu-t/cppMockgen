@@ -14,6 +14,45 @@ using namespace Sample1::Types;
 using namespace Sample1::Vars;
 using namespace Sample2;
 
+#ifdef NO_FORWARDING_TO_MOCK_IS_DEFAULT
+
+class TestSampleNoForwaring : public ::testing::Test{};
+
+TEST_F(TestSampleNoForwaring, ForwardSelective) {
+    MOCK_OF(DerivedClass) mock(INSTANCE_OF(anObject));
+    {
+        EXPECT_CALL(mock, Func(0, 0)).Times(0);
+        EXPECT_EQ(0, SampleFunc());
+    }
+    {
+        // Allow to forward to the mock Func()
+        INSTANCE_OF(anObject).Func_nomock_ = false;
+        const int expected = 1;
+        EXPECT_CALL(mock, Func(0, 0)).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, SampleFunc());
+    }
+}
+
+TEST_F(TestSampleNoForwaring, DecorateSelective) {
+    MOCK_OF(DerivedClass) mock(localObject);
+    DECORATOR(DerivedClass)::pClassMock_ = &mock;
+    {
+        EXPECT_CALL(mock, StaticFunc()).Times(0);
+        EXPECT_EQ(0, localObject.StaticFunc());
+    }
+    {
+        DECORATOR(DerivedClass)::StaticFunc_nomock_ = false;
+        constexpr int expected = 2;
+        EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, localObject.StaticFunc());
+    }
+
+    // Restore manually
+    DECORATOR(DerivedClass)::StaticFunc_nomock_ = true;
+}
+
+#else
+
 class TestSample : public ::testing::Test{};
 
 TEST_F(TestSample, SwapVariable) {
@@ -587,6 +626,8 @@ TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
         EXPECT_EQ(&switchedFunc12, g_switchedFuncPtr12);
     }
 }
+
+#endif // NO_FORWARDING_TO_MOCK_IS_DEFAULT
 
 /*
 Local Variables:
