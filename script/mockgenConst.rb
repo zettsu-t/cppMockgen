@@ -14,7 +14,7 @@ module Mockgen
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
     ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze
 
-    # Hard coded mode
+    # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
     MODE_DEFAULT_NO_FORWARDING_TO_MOCK = false.freeze
 
@@ -80,7 +80,7 @@ module Mockgen
     MEMVAR_FIRST_WORD_EXCLUDED_MAP = Hash[*(MEMVAR_FIRST_WORD_EXCLUDED_SET.map{ |word| [word, true] }.flatten)].freeze
     MEMVAR_LAST_WORD_REJECTED_MAP = Hash[*(MEMVAR_LAST_WORD_REJECTED_SET.map{ |word| [word, true] }.flatten)].freeze
 
-    # The namespace which containts generated codes
+    # The namespace which contains generated codes
     GENERATED_SYMBOL_NAMESPACE = "MyUnittest".freeze
 
     # Fixed variable names

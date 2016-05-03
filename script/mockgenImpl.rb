@@ -12,12 +12,12 @@
 #   functions or their mocks
 # + Stubs to undefined functions
 #
-# This script is applicable to C code, which has top-level namespace,
+# This script is applicable to C code, which has the top-level namespace,
 # no other namespaces and no classes.
 #
 # Steps
 # 1. Read a given linker output file and parse its each line
-#  Parse symbols in the file and detect variables and functions.
+#  Parse symbols in the file, and detect variables and functions.
 # - A C++ linkage (mangled) symbol contains a name and types to
 #   check which overloaded functions in header files need to
 #   make stub.
@@ -37,14 +37,14 @@
 #  - All comments are removed.
 #  - Nesting depth of a block and its indent spaces do not match.
 #
-#  Support for class template is limited. This script ignores
-#  implicit and explicit instantiation of template so does not
-#  determine for which types it must be instantiated.
-#  Testers have to instantiate a templates and its mock manually.
+#  Support for class templates are limited. This script ignores
+#  implicit and explicit instantiations of templates so this
+#  script does not determine for which types it must be instantiated.
+#  Testers have to instantiate a template and its mock manually.
 #
-#  Filter out data structures that this script do not handle.
+#  Filter out data structures that this script does not handle.
 #  - Standard C++, Boost C++, Google Test/Mock headers.
-#  - Compiler internal symbols that contains double underline (__)
+#  - Compiler internal symbols that contain double underline (__)
 #  - Data structures which are defined in given source files in
 #    the argument. This script treats namespaces always relative
 #    (not absolute from the top) because it does not preprocess
@@ -189,7 +189,7 @@ module Mockgen
   class BaseBlock
     attr_reader :parent, :children, :typeAliasSet
 
-    # line : Head of block line (leading and trailing spaces must be removed)
+    # line : A head line of a block (leading and trailing spaces must be removed)
     def initialize(line)
       @line = line      # Headline of a block
       @parent = nil     # nil for the root block
@@ -915,7 +915,7 @@ module Mockgen
       # Remove spaces between * and &
       str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
       # Do not sort beyond * and &
-      # Do not mix diffrent types
+      # Do not mix different types
       str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
     end
 
@@ -1002,7 +1002,7 @@ module Mockgen
       @callBase = (@argSet.empty?) ? "" : "#{className}#{@typeStr}(#{@argSet}), "
     end
 
-    # Non default constructive base classes are not supported yet
+    # Non-default constructive base classes are not supported yet
     def makeStubDef(className)
       fullname = getNonTypedFullname(@className)
       "#{fullname}::#{@className}(#{@typedArgSet}) {}\n"
@@ -1227,7 +1227,7 @@ module Mockgen
       phrase.split(/\s+/).any? { |word| word == "const" }
     end
 
-    # Remove non-type related keywords
+    # Remove non-type-related keywords
     def extractReturnType(phrase)
       wordSet = splitByReferenceMarks(phrase)
       staticMemfunc = wordSet.include?("static")
@@ -1245,7 +1245,7 @@ module Mockgen
     # List each type of arguments and omit variables.
     # Distinguish const and non-const member function.
     # Discard return type because it may be covariant and
-    # be determined unique by function name and argument types
+    # be determined uniquely by function name and argument types
     def extractArgSignature(funcName, argTypeStr, constMemfunc)
       constStr = constMemfunc ? "const" : ""
       "#{funcName}(#{argTypeStr})#{constStr}"
@@ -1303,7 +1303,7 @@ module Mockgen
       @templateParam = nil
     end
 
-    ## Public methods added on the base class
+    ## Public methods added in the base class
     def override?(block)
       @argSignature == block.argSignature
     end
@@ -1410,7 +1410,7 @@ module Mockgen
     end
 
     def makeForwarderDef(className, definedNameSet)
-      # Add :: to call a free function and prevent infinite calling
+      # Add "::" to call a free function and prevent infinite calling
       # to a member function itself
       @alreadyDefined ? "" : makeForwarderDefImpl(getNameFromTopNamespace(getNonTypedFullname(className)), "", definedNameSet)
     end
@@ -1502,7 +1502,7 @@ module Mockgen
       @funcSet << func if func.valid
     end
 
-    # Unify same functions that occurs in different include directives
+    # Unify same functions that occur in different include directives
     def uniqFunctions
       @funcSet.uniq! { |func| func.argSignature }
       @undefinedFunctionSet.uniq! { |func| func.argSignature }
@@ -1574,7 +1574,7 @@ module Mockgen
       str += "    #{mockClassName}* #{Mockgen::Constants::VARNAME_INSTANCE_MOCK};\n"
       str += "};\n\n"
 
-      # Class name should begin with a upper case
+      # Class name should begin with an upper case
       varName = forwarderName[0].downcase + forwarderName[1..-1]
       varline = "#{forwarderName} #{varName};\n"
       varDecl = "extern " + varline
@@ -1662,7 +1662,7 @@ module Mockgen
       ("_" + @uniqueName).gsub(Mockgen::Constants::CLASS_SPLITTER_NAME, "_").gsub(/_+/, "_")
     end
 
-    # Skip to parse child members
+    # Skip parsing child members
     def skippingParse
       !@pub
     end
@@ -1900,7 +1900,7 @@ module Mockgen
       else
         return false
       end
-      # uniqueName is a alias of name until changed
+      # uniqueName is an alias of name until changed
       @uniqueName = @name
       return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_MAP.key?(@name)
       # Set generated class names
@@ -2226,7 +2226,7 @@ module Mockgen
       className + (templateParam ? "<#{templateParam.varSet}>" : "")
     end
 
-    # Testers must defined typed mocks that they need
+    # Testers must define typed mocks that they need
     # because the mocks do not know their concrete types needed.
     def getVariableDefinitionExample(templateParam, mockName, decoratorName, forwarderName, fullname)
       templateParam ?
@@ -2416,7 +2416,7 @@ module Mockgen
 
         if isFunction
           functionName = name
-          # Exctract a function name with a class name
+          # Extract a function name with a class name
           nameWithColon = "::" + name + "("
           nameSet = wordSet.select { |word| word.include?(nameWithColon) }
 
@@ -2459,7 +2459,7 @@ module Mockgen
       @refFunctionSet, @refClassNameSet = readAllFiles(filenameSet)
     end
 
-    # Is is possible to return an other reference that in an other namespace
+    # It is possible to return another reference that in other namespaces
     # because ctags does not always describes absolute namespaces from the top
     def freeFunctionDefined?(name)
       @refFunctionSet.key?(stripFullname(name)) ? true : false
@@ -2907,7 +2907,7 @@ module Mockgen
     end
 
     def buildClassTree(filter)
-      # Resolve aliases before find undefined references
+      # Resolve aliases before finding undefined references
       collectTypedefs(@block)
       # classSet : class name => block
       classSet = collectClasses(@block.children, filter)
@@ -3005,8 +3005,8 @@ module Mockgen
       declStr = "extern #{actualClassName} #{actualVarName}#{arrayStr};\n"
 
       # A variable declaration does not tell its constructor's arguments.
-      # To prevent from searching its definition, this script assume that
-      # a constructor that have least arity (may be a default constructor)
+      # To prevent from searching its definition, this script assumes that
+      # a constructor that have the least arity (may be a default constructor)
       # is used and it receives 0's.
       arity = block.getConstructorArity
       argStr = varFullname + ",0" * arity
@@ -3229,7 +3229,7 @@ module Mockgen
       end
     end
 
-    # Write include files to include all
+    # Write header files to include all
     def writeAggregatedFiles(filename, includedFilenameSet)
       File.open(filename, "w") do |file|
         file.puts "// Include files to all\n"

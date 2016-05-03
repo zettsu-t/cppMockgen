@@ -14,44 +14,7 @@ using namespace Sample1::Types;
 using namespace Sample1::Vars;
 using namespace Sample2;
 
-#ifdef NO_FORWARDING_TO_MOCK_IS_DEFAULT
-
-class TestSampleNoForwaring : public ::testing::Test{};
-
-TEST_F(TestSampleNoForwaring, ForwardSelective) {
-    MOCK_OF(DerivedClass) mock(INSTANCE_OF(anObject));
-    {
-        EXPECT_CALL(mock, Func(0, 0)).Times(0);
-        EXPECT_EQ(0, SampleFunc());
-    }
-    {
-        // Allow to forward to the mock Func()
-        INSTANCE_OF(anObject).Func_nomock_ = false;
-        const int expected = 1;
-        EXPECT_CALL(mock, Func(0, 0)).Times(1).WillOnce(::testing::Return(expected));
-        EXPECT_EQ(expected, SampleFunc());
-    }
-}
-
-TEST_F(TestSampleNoForwaring, DecorateSelective) {
-    MOCK_OF(DerivedClass) mock(localObject);
-    DECORATOR(DerivedClass)::pClassMock_ = &mock;
-    {
-        EXPECT_CALL(mock, StaticFunc()).Times(0);
-        EXPECT_EQ(0, localObject.StaticFunc());
-    }
-    {
-        DECORATOR(DerivedClass)::StaticFunc_nomock_ = false;
-        constexpr int expected = 2;
-        EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
-        EXPECT_EQ(expected, localObject.StaticFunc());
-    }
-
-    // Restore manually
-    DECORATOR(DerivedClass)::StaticFunc_nomock_ = true;
-}
-
-#else
+#ifndef NO_FORWARDING_TO_MOCK_IS_DEFAULT
 
 class TestSample : public ::testing::Test{};
 
@@ -131,15 +94,25 @@ TEST_F(TestSample, TopLevelNamespace) {
     ASSERT_FALSE(localTopLevelObject.pMock_);
 
     {
-        MOCK_OF(All) mock(all_Forwarder);
+        EXPECT_EQ(0, FreeFunctionCallerSample());
+        {
+            int expected = 1;
+            MOCK_OF(All) mock(INSTANCE_OF(all));
+            EXPECT_CALL(mock, FreeFunctionCalleeSample()).Times(1).WillOnce(::testing::Return(expected));
+            EXPECT_EQ(expected, FreeFunctionCallerSample());
+        }
+    }
+
+    {
+        MOCK_OF(All) mock(INSTANCE_OF(all));
         int expected = 6;
         EXPECT_CALL(mock, TopLevelSampleFunc()).Times(1).WillOnce(::testing::Return(expected));
-        all_Forwarder.TopLevelSampleFunc();
+        INSTANCE_OF(all).TopLevelSampleFunc();
         ++expected;
         EXPECT_CALL(mock, TopLevelSampleFunc()).Times(1).WillOnce(::testing::Return(expected));
-        EXPECT_EQ(expected, all_Forwarder.TopLevelSampleFunc());
+        EXPECT_EQ(expected, INSTANCE_OF(all).TopLevelSampleFunc());
     }
-    ASSERT_FALSE(all_Forwarder.pMock_);
+    ASSERT_FALSE(INSTANCE_OF(all).pMock_);
 }
 
 TEST_F(TestSample, SwapVariableCtorWithArg) {
@@ -346,8 +319,25 @@ TEST_F(TestVariadicTemplate, Get) {
 
 class TestFreeFunctionSwitch : public ::testing::Test{};
 
+TEST_F(TestFreeFunctionSwitch, CallFunctionPointer) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithoutArg, mock, &MOCK_OF(All)::funcWithoutArg1);
+        EXPECT_EQ(g_returnValueWithoutArg1, callFuncPtrWithoutArg());
+        g_funcPtrWithoutArg = &funcWithoutArg2;
+        EXPECT_EQ(g_returnValueWithoutArg2, callFuncPtrWithoutArg());
+
+        pSwitch->SwitchToMock();
+        const int expected = g_returnValueWithoutArg2 + 1;
+        EXPECT_CALL(mock, funcWithoutArg1()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, g_funcPtrWithoutArg());
+
+    }
+    EXPECT_EQ(&funcWithoutArg1, g_funcPtrWithoutArg);
+}
+
 TEST_F(TestFreeFunctionSwitch, NoArguments) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     {
         auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithoutArg, mock, &All_Mock::funcWithoutArg1);
         // Switch between free functions and a mock
@@ -380,7 +370,7 @@ TEST_F(TestFreeFunctionSwitch, NoArguments) {
 }
 
 TEST_F(TestFreeFunctionSwitch, OneArgument) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     {
         auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithOneArg, mock, &All_Mock::funcWithOneArg1);
         constexpr int arg1 = 101;
@@ -413,7 +403,7 @@ TEST_F(TestFreeFunctionSwitch, OneArgument) {
 }
 
 TEST_F(TestFreeFunctionSwitch, TwoArguments) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     {
         auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithTwoArgs, mock, &All_Mock::funcWithTwoArgs);
         constexpr int arg1 = 101;
@@ -439,7 +429,7 @@ TEST_F(TestFreeFunctionSwitch, TwoArguments) {
 }
 
 TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     {
         auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithThreeArgs, mock, &All_Mock::funcWithThreeArgs);
         constexpr int arg1 = 101;
@@ -465,7 +455,7 @@ TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
 }
 
 TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     {
         auto pSwitch4 = GetFreeFunctionSwitch(g_funcPtrWith4Args, mock, &All_Mock::funcWith4Args);
         auto pSwitch5 = GetFreeFunctionSwitch(g_funcPtrWith5Args, mock, &All_Mock::funcWith5Args);
@@ -553,7 +543,7 @@ TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
 }
 
 TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
-    MOCK_OF(All) mock(all_Forwarder);
+    MOCK_OF(All) mock(INSTANCE_OF(all));
     // run twice
     for(int loop=0; loop<2; ++loop) {
         {
@@ -625,6 +615,43 @@ TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
         EXPECT_EQ(&switchedFunc11, g_switchedFuncPtr11);
         EXPECT_EQ(&switchedFunc12, g_switchedFuncPtr12);
     }
+}
+
+#else
+
+class TestSampleNoForwaring : public ::testing::Test{};
+
+TEST_F(TestSampleNoForwaring, ForwardSelective) {
+    MOCK_OF(DerivedClass) mock(INSTANCE_OF(anObject));
+    {
+        EXPECT_CALL(mock, Func(0, 0)).Times(0);
+        EXPECT_EQ(0, SampleFunc());
+    }
+    {
+        // Allow to forward to the mock Func()
+        INSTANCE_OF(anObject).Func_nomock_ = false;
+        const int expected = 1;
+        EXPECT_CALL(mock, Func(0, 0)).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, SampleFunc());
+    }
+}
+
+TEST_F(TestSampleNoForwaring, DecorateSelective) {
+    MOCK_OF(DerivedClass) mock(localObject);
+    DECORATOR(DerivedClass)::pClassMock_ = &mock;
+    {
+        EXPECT_CALL(mock, StaticFunc()).Times(0);
+        EXPECT_EQ(0, localObject.StaticFunc());
+    }
+    {
+        DECORATOR(DerivedClass)::StaticFunc_nomock_ = false;
+        constexpr int expected = 2;
+        EXPECT_CALL(mock, StaticFunc()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, localObject.StaticFunc());
+    }
+
+    // Restore manually
+    DECORATOR(DerivedClass)::StaticFunc_nomock_ = true;
 }
 
 #endif // NO_FORWARDING_TO_MOCK_IS_DEFAULT

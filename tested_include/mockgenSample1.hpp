@@ -201,6 +201,10 @@ PACKED_PREFIX struct StructNotInstanciated2 {};
 extern TopLevelClass aTopLevelObject;
 extern int TopLevelSampleFunc(void);
 
+// Define these free function in different source files
+extern int FreeFunctionCallerSample(void);
+extern int FreeFunctionCalleeSample(void);
+
 namespace {
     const int CTOR_VALUE_aCtorWithArg = 100;
     const int CTOR_VALUE_localCtorWithArg = 200;
@@ -239,6 +243,7 @@ namespace {
     constexpr long long g_returnValueWithThreeArgs = 3;
 }
 
+extern int  callFuncPtrWithoutArg(void);
 extern int  funcWithoutArg1(void);
 extern int  funcWithoutArg2(void);
 extern long funcWithOneArg1(int arg1);

@@ -43,6 +43,10 @@ int TopLevelSampleFunc(void) {
         + Sample1::MissingFuncInNamespace();
 }
 
+int FreeFunctionCalleeSample(void) {
+    return 0;
+}
+
 /*
 Local Variables:
 mode: c++

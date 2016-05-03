@@ -78,6 +78,10 @@ FuncPtrWith7ArgsType g_funcPtrWith7Args = &funcWith7Args;
 FuncPtrWith8ArgsType g_funcPtrWith8Args = &funcWith8Args;
 FuncPtrWith9ArgsType g_funcPtrWith9Args = &funcWith9Args;
 
+int callFuncPtrWithoutArg(void) {
+    return g_funcPtrWithoutArg();
+}
+
 int funcWithoutArg1(void) {
     return g_returnValueWithoutArg1;
 }

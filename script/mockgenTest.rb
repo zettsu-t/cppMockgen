@@ -1566,7 +1566,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     assert_equal(1, middleBlock.instance_variable_get(:@superMemberSet).size)
     assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
 
-    # Ignore an already binded block
+    # Ignore an already bound block
     subBlock.addSuperMember(middleBlock)
     assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
   end
@@ -3537,7 +3537,7 @@ class TestClassBlock < Test::Unit::TestCase
     actual = block.collectDecoratorDef([], {}, {})
     assert_equal(4, actual.lines.count)
 
-    # Generate one mock and no new switch varaiable
+    # Generate one mock and no new switch variable
     connectFuncNotOverriden(block, blockBase, :collectDecoratorDef, funcLine, [{}, {}])
     actual = block.collectDecoratorDef([], {}, {})
     assert_equal(5, actual.lines.count)
@@ -3567,7 +3567,7 @@ class TestClassBlock < Test::Unit::TestCase
     actual = block.collectForwarderDef([], {})
     assert_equal(4, actual.lines.count)
 
-    # Generate one mock and no new switch varaiable
+    # Generate one mock and no new switch variable
     connectFuncNotOverriden(block, blockBase, :collectForwarderDef, funcLine, [{}])
     actual = block.collectForwarderDef([], {})
     assert_equal(5, actual.lines.count)
