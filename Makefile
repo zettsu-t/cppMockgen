@@ -62,6 +62,10 @@ $(TARGET_EXE): $(GENERATED_FILES) $(ALL_OBJS) $(PROCESSED_CPPS) FORCE
 	$(eval GENERATED_OBJS := $(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES))))
 	$(LD) $(LIBPATH) -o $@ $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
 
+# This assumes code is already generated
+compile:
+	$(MAKE) $(MAKEFILE_PARALLEL) -f $(MAKEFILE_SUB_COMPILE)
+
 # Define rules in the sub makefile
 $(ALL_OBJS) : ;
 $(PROCESSED_CPPS) : ;
