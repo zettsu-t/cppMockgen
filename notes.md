@@ -77,7 +77,7 @@ In all three tests, _make_ executes the steps shown below.
 1. Runs _mockgenTest.rb_ which tests classes in _mockgen.rb_ and
   reports its result.
 1. Runs _mockgenReplaceTest.rb_ which checks files to which
-  the clang++/g++ pre-processor converts from .hpp and .cpp files.
+  the clang++/g++ preprocessor converts from .hpp and .cpp files.
   It reads the converted files and checks whether the generated macros
   surely replace keywords of the files.
 1. Runs _mockgen.rb_ with different arguments and checks generated
@@ -86,10 +86,10 @@ In all three tests, _make_ executes the steps shown below.
 
 ### Build partially
 
-It takes a few minutes to test fully. Other _make_ arguments are useful
-to confirm your changes quickly.
+It takes a few minutes to test fully. Other _make_ arguments are
+useful to confirm your changes quickly.
 
-|Arguments of make|Actions|
+|Argument of make|Actions|
 |:-------|:----------|
 |runthrough_llvm, runthrough_gcc| check all with either clang++ or g++ |
 |all (or no arguments)| generate, compile, and link all source files |
@@ -105,7 +105,7 @@ details in comments of mockgen.rb. The arguments specify
 
 * Whether to generate stubs only or, to generate stubs and mocks [stub | mock]
 * How to filter mocked free functions. [-filter].
-* How To filter out classes to work around what CppMockGen cannot handle
+* How to filter out classes to work around what CppMockGen cannot handle
   properly [-filterout].
 * Which files tester codes directly call [-source].
 * How to split output files [-split].
@@ -129,8 +129,8 @@ of memory, it is better to split generated files. A special argument
 _-split 1_ generates files per class and it helps to find which file a
 tester code should include.
 
-Even using _-split 1_, all mocks for free functions are in one file to
-write _#include generated.hpp_ directives easily.
+All mocks for free functions are in one file to write _#include
+generated.hpp_ directives easily.
 
 
 ## Limitations
@@ -149,6 +149,12 @@ preprocessor).
 CppMockGen applies filters in _-source_ options to NOT preprocessed
 files so _#define_ is not applied. It may cause problems if _#define_
 changes function names in your .cpp files.
+
+Filters in _-source_ options use _ctags_ to find definitions of
+functions and _ctags_ does not solve implicit namespaces. In this
+reason, CppMockGen treats namespaces always relative and tries
+backward matching to function names in classes and namespaces between
+outputs of ctags and clang. It may lead mismatching.
 
 ### Template class
 
@@ -173,13 +179,215 @@ template <typename T = int> class TypedClass :
     public Sample1::Types::NonTypedBaseClass {
 ```
 
+CppMockGen ignores implicit and explicit instantiations of templates
+so does not determine for which types it must be instantiated.
+Testers have to instantiate a template and its mock manually.
+
+### The std namespace
+
+You can write `size_t` instead of `std::size_t` in C++ code on some
+platform but cannon do it on other platforms.
+
+In the later case, when you drop the `std::` qualifier, the clang
+front end cannot find a type alias for size_t and treats size_t as int
+without any warnings. It causes compilation errors for generated
+codes. Its error message may be hard to understand especially for
+templates.
+
+It needs to write `std::size_t` or `using std::size_t` in code which
+CppMockGen parses.
+
 ### Others
 
 CppMockGen does not support some C++ features such as
 
 * va_arg : I think it is more appropriate in C++ to use boost::any and
-  std::tuple to pass arbitrary type and size arguments.
-* Write an array of function pointers _T(f[])(args)_ as an argument of
-  function declarations : I think this is difficult to read and
-  like to define and use its type alias.
+  std::tuple to pass arbitrary type and number of arguments.
+* Write an array of function pointers `T(f[])(args)` as an argument of
+  function declarations : I think this is difficult to read and I
+  would like to define and use its type alias.
 * Operator overloading
+* Perfect forwarding and move semantics `(T&&)`
+* CppMockGen does not make mocks for member functions with
+  ref-qualifier (`&` and `&&`).
+
+
+## Data structure and converting C++ code
+
+CppMockGen consists of three primary components, launcher, C++ data
+structure blocks and symbol tables.
+
+### Launcher
+
+These classes parse command line options, launch the clang front end,
+and generate codes.
+
+* MockGenLauncher : parses command line options, launches the clang
+  front end, and sends its output to a code generator _CppFileParser_.
+* CppIoFilenameSet, CppFileParameterSet : hold the command line options.
+* CppFileParser : parses the output of clang, generate codes and write
+  them to files.
+
+The clang front end outputs a pretty AST (abstract syntax tree) in the
+form of C++ source code. _MockGenLauncher_ feeds clang stdout into a
+file.
+
+_CppFileParser_ receives the file and constructs C++ blocks from the
+AST. It also constructs defined and undefined references from files
+specified in the command line options. Then it collects generated
+codes in the C++ blocks and writes to files.
+
+### C++ data structure blocks
+
+C++ blocks are data structure similar to blocks and their nesting in
+C++ source code.
+
+_BaseBlock_ and its derived classes represent C++ blocks and their
+each instance matches a block in the AST. _RootBlock_ is a special
+block that represents the top level namespace and has no parent
+blocks.
+
+#### Find blocks
+
+The AST defines a block as in a form of multi-lines `{...}` or a
+single line `...;`. _BlockFactory_ parses each line in the AST and
+creates block instances. Note that indentation of lines in the AST is
+not relevant to their block structure.
+
+#### Merge namespace blocks
+
+C++ code can have multiple blocks for one namespace. The top-level
+namespace includes extern "C" blocks. An instance of _FreeFunctionSet_
+holds free functions in one namespace. In a similar manner, an
+instance of _TypeAliasSet_ holds type aliases (typedefs) in one
+namespace or other types like a class.
+
+#### Difference with libTooling and ast-dump
+
+They are slightly different from outputs of libTooling and `clang
+-ast-dump` on the points that
+
+* A class block contains its templates but ClassTemplateDecl contains
+  CXXRecordDecl in libTooling
+* CppFileParser interprets but does not create blocks for some data
+  structures such as access specifiers (AccessSpecDecl in -ast-dump)
+* CppFileParser does not create statement blocks because it needs only
+  signatures of functions.
+
+#### Notices
+
+* `struct` is a syntactic sugar that means `class` with default public
+  access and inheritance.
+* Functions without arguments `f()` is same as `void` argument
+  `f(void)` in C++.
+* CppMockGen does not create mocks for pure virtual
+  functions. Abstract classes cannot be instantiated and I assume they
+  are not tested solely and tested with their concrete derived
+  classes.
+
+### Symbol tables
+
+_ClassInstanceMap_ holds a map from a class name to its instances. It
+is used to make macros that swap type and variable
+names. _ClassInstance_ holds code to swap them.
+
+_UndefinedReferenceSet_ parses a specified _ld_ log file in the
+command line options and collects undefined symbols. Each
+_UndefinedReference_ instance hold a symbol in the set.
+
+_DefinedReferenceSet_ launches _ctags_ to find definitions of
+functions, collects names and their class (if exist) of functions. It
+determines which class is possibly defined or not by the class
+names. Each _DefinedReference_ instance holds a name in the set.
+
+_SymbolFilter_ is a set of filters which contains string patterns and
+the references to filter functions and classes.
+
+_FunctionReferenceSet_ is a helper class which compares symbols ones
+in a _ld_ log and in source files. These symbols are different on
+these points.
+* Type aliases are solved in the _ld_ log and not resolved in the
+  source files.
+* C++ linkage (mangled) symbols in the _ld_ log contain a name and
+  types. It also indicates a symbol is a variable or a function.
+  CppFileParser has to select one of overloaded functions in the
+  source files in consideration of type aliases.
+* C linkage (not mangled, extern "C") in the _ld_ log symbols do not
+  specify their types and whether it is a variable or a function.
+  CppFileParser has to find it in the source files by name.
+* The _ld_ log does not contain return types of functions.
+  CppFileParser searches the source files for the return types in
+  making their mocks.
+
+### Utility classes
+
+_TypeStringWithoutModifier_ removes C++ reserved words such class and
+enum (they are required in their definition but redundant to define
+their instances) and splits pointer `*` and reference `&` from a
+typename. It is used to resolve type aliases of a typename.
+
+_LineWithoutAttribute_ removes `__attribute__` from an line. Ignoring
+`__attribute__((...))` requires exact matching its left and right
+parenthesis (two or more pairs). _StringOfParenthesis_ matches it with
+a recursive regular expression. _StringOfAngleBrackets_ also matches
+nested <>s to parse template parameters.
+
+
+## Steps to generate code
+
+This section describes steps to generate mock and stub code.
+
+### Preprocess a header file by the clang front end
+
+Before parsing input files, CppMockGen launches the clang front end to
+format the files. clang
+* Executes preprocessing; imports headers and expands macros
+* Indents lines and formats block structures to put symbol declaration and definition in one line.
+* Resolves implicit namespaces
+* Removes all comments
+
+clang splits the typedef idiom to define a struct and its alias simultaneously
+
+```cpp
+typedef struct tagName {
+    ...
+} Name;
+```
+
+into a definition of the struct and its typedef.
+
+### Parse the header file
+
+_CppFileParser_ reads the preprocessed header file, parse its each
+line and creates blocks.
+
+CppMockGen filters out data structures that CppMockGen does not handle.
+* Standard C++, Boost C++, Google Test / Google Mock headers
+* Compiler internal symbols that contain double underline `(__)`
+* Compiler internal symbols that begin with an underline followed
+  immediately by an uppercase letter `(_A*)`
+* Data structures which are defined in given source files in
+  the argument.
+
+### Parse files to make filters for symbols
+
+As described in the section _Symbol tables_, CppMockGen parses a _ld_
+output file and source files to filter symbols later.
+
+### Construct class hierarchy
+
+CppFileParser merges and ties the blocks. It contains these items and
+applies the filters.
+* Collecting free functions in each namespace
+* Searching public base classes for a class and connecting them
+* Building a tree of blocks to search local typedefs
+* Collecting global variable declarations
+
+CppMockGen abandons blocks which are unused in later steps because
+standard C++ and Boost C++ headers are large.
+
+### Format and write codes
+
+Each block formats codes. CppFileParser collects them and writes to
+files. A block class acts a parser, a data holder, and a code
+generator in CppMockGen and, are not split into multiple classes now.

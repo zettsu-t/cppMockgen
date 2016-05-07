@@ -47,12 +47,6 @@
 # All other arguments are passed to clang. Specify include paths and
 # macros (-DSYMBOL=VALUE) here.
 #
-# Before parsing input files, this script launches the clang front end
-# to format the files.
-# - Execute preprocessing, import headers and expand macros
-# - Indent lines. Write a symbol declaration and definition in one line.
-# - Resolve implicit namespaces
-#
 # In my environment, the clang front end requires these option.
 # These paths may differ in different environment such as
 # - Cygwin/MinGW 64 or 32bit version

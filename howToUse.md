@@ -6,6 +6,9 @@ CppMockGen generates codes to test C++ codes. It makes
 * Mock classes to describe expectations with Google Mock
 * Stub functions to link subset of tested source files
 
+This is applicable to C code, which has the top-level namespace,
+no other namespaces and no classes.
+
 ### Platform
 
 CppMockGen is a set of ruby scripts and launches the clang front-end
@@ -22,7 +25,7 @@ to test CppMockGen with GNU _make_ on Linux. Note that clang++
 requires include paths to find g++ header files.
 
 Testing CppMockGen needs command line tools such as _echo_, _ls_,
-_grep_, _wc_ in Cygwin or Linux. To test CppMockGen on MinGW, add
+_grep_, _wc_, _ctags_ in Cygwin or Linux. To test CppMockGen on MinGW, add
 Cygwin /usr/bin directory to _PATH_ environment variable.
 
 ### Sample codes
@@ -57,11 +60,13 @@ Other subdirectories contain
 
 ## Generate codes
 
-CppMockGen generates codes that tested and tester code include or link
-* Mock class : Google Mock style class definition
-* Forwarder class : class definition to switch a mock and a tested
-  (original) function/method
-* Decorator class : class definition to overwrite definitions of the
+CppMockGen generates codes that tested and tester codes include or link
+* Mock class : Google Mock style class definition. It can attach to a
+  forwarder or a decorator instance.
+* Forwarder class : class definition to switch invocations to a mock
+  or a tested (original) function / class
+* Decorator class : class definition to overwrite definitions of a
+  tested (original) class to switch invocations to a mock or the
   tested class
 * Swapper macro : macro replacing type and variable names with the
   generated code's
@@ -165,7 +170,7 @@ We can replace calling free functions in the same manner.
 
 We want to swap invocations to `defaultCallback` but we have to avoid
 replacing the definition of `defaultCallback`. Tell CppMockGen a file
-which containts the definition to do this (see the _Launch the script_
+which contains the definition to do this (see the _Launch the script_
 section).
 
 ### Decorator
