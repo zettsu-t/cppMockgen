@@ -223,6 +223,25 @@ the callee calls. It leads that the test case needs all source files
 to test the caller alone. Making stubs automatically eases this
 burden.
 
+### Arguments of constructors for generated classes
+
+The generated mock, forwarder and decorator class inherit a tested
+code class. If the tested class is not constructive without arguments,
+the generated classes pass arguments of their constructors to the
+tested (base) class. Tester and tested codes set arguments of
+constructors of the mocks and the decorators as the tested class.
+
+It causes a problem to define a forwarder instance which mocks a
+global variable because a signature of a constructor does not tell
+what is appropriate to take as arguments. CppMockGen chooses a
+constructor that has least arguments (preferably no arguments) and
+passes 0s to it. It may cause compilation or runtime errors.
+
+I assume an instance as a global variable has a constructor without
+arguments. It is reasonable to avoid the problem that an order to
+initialize global variables is not defined in C++ and they should be
+initialized after _main_ called (or using the construct on first use
+idiom).
 
 ## Write test cases with the generated code
 
@@ -362,7 +381,17 @@ test case disables to mock `Func`.
 ```
 
 Line 5 indicates the mock does not mock `Func` and still mocks other
-methods of it.
+methods of it. The variable _Func_nomock__ is a switch to do it.
+
+Overloaded functions share a switch variable "their function name +
+nomock".
+
+For the forwarders, a switch variable is an instance member variable
+for an instance method and a class member variable for and class
+method.
+
+For the decorators, a switch variable is always a class member
+variable because tester codes may not get instances the decorators.
 
 ### Mock functions called via pointers to free functions
 
@@ -408,6 +437,27 @@ types between the free function and a mock instance method.
 * Lines 10 and 11 mocks the pointer.
 * Line 13 confirms the value of the pointer is restored after the
   switch is deleted.
+
+`GetFreeFunctionSwitch` has constraint that tester code can use up to 10
+switches per signature (a set of return and argument types) because
+they share a template class definition and its class variables.
+
+Macro `MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME` and free function
+`GetFreeFunctionSwitchByName` are altanative without the limitation.
+
+```cpp
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(UniqueName)
+
+TEST_F(TestFreeFunctionSwitch, CallFunctionPointer) {
+    auto pSwitch = GetFreeFunctionSwitchByName(UniqueName,
+        g_funcPtrWithoutArg, mock, &MOCK_OF(All)::funcWithoutArg1);
+}
+```
+
+The macro must be outside of any block. `UniqueName` is a unique
+switch name that a caller set.  It can be same as a name of a global
+variable. `GetFreeFunctionSwitchByName` generates new symbols with the
+name internally.
 
 
 ## Include generated code from tested codes
@@ -455,8 +505,8 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
   `link_error.log` does not exist or contains no undefined symbols.
 * Other filenames : CppMockGen writes the files.
 * -cc1 and more arguments : CppMockGen passes the arguments to clang
-  -cc1. Compile options such as `-I`s and `-D`s should be same as
-  tested codes.
+  -cc1. Compile options such as `-I`s, `-D`s, and `-m32` should be
+  -same as tested codes.
 
 ### Name generated files
 

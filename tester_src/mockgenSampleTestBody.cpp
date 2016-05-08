@@ -319,6 +319,8 @@ TEST_F(TestVariadicTemplate, Get) {
 
 class TestFreeFunctionSwitch : public ::testing::Test{};
 
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(UniqueName)
+
 TEST_F(TestFreeFunctionSwitch, CallFunctionPointer) {
     MOCK_OF(All) mock(INSTANCE_OF(all));
     {
@@ -333,13 +335,35 @@ TEST_F(TestFreeFunctionSwitch, CallFunctionPointer) {
         EXPECT_EQ(expected, g_funcPtrWithoutArg());
 
     }
+
+    {
+        auto pSwitch = GetFreeFunctionSwitchByName(UniqueName, g_funcPtrWithoutArg, mock, &MOCK_OF(All)::funcWithoutArg1);
+        pSwitch->SwitchToMock();
+        const int expected = g_returnValueWithoutArg2 + 2;
+        EXPECT_CALL(mock, funcWithoutArg1()).Times(1).WillOnce(::testing::Return(expected));
+        EXPECT_EQ(expected, g_funcPtrWithoutArg());
+    }
+
     EXPECT_EQ(&funcWithoutArg1, g_funcPtrWithoutArg);
 }
 
-TEST_F(TestFreeFunctionSwitch, NoArguments) {
-    MOCK_OF(All) mock(INSTANCE_OF(all));
-    {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithoutArg, mock, &All_Mock::funcWithoutArg1);
+// Instantiate these macros out of function and class definitions
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(NoArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(OneArg)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(TwoArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(ThreeArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(FourArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(FiveArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(SixArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(SevenArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(EightArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(NineArgs)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(SwitchA)
+MACRO_GET_FREE_FUNCTION_SWITCH_BY_NAME(SwitchB)
+
+namespace {
+    template <typename Mock, typename Switch>
+    void CheckFunctionSwitchNoArguments(Mock& mock, Switch& pSwitch) {
         // Switch between free functions and a mock
         {
             EXPECT_CALL(mock, funcWithoutArg1()).Times(0);
@@ -366,13 +390,9 @@ TEST_F(TestFreeFunctionSwitch, NoArguments) {
             EXPECT_EQ(g_returnValueWithoutArg1, g_funcPtrWithoutArg());
         }
     }
-    EXPECT_EQ(&funcWithoutArg1, g_funcPtrWithoutArg);
-}
 
-TEST_F(TestFreeFunctionSwitch, OneArgument) {
-    MOCK_OF(All) mock(INSTANCE_OF(all));
-    {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithOneArg, mock, &All_Mock::funcWithOneArg1);
+    template <typename Mock, typename Switch>
+    void CheckFunctionSwitchOneArgument(Mock& mock, Switch& pSwitch) {
         constexpr int arg1 = 101;
         {
             EXPECT_CALL(mock, funcWithOneArg1(::testing::_)).Times(0);
@@ -399,13 +419,9 @@ TEST_F(TestFreeFunctionSwitch, OneArgument) {
             EXPECT_EQ(g_returnValueWithOneArg1, g_funcPtrWithOneArg(arg1));
         }
     }
-    EXPECT_EQ(&funcWithOneArg1, g_funcPtrWithOneArg);
-}
 
-TEST_F(TestFreeFunctionSwitch, TwoArguments) {
-    MOCK_OF(All) mock(INSTANCE_OF(all));
-    {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithTwoArgs, mock, &All_Mock::funcWithTwoArgs);
+    template <typename Mock, typename Switch>
+    void CheckFunctionSwitchTwoArguments(Mock& mock, Switch& pSwitch) {
         constexpr int arg1 = 101;
         // Return value via a reference argument
         constexpr char initial = 'Y';
@@ -425,13 +441,9 @@ TEST_F(TestFreeFunctionSwitch, TwoArguments) {
             EXPECT_EQ(expected, arg2);
         }
     }
-    EXPECT_EQ(&funcWithTwoArgs, g_funcPtrWithTwoArgs);
-}
 
-TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
-    MOCK_OF(All) mock(INSTANCE_OF(all));
-    {
-        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithThreeArgs, mock, &All_Mock::funcWithThreeArgs);
+    template <typename Mock, typename Switch>
+    void CheckFunctionSwitchThreeArguments(Mock& mock, Switch& pSwitch) {
         constexpr int arg1 = 101;
         constexpr int arg2 = 102;
         // Return value via a reference argument
@@ -451,23 +463,14 @@ TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
             EXPECT_EQ(expected, arg3);
         }
     }
-    EXPECT_EQ(&funcWithThreeArgs, g_funcPtrWithThreeArgs);
-}
 
-TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
-    MOCK_OF(All) mock(INSTANCE_OF(all));
-    {
-        auto pSwitch4 = GetFreeFunctionSwitch(g_funcPtrWith4Args, mock, &All_Mock::funcWith4Args);
-        auto pSwitch5 = GetFreeFunctionSwitch(g_funcPtrWith5Args, mock, &All_Mock::funcWith5Args);
-        auto pSwitch6 = GetFreeFunctionSwitch(g_funcPtrWith6Args, mock, &All_Mock::funcWith6Args);
-        auto pSwitch7 = GetFreeFunctionSwitch(g_funcPtrWith7Args, mock, &All_Mock::funcWith7Args);
-        auto pSwitch8 = GetFreeFunctionSwitch(g_funcPtrWith8Args, mock, &All_Mock::funcWith8Args);
-        auto pSwitch9 = GetFreeFunctionSwitch(g_funcPtrWith9Args, mock, &All_Mock::funcWith9Args);
-
-        using SharedSwitch = std::shared_ptr<std::remove_pointer<decltype(pSwitch4.get())>::type>;
+    template <typename Mock, typename Switch4, typename Switch5, typename Switch6,
+              typename Switch7, typename Switch8, typename Switch9>
+    void CheckFunctionSwitchFourAndMoreArguments(Mock& mock, Switch4& pSwitch4, Switch5& pSwitch5, Switch6& pSwitch6,
+                                                 Switch7& pSwitch7, Switch8& pSwitch8, Switch9& pSwitch9) {
+        using SharedSwitch = std::shared_ptr<::FREE_FUNCTION_SWITCH_NAMESPACE::FreeFunctionSwitchBase>;
         std::vector<SharedSwitch> switchSet { std::move(pSwitch4), std::move(pSwitch5),
                 std::move(pSwitch6), std::move(pSwitch7), std::move(pSwitch8), std::move(pSwitch9)};
-
         constexpr int arg1 = 101;
         constexpr int arg2 = 102;
         constexpr int arg3 = 103;
@@ -534,12 +537,104 @@ TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
             EXPECT_EQ(expected9, g_funcPtrWith9Args(arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9));
         }
     }
-    EXPECT_EQ(&funcWith4Args, g_funcPtrWith4Args);
-    EXPECT_EQ(&funcWith5Args, g_funcPtrWith5Args);
-    EXPECT_EQ(&funcWith6Args, g_funcPtrWith6Args);
-    EXPECT_EQ(&funcWith7Args, g_funcPtrWith7Args);
-    EXPECT_EQ(&funcWith8Args, g_funcPtrWith8Args);
-    EXPECT_EQ(&funcWith9Args, g_funcPtrWith9Args);
+
+    void CheckFunctionSwitchRestored(void) {
+        EXPECT_EQ(&funcWithoutArg1, g_funcPtrWithoutArg);
+        EXPECT_EQ(&funcWithOneArg1, g_funcPtrWithOneArg);
+        EXPECT_EQ(&funcWithTwoArgs, g_funcPtrWithTwoArgs);
+        EXPECT_EQ(&funcWithThreeArgs, g_funcPtrWithThreeArgs);
+        EXPECT_EQ(&funcWith4Args, g_funcPtrWith4Args);
+        EXPECT_EQ(&funcWith5Args, g_funcPtrWith5Args);
+        EXPECT_EQ(&funcWith6Args, g_funcPtrWith6Args);
+        EXPECT_EQ(&funcWith7Args, g_funcPtrWith7Args);
+        EXPECT_EQ(&funcWith8Args, g_funcPtrWith8Args);
+        EXPECT_EQ(&funcWith9Args, g_funcPtrWith9Args);
+    }
+}
+
+TEST_F(TestFreeFunctionSwitch, NoArguments) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithoutArg, mock, &MOCK_OF(All)::funcWithoutArg1);
+        CheckFunctionSwitchNoArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+
+    {
+        auto pSwitch = GetFreeFunctionSwitchByName(NoArgs, g_funcPtrWithoutArg, mock, &MOCK_OF(All)::funcWithoutArg1);
+        CheckFunctionSwitchNoArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+}
+
+TEST_F(TestFreeFunctionSwitch, OneArgument) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithOneArg, mock, &MOCK_OF(All)::funcWithOneArg1);
+        CheckFunctionSwitchOneArgument(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+
+    {
+        auto pSwitch = GetFreeFunctionSwitchByName(OneArg, g_funcPtrWithOneArg, mock, &MOCK_OF(All)::funcWithOneArg1);
+        CheckFunctionSwitchOneArgument(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+}
+
+TEST_F(TestFreeFunctionSwitch, TwoArguments) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithTwoArgs, mock, &MOCK_OF(All)::funcWithTwoArgs);
+        CheckFunctionSwitchTwoArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+
+    {
+        auto pSwitch = GetFreeFunctionSwitchByName(TwoArgs, g_funcPtrWithTwoArgs, mock, &MOCK_OF(All)::funcWithTwoArgs);
+        CheckFunctionSwitchTwoArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+}
+
+TEST_F(TestFreeFunctionSwitch, ThreeArguments) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch = GetFreeFunctionSwitch(g_funcPtrWithThreeArgs, mock, &MOCK_OF(All)::funcWithThreeArgs);
+        CheckFunctionSwitchThreeArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+
+    {
+        auto pSwitch = GetFreeFunctionSwitchByName(ThreeArgs, g_funcPtrWithThreeArgs, mock, &MOCK_OF(All)::funcWithThreeArgs);
+        CheckFunctionSwitchThreeArguments(mock, pSwitch);
+    }
+    CheckFunctionSwitchRestored();
+}
+
+TEST_F(TestFreeFunctionSwitch, FourAndMoreArguments) {
+    MOCK_OF(All) mock(INSTANCE_OF(all));
+    {
+        auto pSwitch4 = GetFreeFunctionSwitch(g_funcPtrWith4Args, mock, &MOCK_OF(All)::funcWith4Args);
+        auto pSwitch5 = GetFreeFunctionSwitch(g_funcPtrWith5Args, mock, &MOCK_OF(All)::funcWith5Args);
+        auto pSwitch6 = GetFreeFunctionSwitch(g_funcPtrWith6Args, mock, &MOCK_OF(All)::funcWith6Args);
+        auto pSwitch7 = GetFreeFunctionSwitch(g_funcPtrWith7Args, mock, &MOCK_OF(All)::funcWith7Args);
+        auto pSwitch8 = GetFreeFunctionSwitch(g_funcPtrWith8Args, mock, &MOCK_OF(All)::funcWith8Args);
+        auto pSwitch9 = GetFreeFunctionSwitch(g_funcPtrWith9Args, mock, &MOCK_OF(All)::funcWith9Args);
+        CheckFunctionSwitchFourAndMoreArguments(mock, pSwitch4, pSwitch5, pSwitch6, pSwitch7, pSwitch8, pSwitch9);
+    }
+    CheckFunctionSwitchRestored();
+
+    {
+        auto pSwitch4 = GetFreeFunctionSwitchByName(FourArgs, g_funcPtrWith4Args, mock, &MOCK_OF(All)::funcWith4Args);
+        auto pSwitch5 = GetFreeFunctionSwitchByName(FiveArgs, g_funcPtrWith5Args, mock, &MOCK_OF(All)::funcWith5Args);
+        auto pSwitch6 = GetFreeFunctionSwitchByName(SixArgs, g_funcPtrWith6Args, mock, &MOCK_OF(All)::funcWith6Args);
+        auto pSwitch7 = GetFreeFunctionSwitchByName(SevenArgs, g_funcPtrWith7Args, mock, &MOCK_OF(All)::funcWith7Args);
+        auto pSwitch8 = GetFreeFunctionSwitchByName(EightArgs, g_funcPtrWith8Args, mock, &MOCK_OF(All)::funcWith8Args);
+        auto pSwitch9 = GetFreeFunctionSwitchByName(NineArgs, g_funcPtrWith9Args, mock, &MOCK_OF(All)::funcWith9Args);
+        CheckFunctionSwitchFourAndMoreArguments(mock, pSwitch4, pSwitch5, pSwitch6, pSwitch7, pSwitch8, pSwitch9);
+    }
+    CheckFunctionSwitchRestored();
 }
 
 TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
@@ -548,19 +643,19 @@ TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
     for(int loop=0; loop<2; ++loop) {
         {
             // Switch1 to 10 have their unique entry function FreeFunctionSwitch::CallToMock1 and CallToMock10
-            auto pSwitch1 = GetFreeFunctionSwitch(g_switchedFuncPtr1, mock, &All_Mock::switchedFunc1);
-            auto pSwitch2 = GetFreeFunctionSwitch(g_switchedFuncPtr2, mock, &All_Mock::switchedFunc2);
-            auto pSwitch3 = GetFreeFunctionSwitch(g_switchedFuncPtr3, mock, &All_Mock::switchedFunc3);
-            auto pSwitch4 = GetFreeFunctionSwitch(g_switchedFuncPtr4, mock, &All_Mock::switchedFunc4);
-            auto pSwitch5 = GetFreeFunctionSwitch(g_switchedFuncPtr5, mock, &All_Mock::switchedFunc5);
-            auto pSwitch6 = GetFreeFunctionSwitch(g_switchedFuncPtr6, mock, &All_Mock::switchedFunc6);
-            auto pSwitch7 = GetFreeFunctionSwitch(g_switchedFuncPtr7, mock, &All_Mock::switchedFunc7);
-            auto pSwitch8 = GetFreeFunctionSwitch(g_switchedFuncPtr8, mock, &All_Mock::switchedFunc8);
-            auto pSwitch9 = GetFreeFunctionSwitch(g_switchedFuncPtr9, mock, &All_Mock::switchedFunc9);
-            auto pSwitch10 = GetFreeFunctionSwitch(g_switchedFuncPtr10, mock, &All_Mock::switchedFunc10);
+            auto pSwitch1 = GetFreeFunctionSwitch(g_switchedFuncPtr1, mock, &MOCK_OF(All)::switchedFunc1);
+            auto pSwitch2 = GetFreeFunctionSwitch(g_switchedFuncPtr2, mock, &MOCK_OF(All)::switchedFunc2);
+            auto pSwitch3 = GetFreeFunctionSwitch(g_switchedFuncPtr3, mock, &MOCK_OF(All)::switchedFunc3);
+            auto pSwitch4 = GetFreeFunctionSwitch(g_switchedFuncPtr4, mock, &MOCK_OF(All)::switchedFunc4);
+            auto pSwitch5 = GetFreeFunctionSwitch(g_switchedFuncPtr5, mock, &MOCK_OF(All)::switchedFunc5);
+            auto pSwitch6 = GetFreeFunctionSwitch(g_switchedFuncPtr6, mock, &MOCK_OF(All)::switchedFunc6);
+            auto pSwitch7 = GetFreeFunctionSwitch(g_switchedFuncPtr7, mock, &MOCK_OF(All)::switchedFunc7);
+            auto pSwitch8 = GetFreeFunctionSwitch(g_switchedFuncPtr8, mock, &MOCK_OF(All)::switchedFunc8);
+            auto pSwitch9 = GetFreeFunctionSwitch(g_switchedFuncPtr9, mock, &MOCK_OF(All)::switchedFunc9);
+            auto pSwitch10 = GetFreeFunctionSwitch(g_switchedFuncPtr10, mock, &MOCK_OF(All)::switchedFunc10);
             // Switch11 and 12 shares FreeFunctionSwitch::CallToMock
-            auto pSwitch11 = GetFreeFunctionSwitch(g_switchedFuncPtr11, mock, &All_Mock::switchedFunc11);
-            auto pSwitch12 = GetFreeFunctionSwitch(g_switchedFuncPtr12, mock, &All_Mock::switchedFunc12);
+            auto pSwitch11 = GetFreeFunctionSwitch(g_switchedFuncPtr11, mock, &MOCK_OF(All)::switchedFunc11);
+            auto pSwitch12 = GetFreeFunctionSwitch(g_switchedFuncPtr12, mock, &MOCK_OF(All)::switchedFunc12);
 
             pSwitch1->SwitchToMock();
             pSwitch2->SwitchToMock();
@@ -614,6 +709,28 @@ TEST_F(TestFreeFunctionSwitch, MultipleInstances) {
         EXPECT_EQ(&switchedFunc10, g_switchedFuncPtr10);
         EXPECT_EQ(&switchedFunc11, g_switchedFuncPtr11);
         EXPECT_EQ(&switchedFunc12, g_switchedFuncPtr12);
+
+        {
+            constexpr int expected = 101;
+            auto pSwitchA = GetFreeFunctionSwitchByName(SwitchA, g_switchedFuncPtr1, mock, &MOCK_OF(All)::switchedFunc1);
+            auto pSwitchB = GetFreeFunctionSwitchByName(SwitchB, g_switchedFuncPtr2, mock, &MOCK_OF(All)::switchedFunc2);
+            {
+                pSwitchA->SwitchToMock();
+                EXPECT_CALL(mock, switchedFunc1()).Times(1).WillOnce(::testing::Return(expected));
+                EXPECT_CALL(mock, switchedFunc2()).Times(0);
+                EXPECT_EQ(expected, g_switchedFuncPtr1());
+                EXPECT_EQ(2, g_switchedFuncPtr2());
+            }
+            {
+                pSwitchA->SwitchToOriginal();
+                EXPECT_CALL(mock, switchedFunc1()).Times(0);
+                EXPECT_CALL(mock, switchedFunc2()).Times(0);
+                EXPECT_EQ(1, g_switchedFuncPtr1());
+                EXPECT_EQ(2, g_switchedFuncPtr2());
+            }
+        }
+        EXPECT_EQ(&switchedFunc1, g_switchedFuncPtr1);
+        EXPECT_EQ(&switchedFunc2, g_switchedFuncPtr2);
     }
 }
 

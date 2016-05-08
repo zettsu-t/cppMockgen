@@ -772,7 +772,6 @@ module Mockgen
     end
   end
 
-  # Extern Variable (not extern typename)
   class MemberVariableStatement < VariableStatement
     def initialize(line)
       super
@@ -2930,7 +2929,7 @@ module Mockgen
       # A variable declaration does not tell its constructor's arguments.
       # To prevent from searching its definition, this script assumes that
       # a constructor that have the least arity (may be a default constructor)
-      # is used and it receives 0's.
+      # is used and it receives 0s.
       arity = block.getConstructorArity
       argStr = varFullname + ",0" * arity
 

@@ -206,6 +206,7 @@ CppMockGen does not support some C++ features such as
 * Write an array of function pointers `T(f[])(args)` as an argument of
   function declarations : I think this is difficult to read and I
   would like to define and use its type alias.
+* Using directives as type aliases
 * Operator overloading
 * Perfect forwarding and move semantics `(T&&)`
 * CppMockGen does not make mocks for member functions with
@@ -284,6 +285,17 @@ They are slightly different from outputs of libTooling and `clang
   functions. Abstract classes cannot be instantiated and I assume they
   are not tested solely and tested with their concrete derived
   classes.
+* If a member function is virtual, its overriding functions are always
+  virtual with or without the virtual keyword. CppMockGen traverses a
+  class hierarchy to check whether a member function is (implicitly)
+  virtual or not.
+* C++11 `override` keyword is helpful to ensure method
+  overriding. clang warns if `override` is not consistently used in
+  a class hierarchy; all or no derived classes use it. CppMockGen
+  follows the suggestion to make classes.
+* C++ permits missing argument names in function declarations (even if
+  it is not kind to programmers). CppMockGen fills missing argument
+  names in constructors and functions to forward them.
 
 ### Symbol tables
 
@@ -310,14 +322,14 @@ these points.
   source files.
 * C++ linkage (mangled) symbols in the _ld_ log contain a name and
   types. It also indicates a symbol is a variable or a function.
-  CppFileParser has to select one of overloaded functions in the
-  source files in consideration of type aliases.
+  CppFileParser has to select a symbol in the source files in
+  consideration of type aliases and method overloading.
 * C linkage (not mangled, extern "C") in the _ld_ log symbols do not
   specify their types and whether it is a variable or a function.
   CppFileParser has to find it in the source files by name.
-* The _ld_ log does not contain return types of functions.
-  CppFileParser searches the source files for the return types in
-  making their mocks.
+* The _ld_ log does not contain return types and default arguments of
+  functions. CppFileParser searches the source files for the return
+  types and the default arguments in making their mocks.
 
 ### Utility classes
 

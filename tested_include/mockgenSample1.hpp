@@ -151,6 +151,7 @@ namespace Sample1 {
 extern void defaultCallback(int a);
 
 typedef int64_t MyInt64;
+using Int64Alias = int64_t;
 typedef int64_t* PtrMyInt64;
 typedef struct tagCstyleStruct {} CstyleStruct;
 
