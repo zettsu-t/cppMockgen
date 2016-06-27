@@ -12,6 +12,7 @@
 #   functions or their mocks
 # + Stubs to undefined functions
 
+require "open3"
 require 'tempfile'
 require_relative './mockgenConst.rb'
 require_relative './mockgenCommon.rb'
@@ -3303,10 +3304,12 @@ module Mockgen
     end
 
     def generate
+      isystemArgs = collectInternalIsystem(@clangArgs)
+
       # Tempfile.create cannot create a tempfile in MinGW
       # and need to specify a filename for clang to output.
       # It is also useful to know how clang format .hpp files.
-      system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{@inputFilename} > #{@convertedFilename}")
+      system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{isystemArgs} #{@inputFilename} > #{@convertedFilename}")
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
@@ -3315,6 +3318,40 @@ module Mockgen
 
       # Value to return as process status code
       0
+    end
+
+    # launch clang -### and extract -internal-isystem paths
+    def collectInternalIsystem(argStr)
+      clangArgStr = argStr.dup
+      # replace -cc1 options
+      [["-cc1",""], ["-triple","-target"], ["-ast-print",""]].each do |fromWord, toWord|
+        clangArgStr.gsub!(/#{fromWord}/, toWord)
+      end
+
+      command = "#{Mockgen::Constants::CLANG_COMMAND} -### #{clangArgStr} #{@inputFilename}"
+      stdoutstr, stderrstr, status = Open3.capture3(command)
+
+      # May return an empty string on Cygwin
+      selectInternalIsystem(stderrstr)
+    end
+
+    def selectInternalIsystem(clangOutStr)
+      argSet = []
+      popNext = false
+      clangOutStr.split('" "').each do |word|
+        if (word == "-internal-isystem")
+          argSet << word
+          popNext = true
+        else
+          if popNext
+            # quote "C:Program Files"
+            argSet << ('"' + word.gsub(/\\\\/,"\\") + '"')
+            popNext = false
+          end
+          popNext = false
+        end
+      end
+      argSet.join(" ")
     end
 
     ## Implementation detail (public for testing)

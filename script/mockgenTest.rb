@@ -4802,6 +4802,27 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(expected, target.instance_variable_get(:@stubOnly))
   end
 
+  def test_selectInternalIsystem
+    str =  '"C:\\Program Files\\LLVM\\bin\\clang++.exe" '
+    str += '"-cc1" "-triple" "x86_64-pc-windows-gnu" "-ast-print" "-internal-isystem" '
+    str += '"C:\\Program Files\\mingw-w64\\x86_64-4.9.2-posix-seh-rt_v3-rev1'
+    str += '\\mingw64\\x86_64-w64-mingw32\\include\\c++" '
+    str += '"-internal-isystem" '
+    str += '"C:\\Program Files\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include" '
+    str += '"-lstdc++" "-lmingw32"'
+
+    args = ["mock", "", "", "", "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    actual = target.selectInternalIsystem(str)
+
+    expected = '-internal-isystem '
+    expected += '"C:\\Program Files\\mingw-w64\\x86_64-4.9.2-posix-seh-rt_v3-rev1'
+    expected += '\\mingw64\\x86_64-w64-mingw32\\include\\c++" '
+    expected += '-internal-isystem '
+    expected += '"C:\\Program Files\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include"'
+    assert_equal(expected, actual)
+  end
+
   def test_quotePathPath
     commonArgs = [Mockgen::Constants::ARGUMENT_MODE_STUB,
                   "input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",

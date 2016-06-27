@@ -29,6 +29,20 @@ C++ sample codes and unit test for the scripts.
 * mockGenerator.flt : a WinMerge filter to filter out generated and intermediate files
 
 
+## Include paths for g++ and clang++
+
+CppMockGen collects compiler-internal include paths via the command shown below.
+
+```bash
+clang++ -###
+```
+
+Its stderr output includes _-internal-isystem_ values and CppMockGen
+passes them to clang -cc1 as its arguments. It works on my platform
+(Cygwin64 and MinGW-64) but may not work on other platforms,
+especially in which gcc and clang are installed in non-system standard
+directories such as /opt.
+
 ## Testing CppMockGen
 
 Run all tests on CppMockGen/ (the parent of script/) directory.
