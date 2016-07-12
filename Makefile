@@ -18,12 +18,13 @@ MAKEFILE_PARALLEL=-j 5
 ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
 .PHONY: all runthrough runthrough_llvm runthrough_gcc runthrough_cxx
-.PHONY: check generate test_generate_each test_generate_bulk
+.PHONY: check generate test_generate_c_func test_generate_each test_generate_bulk
 .PHONY: clean clean_generated rebuild show showall FORCE
 
 all: $(TARGETS)
 
 runthrough:
+	$(MAKE) test_generate_c_func
 	$(MAKE) runthrough_llvm
 	$(MAKE) runthrough_gcc
 	$(MAKE) runthrough_default_no_mocks
@@ -78,6 +79,11 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_1.hpp
 	$(LS) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp
 	$(GREP) $(GENERATOR_FILTERED_OUT_CLASSNAME) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp | $(WC) | $(GREP) "  0  "
+
+# Write stub functions in an link error log file
+test_generate_c_func: clean_generated
+	$(RUBY) $(GENERATOR_SCRIPT) stub $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_INPUT_C_SOURCES) $(GENERATOR_SPLIT_EACH_CLASS) $(ORIGINAL_HEADER) $(TESTED_LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS)
+	$(GREP) $(TESTED_MISSING_FUNCTION_NAME_PREFIX) $(GENERATED_FILE_DIR)/*Stub.cpp | $(WC) -l | $(GREP) "2"
 
 # Write a mock class in an output class named by the class name
 test_generate_each: clean_generated

@@ -39,8 +39,8 @@ int TopLevelSampleFunc(void) {
     return ClassNotInstanciated::arrayMissing[0]
         + aTopLevelObject.GetValue() + localTopLevelObject.GetValue()
         + ClassNotInstanciated::inner_.Func()
-        + TopLevelMissingFuncC() + TopLevelMissingFuncCpp()
-        + Sample1::MissingFuncInNamespace();
+        + TopLevelMissingFuncC() + TopLevelMissingFuncCwithoutExternC(0)
+        + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace();
 }
 
 int FreeFunctionCalleeSample(void) {

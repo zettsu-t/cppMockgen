@@ -783,7 +783,7 @@ module Mockgen
 
   # Compare argument types between a linker output and a source file
   class FunctionReferenceSet
-    def initialize(block, reference, fullname, name, argTypeStr, postFunc)
+    def initialize(block, reference, fullname, name, argTypeStr, postFunc, noMatchingTypes)
       @scopedBlock = block
       @fullname = fullname
       @fullname ||= ""
@@ -801,11 +801,13 @@ module Mockgen
       @refArgTypeStr = reference.argTypeStr if reference  # nullable
       @refPostFunc = reference.postFunc if reference
       @refPostFunc ||= ""
+      @noMatchingTypes = noMatchingTypes
     end
 
     def compare
       result = false
-      if @refArgTypeStr
+      # Can disregard argument types in .c files
+      if @refArgTypeStr && !@noMatchingTypes
         # Resolve typedefs because linkers know the exact type
         # after its aliases are solved but the clang front end does not
         # know the aliases
@@ -916,7 +918,7 @@ module Mockgen
     def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@className)
       filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
-        FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "").compare
+        FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "", false).compare
       end
     end
 
@@ -1042,6 +1044,7 @@ module Mockgen
       @argSignature = ""
       @postFunc = ""
       @defaultNoForwardingToMock = false
+      @noMatchingTypes = false
 
       # Remove trailing ; and {
       body = line
@@ -1057,10 +1060,15 @@ module Mockgen
       @valid
     end
 
+    # No matching arguments between this function declaration and a linker log
+    def setNoMatchingTypes
+      @noMatchingTypes = true
+    end
+
     def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@funcName)
       filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
-        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc).compare
+        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc, @noMatchingTypes).compare
       end
     end
 
@@ -2204,7 +2212,8 @@ module Mockgen
 
   # Factory class for variant type blocks
   class BlockFactory
-    def initialize
+    def initialize(noMatchingTypesInCsource)
+      @noMatchingTypesInCsource = noMatchingTypesInCsource
     end
 
     # Top-level namespace
@@ -2254,6 +2263,7 @@ module Mockgen
           when "extern"
             if (words.size >= 3 && words[-1][-1] == ")")
               newBlock = FreeFunctionBlock.new(line)
+              newBlock.setNoMatchingTypes if @noMatchingTypesInCsource
             else
               newBlock = ExternVariableStatement.new(line)
             end
@@ -2570,7 +2580,7 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
-    attr_reader :defaultNoForwardingToMock
+    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
@@ -2584,6 +2594,15 @@ module Mockgen
       @classNameFilterOutSet = classNameFilterOutSet
       @sourceFilenameSet = sourceFilenameSet
       @defaultNoForwardingToMock = defaultNoForwardingToMock
+
+      # Assume *.c in C, not in C++
+      @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
+                                  Mockgen::Constants::MODE_DEFAULT_NO_MATCHING_TYPES_IN_C_SOURCES
+    end
+
+    def hasCsourceFilesOnly?(sourceFilenameSet)
+      !sourceFilenameSet.nil? && !sourceFilenameSet.empty? &&
+        sourceFilenameSet.all? { |filename| filename =~ /\.c$/ }
     end
   end
 
@@ -2608,7 +2627,7 @@ module Mockgen
     def initialize(parameterSet)
       @cppNameSpace = parameterSet.cppNameSpace
       @inputFilename = parameterSet.inputFilename
-      @blockFactory = BlockFactory.new
+      @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource)
       @stubOnly = parameterSet.stubOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
 
@@ -2627,6 +2646,8 @@ module Mockgen
       definedReferenceSet = parseSourceFileSet(parameterSet.sourceFilenameSet)
       undefinedReferenceSet = parseLinkLog(parameterSet.linkLogFilename)
 
+      # Resolve aliases before finding undefined references of free functions
+      collectTypedefs(@block)
       filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet, parameterSet.classNameFilterOutSet)
       @functionSetArray = buildFreeFunctionSet(filter)
       makeFreeFunctionSet(@functionSetArray)
@@ -2830,8 +2851,6 @@ module Mockgen
     end
 
     def buildClassTree(filter)
-      # Resolve aliases before finding undefined references
-      collectTypedefs(@block)
       # classSet : class name => block
       classSet = collectClasses(@block.children, filter)
       connectClasses(@block.children, classSet)

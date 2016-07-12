@@ -652,7 +652,7 @@ class TestTypedefBlock < Test::Unit::TestCase
   end
 
   def test_collectAliases
-    rootBlock = BlockFactory.new.createRootBlock
+    rootBlock = BlockFactory.new(false).createRootBlock
     block = BaseBlock.new("Parent")
     rootBlock.connect(block)
     typeName = "tagName"
@@ -678,7 +678,7 @@ class TestTypedefBlock < Test::Unit::TestCase
   end
 
   def test_resolveAliasInHierarchy
-    rootBlock = BlockFactory.new.createRootBlock
+    rootBlock = BlockFactory.new(false).createRootBlock
     rootTypedefBlockA = TypedefBlock.new("typedef int32 MyInt;")
     rootTypedefBlockB = TypedefBlock.new("typedef aStruct T;")
     rootBlock.connect(rootTypedefBlockA)
@@ -1091,7 +1091,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     referenceClass = Struct.new(:fullname, :memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refName, refArgTypeStr, refPostFunc)
     block = BaseBlock.new("")
-    assert_true(FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc).compare())
+    assert_true(FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc, false).compare())
   end
 
   data(
@@ -1106,11 +1106,28 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     reference = referenceClass.new(prefix + fullname, name, nil, nil)
     block = BaseBlock.new("")
 
-    assert_true(FunctionReferenceSet.new(block, reference, fullname, name, "", "").compare())
-    assert_true(FunctionReferenceSet.new(block, reference, fullname, name, "int", "").compare())
-    assert_true(FunctionReferenceSet.new(block, reference, "::" + fullname, name, "int", "").compare())
-    assert_false(FunctionReferenceSet.new(block, reference, name, name, "", "").compare())
-    assert_false(FunctionReferenceSet.new(block, reference, othername, name, "", "").compare())
+    assert_true(FunctionReferenceSet.new(block, reference, fullname, name, "", "", false).compare())
+    assert_true(FunctionReferenceSet.new(block, reference, fullname, name, "int", "", false).compare())
+    assert_true(FunctionReferenceSet.new(block, reference, "::" + fullname, name, "int", "", false).compare())
+    assert_false(FunctionReferenceSet.new(block, reference, name, name, "", "", false).compare())
+    assert_false(FunctionReferenceSet.new(block, reference, othername, name, "", "", false).compare())
+  end
+
+  data(
+    'no args' => ["", "", "", true],
+    'exact types' => ["", "int", "int", true],
+    'arg in reference' => ["", "int", "", true],
+    'arg in declaration' => ["", "", "int", true],
+    'different types' => ["", "long long", "int", true],
+    'different names' => ["B", "", "", false])
+  def test_compareWithoutArgumentTypes(data)
+    name = "nameA"
+    refNamePostfix, refArgTypeStr, argTypeStr, expected = data
+    refName = name + refNamePostfix
+    referenceClass = Struct.new(:fullname, :memberName, :argTypeStr, :postFunc)
+    reference = referenceClass.new(refName, refName, refArgTypeStr, "")
+    block = BaseBlock.new("")
+    assert_equal(expected, FunctionReferenceSet.new(block, reference, name, name, argTypeStr, "", true).compare())
   end
 
   data(
@@ -1124,7 +1141,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     referenceClass = Struct.new(:fullname, :memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refName, refArgTypeStr, refPostFunc)
     block = BaseBlock.new("")
-    assert_false(FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc).compare())
+    assert_false(FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc, false).compare())
   end
 
   data(
@@ -1142,7 +1159,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     block.connect(typedefBlockI)
     block.connect(typedefBlockP)
     block.collectAliases
-    assert_true(FunctionReferenceSet.new(block, reference, refName, refName, argTypeStr, "").compare())
+    assert_true(FunctionReferenceSet.new(block, reference, refName, refName, argTypeStr, "", false).compare())
   end
 
   data(
@@ -1156,7 +1173,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
       str.gsub("C","char").gsub("V","void")
     end
 
-    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "").sortArgTypeSetStr(arg))
+    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "", false).sortArgTypeSetStr(arg))
   end
 
   data(
@@ -1170,7 +1187,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
   def test_sortArgTypeStr(data)
     arg, expected = data
     block = BaseBlock.new("")
-    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "").sortArgTypeStr(arg))
+    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "", false).sortArgTypeStr(arg))
   end
 
   data(
@@ -1181,7 +1198,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
   def test_postFunctionPhrase(data)
     arg, expected = data
     block = BaseBlock.new("")
-    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "").postFunctionPhrase(arg))
+    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "", false).postFunctionPhrase(arg))
   end
 
   def test_collectAliases
@@ -1197,7 +1214,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
       2
     end
 
-    set = FunctionReferenceSet.new(blockChild, nil, "", "", "", "")
+    set = FunctionReferenceSet.new(blockChild, nil, "", "", "", "", false)
     assert_equal([2, 1], set.collectAliases)
   end
 end
@@ -1905,6 +1922,13 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     line = data
     block = FreeFunctionBlock.new(line)
     assert_false(block.valid)
+  end
+
+  def test_setNoMatchingTypes
+    block = FreeFunctionBlock.new("extern int Func(int a);")
+    assert_false(block.instance_variable_get(:@noMatchingTypes))
+    block.setNoMatchingTypes
+    assert_true(block.instance_variable_get(:@noMatchingTypes))
   end
 
   def test_filterByDefinedReferenceSet
@@ -3719,11 +3743,11 @@ end
 
 class TestBlockFactory < Test::Unit::TestCase
   def test_createRootBlock
-    assert_true(BlockFactory.new.createRootBlock.canTraverse?)
+    assert_true(BlockFactory.new(false).createRootBlock.canTraverse?)
   end
 
   def test_createBlock
-    factory = BlockFactory.new
+    factory = BlockFactory.new(false)
     rootBlock = factory.createRootBlock
 
     line = "namespace NameSpaceA {"
@@ -3759,8 +3783,12 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "extern const ClassName& obj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse?)
 
-    line = "extern void Func() {"
+    line = "extern void FuncDef() {"
     assert_false(factory.createBlock(line, rootBlock).canTraverse?)
+
+    line = "extern void FuncDecl();"
+    block = factory.createBlock(line, rootBlock)
+    assert_false(block.instance_variable_get(:@noMatchingTypes))
 
     line = "public:"
     block = factory.createBlock(line, classBlock)
@@ -3776,12 +3804,20 @@ class TestBlockFactory < Test::Unit::TestCase
     'class' => "class")
   def test_createBlockWithTypedef(data)
     typeStr = data
-    factory = BlockFactory.new
+    factory = BlockFactory.new(false)
     rootBlock = factory.createRootBlock
 
     line = "typedef #{typeStr} tagName {"
     block = factory.createBlock(line, rootBlock)
     assert_not_nil(block.instance_variable_get(:@typedefBlock))
+  end
+
+  def test_noMatchingTypesInCsource
+    factory = BlockFactory.new(true)
+    rootBlock = factory.createRootBlock
+    line = "extern void Func();"
+    block = factory.createBlock(line, rootBlock)
+    assert_true(block.instance_variable_get(:@noMatchingTypes))
   end
 end
 
@@ -4152,6 +4188,22 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(classNameFilterOutSet, parameterSet.classNameFilterOutSet)
     assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
     assert_equal(defaultNoForwardingToMock, parameterSet.defaultNoForwardingToMock)
+    assert_false(parameterSet.noMatchingTypesInCsource)
+  end
+
+  data(
+    'nil' => [nil, false],
+    'empty' => [[], false],
+    'c only' => [["a.c"], true],
+    'c only multi' => [["a.c", "b.c"], true],
+    'cc only' => [["a.cc"], false],
+    'cpp only' => [["a.cpp"], false],
+    'mixed' => [["a.cpp", "b.c"], false])
+  def test_hasCsourceFilesOnly(data)
+    arg, expected = data
+    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil)
+    assert_equal(expected, parameterSet.noMatchingTypesInCsource)
+    assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
 end
 
@@ -4260,7 +4312,7 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.eliminateAllUnusedBlock(childBlock)
     assert_not_nil(childBlock.parent)
 
-    rootBlock = BlockFactory.new.createRootBlock
+    rootBlock = BlockFactory.new(false).createRootBlock
     nsBlock = NamespaceBlock.new("namespace std {")
     rootBlock.connect(nsBlock)
     nsBlock.connect(parentBlock)
@@ -4658,7 +4710,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_collectTopLevelTypedefSet
-    rootBlock = BlockFactory.new.createRootBlock
+    rootBlock = BlockFactory.new(false).createRootBlock
     ecBlock1 = ExternCBlock.new('extern "C" {')
     ecBlock2 = ExternCBlock.new('extern "C" {')
     rootBlock.connect(ecBlock1)

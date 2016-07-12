@@ -1,0 +1,6 @@
+# Types of arguments are disregarded to make stub functions for linkErrorForTesting.c
+
+mockgen/tested_src/mockgenSampleUser.cpp:42: undefined reference to `TopLevelMissingFuncC'
+mockgen/tested_src/mockgenSampleUser.cpp:42:(.text+0x117): relocation truncated to fit: R_X86_64_PC32 against undefined symbol `TopLevelMissingFuncC'
+mockgen/tested_src/mockgenSampleUser.cpp:42: undefined reference to `TopLevelMissingFuncCwithoutExternC(unsigned long)'
+mockgen/tested_src/mockgenSampleUser.cpp:42:(.text+0x123): relocation truncated to fit: R_X86_64_PC32 against undefined symbol `TopLevelMissingFuncCwithoutExternC(unsigned long)'

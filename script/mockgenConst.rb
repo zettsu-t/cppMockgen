@@ -17,6 +17,7 @@ module Mockgen
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
     MODE_DEFAULT_NO_FORWARDING_TO_MOCK = false.freeze
+    MODE_DEFAULT_NO_MATCHING_TYPES_IN_C_SOURCES = true.freeze
 
     # Namespaces not parsed
     NAMESPACE_SKIPPED_SET = ["std", "boost", "mpl_", "testing"].map(&:freeze).freeze

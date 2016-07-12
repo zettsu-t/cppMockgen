@@ -508,6 +508,12 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
   -cc1. Compile options such as `-I`s, `-D`s, and `-m32` should be
   -same as tested codes.
 
+If all filenames specified with -source have an extension .c,
+CppMockGen treats the files as C (not C++) source code and disregards
+argument types in a linker error log to filter free functions in the
+files. To change this behavior, you can set the constant
+`MODE_DEFAULT_NO_MATCHING_TYPES_IN_C_SOURCES` to false.
+
 ### Name generated files
 
 *_Stub files contain codes that relate free functions and stubs.

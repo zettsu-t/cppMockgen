@@ -191,6 +191,8 @@ public:
 };
 
 extern int TopLevelMissingFuncCpp(void);
+// Need to resolve size_t to match with a linker log
+extern int TopLevelMissingFuncCwithoutExternC(size_t s);
 extern "C" {
     extern int TopLevelMissingFuncC(void);
 }
