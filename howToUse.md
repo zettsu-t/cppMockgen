@@ -16,9 +16,9 @@ internally. This is my environment to develop it.
 
 * Windows 10 64bit Edition
 * Cygwin 64bit version (2.5.1) or MinGW-w64
-* LLVM + clang 3.7.1 (Cygwin), 3.8.0 (MinGW)
-* gcc 5.3.0 (Cygwin), 4.9.2 (MinGW)
-* Ruby 2.2.4p230 (Cygwin), 2.3.1p112 (ActiveScriptRuby)
+* LLVM + clang 3.8.1 (Cygwin/MinGW)
+* gcc 5.4.0 (Cygwin), 4.9.2 (MinGW)
+* Ruby 2.2.5p319 (Cygwin), 2.3.1p112 (ActiveScriptRuby)
 
 CppMockGen is executable on Linux but it needs changes on its Makefile
 to test CppMockGen with GNU _make_ on Linux. Note that clang++
@@ -507,6 +507,10 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
 * -cc1 and more arguments : CppMockGen passes the arguments to clang
   -cc1. Compile options such as `-I`s, `-D`s, and `-m32` should be
   -same as tested codes.
+
+The tested header file should include all header files that tested and
+testing source files need. You can collect header files for a source
+file by `g++ -H file.cpp`.
 
 If all filenames specified with -source have an extension .c,
 CppMockGen treats the files as C (not C++) source code and disregards
