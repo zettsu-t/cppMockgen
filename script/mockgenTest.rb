@@ -4854,6 +4854,49 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(expected, target.instance_variable_get(:@stubOnly))
   end
 
+  def test_selectSystemPath
+    serial = 1
+    argSet = []
+    expected = []
+
+    Mockgen::Constants::CLANG_SYSTEM_HEADER_OPTION_SET.each do |opt|
+      path = "Path#{serial}"
+      argSet << opt << path
+      expected <<= path
+      serial += 1
+
+      path = "Path with space#{serial}"
+      argSet << opt << path
+      expected <<= path
+      serial += 1
+
+      path = "Path#{serial}"
+      argSet << "#{opt}#{path}"
+      expected <<= path
+      serial += 1
+
+      path = "Path with space#{serial}"
+      argSet << "#{opt}#{path}"
+      expected <<= path
+      serial += 1
+    end.join(" ")
+    argSet << Mockgen::Constants::CLANG_SYSTEM_HEADER_OPTION_SET[0]
+
+    args = ["mock", "", "", "", "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    assert_equal(expected, target.selectSystemPath(argSet))
+  end
+
+  def test_selectClangNonCc1Options
+    str = "clang++.exe -cc1 -triple x86_64-pc-windows-gnu -ast-print -internal-isystem /usr/include"
+    expected = "clang++.exe  -target x86_64-pc-windows-gnu  -internal-isystem /usr/include"
+
+    args = ["mock", "", "", "", "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    actual = target.selectClangNonCc1Options(str)
+    assert_equal(expected, actual)
+  end
+
   def test_selectInternalIsystem
     str =  '"C:\\Program Files\\LLVM\\bin\\clang++.exe" '
     str += '"-cc1" "-triple" "x86_64-pc-windows-gnu" "-ast-print" "-internal-isystem" '
@@ -4865,13 +4908,38 @@ class TestMockGenLauncher < Test::Unit::TestCase
 
     args = ["mock", "", "", "", "", "", "", "", ""]
     target = MockGenLauncher.new(args)
-    actual = target.selectInternalIsystem(str)
+    actualStr, pathSet = target.selectInternalIsystem(str)
 
-    expected = '-internal-isystem '
-    expected += '"C:\\Program Files\\mingw-w64\\x86_64-4.9.2-posix-seh-rt_v3-rev1'
-    expected += '\\mingw64\\x86_64-w64-mingw32\\include\\c++" '
-    expected += '-internal-isystem '
-    expected += '"C:\\Program Files\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include"'
+    path1 = '"C:\\Program Files\\mingw-w64\\x86_64-4.9.2-posix-seh-rt_v3-rev1'
+    path1 += '\\mingw64\\x86_64-w64-mingw32\\include\\c++"'
+    path2 = '"C:\\Program Files\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include"'
+
+    expected = '-internal-isystem '+ path1
+    expected += ' -internal-isystem '+ path2
+    assert_equal(expected, actualStr)
+    assert_equal([path1, path2], pathSet)
+  end
+
+  def test_selectNonInternalIsystemHeaders
+    logStr =  ". tested_include/mockgenSample1.hpp\n"
+    logStr += ". tested_include/mockgenSample2.hpp\n"
+    logStr += ". tested_include/mockgenSample1.hpp\n"
+    logStr += ".. /usr/include/time.h\n"
+    logStr += ".. /usr/lib/gcc/x86_64-pc-cygwin/5.4.0/include/c++/cstdlib\n"
+    logStr += "... C:\\\\Program Files\\\\mingw-w64\\\\x86_64-4.9.2-posix-seh-rt_v3-rev1\\\\"
+    logStr += "mingw64\\\\x86_64-w64-mingw32\\\\include\\\\c++\\\\cstdlib\n"
+    logStr += "src/source.cpp:2:5: error\n"
+    logStr += "Error ... other.hpp\n"
+
+    argIsystemPaths = ["/usr/include", "/usr/lib/gcc/x86_64-pc-cygwin/5.4.0/include/c++",
+                       "C:\\\\Program Files\\\\mingw-w64\\\\x86_64-4.9.2-posix-seh-rt_v3-rev1" +
+                       "\\\\mingw64\\\\x86_64-w64-mingw32\\\\include\\\\c++"]
+
+    dir = Dir::pwd.chomp
+    expected = ["#{dir}/tested_include/mockgenSample1.hpp", "#{dir}/tested_include/mockgenSample2.hpp"]
+    args = ["mock", "", "", "", "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    actual = target.selectNonInternalIsystemHeaders(logStr, argIsystemPaths)
     assert_equal(expected, actual)
   end
 
@@ -4894,7 +4962,8 @@ class TestMockGenLauncher < Test::Unit::TestCase
     mingwInclude = "mingw-w64/x86_64-4.9.2-posix-seh-rt_v3-rev1/mingw64/x86_64-w64-mingw32/include"
     mingwPath = ["-cxx-isystem", "C:/Program", "Files/#{mingwInclude}",
                  "-cxx-isystem", "C:/Program", "Files/#{mingwInclude}/c++",
-                 "-cxx-isystem", "C:/Program", "Files/#{mingwInclude}/c++/x86_64-w64-mingw32"]
+                 "-cxx-isystem", "C:/Program", "Files/#{mingwInclude}/c++/x86_64-w64-mingw32",
+                 "-DOPTION"]
     args = [commonArgs, mingwPath].flatten.map { |w| w.tr("/", "\\") }
     target = MockGenLauncher.new(args)
 
@@ -4902,6 +4971,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '" '
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++" '
     expected += '-cxx-isystem "C:/Program Files/' + mingwInclude + '/c++/x86_64-w64-mingw32"'
+    expected += " -DOPTION"
     assert_equal(expected.tr("/", "\\"), target.instance_variable_get(:@clangArgs))
 
     assert_false(target.instance_variable_get(:@defaultNoForwardingToMock))
@@ -4961,6 +5031,15 @@ end
       target = MockGenLauncher.new(args)
       assert_equal(expected, target.instance_variable_get(:@sourceFilenameSet))
     end
+  end
+
+  def test_parseOutHeaderFilename
+    expected = "outFile.hpp"
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
+    args.concat([Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME, expected])
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_equal(expected, target.instance_variable_get(:@outHeaderFilename))
   end
 
   data(

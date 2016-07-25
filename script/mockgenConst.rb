@@ -13,6 +13,7 @@ module Mockgen
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
     ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze
+    ARGUMENT_OUT_HEADER_FILENAME = "-outheaderfile".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
@@ -104,6 +105,8 @@ module Mockgen
 
     # clang executable
     CLANG_COMMAND = "clang++".freeze
+    CLANG_SYSTEM_HEADER_OPTION_SET = ["-isystem", "-cxx-isystem", "-internal-isystem"]
+    CLANG_SYSTEM_HEADER_DEFAULT_SET = ["/usr/include", "/usr/lib"]
 
     # ctags
     CTAGS_COMMAND = "ctags".freeze

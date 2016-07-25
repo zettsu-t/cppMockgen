@@ -3273,6 +3273,7 @@ module Mockgen
       @classNameFilterOutSet = []
       @sourceFilenameSet = []
       @numberOfClassInFile = nil
+      @outHeaderFilename = nil
       @defaultNoForwardingToMock = false
 
       while(!argSet.empty?)
@@ -3301,6 +3302,9 @@ module Mockgen
           argSet.shift(2)
           value = optionValue.to_i
           @numberOfClassInFile = value if value > 0
+        when Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME
+          argSet.shift(2)
+          @outHeaderFilename = optionValue
         else
           stopParsing = true
         end
@@ -3317,13 +3321,40 @@ module Mockgen
       @outDeclFilename = argSet.shift
       @outDefFilename = argSet.shift
 
+      @systemPathSet = selectSystemPath(argSet)
       @clangArgs = quotePath(argSet)
       # Can set later
       @cppNameSpace = Mockgen::Constants::GENERATED_SYMBOL_NAMESPACE
     end
 
+    def selectSystemPath(argSet)
+      wordSet = argSet.dup
+      pathSet = []
+
+      while(!wordSet.empty?)
+        arg = wordSet.shift
+        key = Mockgen::Constants::CLANG_SYSTEM_HEADER_OPTION_SET.find do |opt|
+          i = arg.index(opt)
+          !i.nil? && (i == 0)
+        end
+        next unless key
+
+        if arg.size > key.size
+          # extract /usr/include from -isystem/usr/include
+          pathSet << arg[(key.size)..-1]
+        else
+          # Expect each path is passed as one argument even if it includes
+          # whitespaces (i.e. quoted in command lines).
+          pathSet << wordSet.shift unless wordSet.empty?
+        end
+      end
+
+      pathSet
+    end
+
     def generate
-      isystemArgs = collectInternalIsystem(@clangArgs)
+      isystemArgs, isystemPaths = collectInternalIsystem(@clangArgs)
+      collectNonInternalIsystemHeaders(@clangArgs, @systemPathSet, isystemPaths)
 
       # Tempfile.create cannot create a tempfile in MinGW
       # and need to specify a filename for clang to output.
@@ -3341,7 +3372,7 @@ module Mockgen
 
     # launch clang -### and extract -internal-isystem paths
     def collectInternalIsystem(argStr)
-      clangArgStr = argStr.dup
+      clangArgStr = selectClangNonCc1Options(argStr)
       # replace -cc1 options
       [["-cc1",""], ["-triple","-target"], ["-ast-print",""]].each do |fromWord, toWord|
         clangArgStr.gsub!(/#{fromWord}/, toWord)
@@ -3354,9 +3385,21 @@ module Mockgen
       selectInternalIsystem(stderrstr)
     end
 
+    def selectClangNonCc1Options(argStr)
+      clangArgStr = argStr.dup
+      # replace -cc1 options
+      [["-cc1",""], ["-triple","-target"], ["-ast-print",""]].each do |fromWord, toWord|
+        clangArgStr.gsub!(/#{fromWord}/, toWord)
+      end
+
+      clangArgStr
+    end
+
     def selectInternalIsystem(clangOutStr)
       argSet = []
+      pathSet = []
       popNext = false
+
       clangOutStr.split('" "').each do |word|
         if (word == "-internal-isystem")
           argSet << word
@@ -3364,13 +3407,53 @@ module Mockgen
         else
           if popNext
             # quote "C:Program Files"
-            argSet << ('"' + word.gsub(/\\\\/,"\\") + '"')
+            path = '"' + word.gsub(/\\\\/,"\\") + '"'
+            argSet << path
+            pathSet << path
             popNext = false
           end
           popNext = false
         end
       end
-      argSet.join(" ")
+
+      return argSet.join(" "), pathSet
+    end
+
+    # launch clang -H and extract included header files except internal-isystem headers
+    def collectNonInternalIsystemHeaders(argStr, systemPaths, internalPaths)
+      return if @sourceFilenameSet.empty? && @outHeaderFilename.nil?
+
+      headerSet = []
+      @sourceFilenameSet.each do |inputFilename|
+        clangArgStr = selectClangNonCc1Options(argStr).gsub(/-cxx-isystem/, "-isystem")
+        command = "#{Mockgen::Constants::CLANG_COMMAND} -H #{clangArgStr} #{inputFilename}"
+        stdoutstr, stderrstr, status = Open3.capture3(command)
+
+        allSystemPaths = [Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET, systemPaths, internalPaths].flatten
+        headerSet.concat(selectNonInternalIsystemHeaders(stderrstr, allSystemPaths))
+      end
+
+      File.open(@outHeaderFilename, "w") do |file|
+        headerSet.uniq.each do |header|
+          str = '#include "' + header + '"'
+          file.puts str
+        end
+      end
+    end
+
+    def selectNonInternalIsystemHeaders(logStr, argIsystemPaths)
+      # clang++ -H writes paths with delimiter /
+      isystemPaths = argIsystemPaths.map {|path| path.gsub(/\\+/,"/") }
+
+      logStr.split("\n").map do |line|
+        headerFilename = nil
+        # Leading ... indicate nesting level of a header file
+        if md = line.chomp.match(/^\.+\s+(.+)/)
+          filename = File.absolute_path(md[1]).gsub(/\\+/,"/")
+          headerFilename = (isystemPaths.all? { |path| filename.index(path).nil? }) ? filename : nil
+        end
+        headerFilename
+      end.select{ |path| !path.nil? }.uniq
     end
 
     ## Implementation detail (public for testing)
@@ -3381,11 +3464,18 @@ module Mockgen
       argSet = []
       currentWord = ""
       argv.each do |word|
-        if (word == "-cxx-isystem")
+        next if word.empty?
+        if (word[0] == "-")
+          # break by any options other than -cxx-isystem
           argSet[-1] = argSet[-1] + '"' if !argSet.empty? && quoting
           currentWord = word
-          quoteNext = true
-          quoting = true
+          if (word == "-cxx-isystem")
+            quoteNext = true
+            quoting = true
+          else
+            quoteNext = false
+            quoting = false
+          end
         elsif quoteNext
           currentWord = '"' + word
           quoteNext = false

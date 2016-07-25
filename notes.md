@@ -363,6 +363,25 @@ nested <>s to parse template parameters.
 
 This section describes steps to generate mock and stub code.
 
+### Create an all-in-one header file (optional)
+
+_CppFileParser_ reads source files, collects header files that the
+source files include, and writes it to a file specified with the
+-outheaderfile option.
+
+1. Launches _clang++ -H_ with -I and -D options same as for preprocessors.
+1. Filters out system headers. It uses partial matching and may cause
+a mismatch in your project directories.
+1. Writes include directives with absolute paths that helps to build
+in any directory.
+
+System headers mean
+* Paths explicitly specified with -isystem and -cxx-isystem
+* System internal paths that clang -### tells with -internal-isystem
+* Linux and Cygwin system directories /usr/include and /usr/lib. If
+  you need to add directories such as /opt, change
+  _CLANG_SYSTEM_HEADER_DEFAULT_SET_.
+
 ### Preprocess a header file by the clang front end
 
 Before parsing input files, CppMockGen launches the clang front end to

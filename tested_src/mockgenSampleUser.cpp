@@ -1,10 +1,14 @@
 #include "mockgenSample1.hpp"
 // Swap class names used later to their decorator
+#ifndef GENERATING_MOCK
 #include "typeSwapper_mockgenSample1.hpp"
+#endif
 
 #include "mockgenSample2.hpp"
 // Swap variables already declared to their forwarder
+#ifndef GENERATING_MOCK
 #include "varSwapper_mockgenSample1.hpp"
+#endif
 
 // These types are swapped to their decorators
 namespace Sample2 {

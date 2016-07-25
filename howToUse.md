@@ -15,7 +15,7 @@ CppMockGen is a set of ruby scripts and launches the clang front-end
 internally. This is my environment to develop it.
 
 * Windows 10 64bit Edition
-* Cygwin 64bit version (2.5.1) or MinGW-w64
+* Cygwin 64bit version (2.5.2) or MinGW-w64
 * LLVM + clang 3.8.1 (Cygwin/MinGW)
 * gcc 5.4.0 (Cygwin), 4.9.2 (MinGW)
 * Ruby 2.2.5p319 (Cygwin), 2.3.1p112 (ActiveScriptRuby)
@@ -496,6 +496,9 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
 * -source filename : CppMockGen does not swap free functions in
    `filename`. We have to avoid swapping definitions of tested
    functions and need to set this option.
+* -outheaderfile filename (shown later) : CppMockGen creates `filename`
+  that contains include directives same as source files specified with
+  -source options.
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
@@ -508,9 +511,19 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
   -cc1. Compile options such as `-I`s, `-D`s, and `-m32` should be
   -same as tested codes.
 
-The tested header file should include all header files that tested and
-testing source files need. You can collect header files for a source
-file by `g++ -H file.cpp`.
+The first file (tested header file) should include all header files
+that tested and testing source files need. You can collect header
+files for a source file by `g++ (or clang++) -H file.cpp` manually.
+Note that you have to pass `-I`s and `-Ds` to compilers to find header
+files that the source files include.
+
+Instead of this, CppMockGen creates an all-in-one header when -source
+and -outheaderfile options are specified. The created (output) header
+file can be same as the first (input) header file of arguments.
+
+```bash
+ruby script/mockgen.rb (omitted) -source file1.cpp -source file2.cpp -outheaderfile ./generated/allInOne.hpp ./generated/allInOne.hpp ./generated/link_error.log (omitted)
+```
 
 If all filenames specified with -source have an extension .c,
 CppMockGen treats the files as C (not C++) source code and disregards
