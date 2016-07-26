@@ -8,12 +8,16 @@ module Mockgen
     # Argument to specify mode
     ARGUMENT_MODE_STUB = "stub".freeze
     ARGUMENT_MODE_MOCK = "mock".freeze
+
+    # Discards hyphens between words in command line arguments
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
     ARGUMENT_CLASS_NAME_FILTER_OUT = "-filterout".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
     ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze
     ARGUMENT_OUT_HEADER_FILENAME = "-outheaderfile".freeze
+    ARGUMENT_SYSTEM_PATH = "-systempath".freeze
+    ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH = "-checkinternalsystempath".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
@@ -105,8 +109,9 @@ module Mockgen
 
     # clang executable
     CLANG_COMMAND = "clang++".freeze
-    CLANG_SYSTEM_HEADER_OPTION_SET = ["-isystem", "-cxx-isystem", "-internal-isystem"]
-    CLANG_SYSTEM_HEADER_DEFAULT_SET = ["/usr/include", "/usr/lib"]
+    CLANG_INTERNAL_SYSTEM_HEADER_OPTION = "-internal-isystem".freeze
+    CLANG_SYSTEM_HEADER_OPTION_SET = ["-isystem", "-cxx-isystem", CLANG_INTERNAL_SYSTEM_HEADER_OPTION].map(&:freeze).freeze
+    CLANG_SYSTEM_HEADER_DEFAULT_SET = ["/usr/include", "/usr/lib"].map(&:freeze).freeze
 
     # ctags
     CTAGS_COMMAND = "ctags".freeze

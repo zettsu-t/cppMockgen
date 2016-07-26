@@ -377,10 +377,14 @@ in any directory.
 
 System headers mean
 * Paths explicitly specified with -isystem and -cxx-isystem
-* System internal paths that clang -### tells with -internal-isystem
+* System internal paths that _clang -###_ tells with -internal-isystem
 * Linux and Cygwin system directories /usr/include and /usr/lib. If
-  you need to add directories such as /opt, change
-  _CLANG_SYSTEM_HEADER_DEFAULT_SET_.
+  you need to add directories such as /opt, use the _-systempath_ option.
+
+When you specify the _-check-internal-system-path_ option for
+CppMockGen, it fails if _clang -###_ tells none of -internal-isystem
+paths. It implies that clang may not installed properly and cannot
+work with gcc.
 
 ### Preprocess a header file by the clang front end
 

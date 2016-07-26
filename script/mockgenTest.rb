@@ -2,12 +2,13 @@
 # -*- coding: utf-8 -*-
 
 require_relative './mockgenImpl.rb'
-require "tempfile"
+require 'tempfile'
 require 'test/unit'
 
 # Omit the module name in this testing
 include Mockgen
 
+TestInputSourceFileForIsystem = "tested_src/linkErrorForTesting.c"
 TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
 TestMockRefClass = Struct.new(:classFullname, :fullname, :memberName, :argTypeStr, :postFunc)
 
@@ -4885,6 +4886,30 @@ class TestMockGenLauncher < Test::Unit::TestCase
     args = ["mock", "", "", "", "", "", "", "", ""]
     target = MockGenLauncher.new(args)
     assert_equal(expected, target.selectSystemPath(argSet))
+    assert_equal(Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET,
+                 target.instance_variable_get(:@systemHeaderSet))
+    assert_false(target.instance_variable_get(:@checkInternalSystemPath))
+  end
+
+  def test_collectInternalIsystemFail
+    args = ["mock", Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER,
+            "FileNotExist", Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH,
+            "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    assert_raise(MockgenRuntimeError) { target.collectInternalIsystem("-cc1") }
+  end
+
+  def test_collectInternalIsystemPass
+    command = "#{Mockgen::Constants::CLANG_COMMAND} -v"
+    stdoutstr, stderrstr, status = Open3.capture3(command)
+    assert_true(status.success?)
+
+    # assume /usr/bin/clang++ does not write a -internal-isystem list
+    check = stderrstr.match(/InstalledDir:\s+\/usr\/bin/) ? "" : Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH
+    args = ["mock", Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER,
+            TestInputSourceFileForIsystem, check, "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    assert_nothing_thrown(MockgenRuntimeError) { target.collectInternalIsystem("-cc1") }
   end
 
   def test_selectClangNonCc1Options
@@ -4918,6 +4943,12 @@ class TestMockGenLauncher < Test::Unit::TestCase
     expected += ' -internal-isystem '+ path2
     assert_equal(expected, actualStr)
     assert_equal([path1, path2], pathSet)
+  end
+
+  def test_collectNonInternalIsystemHeaders
+    args = ["mock", "", "", "", "", "", "", "", ""]
+    target = MockGenLauncher.new(args)
+    target.collectNonInternalIsystemHeaders(nil, nil, nil)
   end
 
   def test_selectNonInternalIsystemHeaders
@@ -5033,13 +5064,50 @@ end
     end
   end
 
-  def test_parseOutHeaderFilename
+  data(
+    'default' => Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME,
+    'do not split' => "-outheaderfile",
+    'split' => "-out-header-file")
+  def test_parseOutHeaderFilename(data)
     expected = "outFile.hpp"
     args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
-    args.concat([Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME, expected])
+    args.concat([data, expected])
     args.concat(getOptionSet())
     target = MockGenLauncher.new(args)
     assert_equal(expected, target.instance_variable_get(:@outHeaderFilename))
+  end
+
+  def test_parseSystemPath
+    path1 = "/opt/gcc5"
+    path2 = "/opt/gcc6"
+    pathSet = [path1, path2]
+    expected = Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET.dup.concat(pathSet)
+
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB]
+    pathSet.each { |path| args.concat([Mockgen::Constants::ARGUMENT_SYSTEM_PATH, path]) }
+    args.concat(getOptionSet())
+
+    target = MockGenLauncher.new(args)
+    assert_equal(expected, target.instance_variable_get(:@systemHeaderSet))
+  end
+
+  data(
+    'default' => Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH,
+    'do not split' => "-checkinternalsystempath",
+    'split' => "-check-internal-system-path")
+  def test_checkInternalSystemPathPass(data)
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, data]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@checkInternalSystemPath))
+  end
+
+  def test_checkInternalSystemPathFail
+    # Without a leading hyphen
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, "check-internal-system-path"]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_false(target.instance_variable_get(:@checkInternalSystemPath))
   end
 
   data(

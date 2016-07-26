@@ -18,6 +18,9 @@ require_relative './mockgenConst.rb'
 require_relative './mockgenCommon.rb'
 
 module Mockgen
+  class MockgenRuntimeError < StandardError
+  end
+
   class TypeStringWithoutModifier
     attr_reader :strSet
     def initialize(typeStrSet)
@@ -3275,6 +3278,8 @@ module Mockgen
       @numberOfClassInFile = nil
       @outHeaderFilename = nil
       @defaultNoForwardingToMock = false
+      @systemHeaderSet = Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET.dup
+      @checkInternalSystemPath = false
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -3283,9 +3288,20 @@ module Mockgen
           next
         end
 
-        break if argSet.size < 2
-        optionWord = argSet[0]
+        keyword = argSet[0]
+        optionWord = (keyword.empty? || (keyword[0] != "-")) ? keyword : ("-" + keyword[1..-1].tr('-',''))
         optionValue = argSet[1].tr('"','')
+
+        caught = false
+        case optionWord
+        when Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH
+          argSet.shift
+          @checkInternalSystemPath = true
+          caught = true
+        end
+
+        next if caught
+        break if argSet.size < 2
 
         stopParsing = false
         case optionWord
@@ -3305,6 +3321,9 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME
           argSet.shift(2)
           @outHeaderFilename = optionValue
+        when Mockgen::Constants::ARGUMENT_SYSTEM_PATH
+          argSet.shift(2)
+          @systemHeaderSet << optionValue
         else
           stopParsing = true
         end
@@ -3378,8 +3397,17 @@ module Mockgen
         clangArgStr.gsub!(/#{fromWord}/, toWord)
       end
 
-      command = "#{Mockgen::Constants::CLANG_COMMAND} -### #{clangArgStr} #{@inputFilename}"
+      # clang++ -### causes errors for non-existing source files
+      sourceFilename = @sourceFilenameSet.empty? ? @inputFilename : @sourceFilenameSet[0]
+      command = "#{Mockgen::Constants::CLANG_COMMAND} -### #{clangArgStr} #{sourceFilename}"
       stdoutstr, stderrstr, status = Open3.capture3(command)
+
+      # Ignore the error status if found internal headers
+      if @checkInternalSystemPath
+        unless stderrstr.index(Mockgen::Constants::CLANG_INTERNAL_SYSTEM_HEADER_OPTION)
+          raise MockgenRuntimeError, "#{command} failed"
+        end
+      end
 
       # May return an empty string on Cygwin
       selectInternalIsystem(stderrstr)
@@ -3421,7 +3449,7 @@ module Mockgen
 
     # launch clang -H and extract included header files except internal-isystem headers
     def collectNonInternalIsystemHeaders(argStr, systemPaths, internalPaths)
-      return if @sourceFilenameSet.empty? && @outHeaderFilename.nil?
+      return unless @outHeaderFilename
 
       headerSet = []
       @sourceFilenameSet.each do |inputFilename|
@@ -3429,7 +3457,7 @@ module Mockgen
         command = "#{Mockgen::Constants::CLANG_COMMAND} -H #{clangArgStr} #{inputFilename}"
         stdoutstr, stderrstr, status = Open3.capture3(command)
 
-        allSystemPaths = [Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET, systemPaths, internalPaths].flatten
+        allSystemPaths = [@systemHeaderSet, systemPaths, internalPaths].flatten
         headerSet.concat(selectNonInternalIsystemHeaders(stderrstr, allSystemPaths))
       end
 

@@ -486,8 +486,11 @@ change them.
 Run `make` and copy its command log for a quick start of CppMockGen.
 
 ```bash
-ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested_src/mockgenSampleNotSwapped.cpp tested_include/mockgenSample1.hpp ./generated/link_error.log (omitted) -cc1 (omitted)
+ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested_src/mockgenSampleNotSwapped.cpp -systempath /opt/gcc6 tested_include/mockgenSample1.hpp ./generated/link_error.log (omitted) -cc1 (omitted)
 ```
+
+Hyphens between words in each option can be omitted. CppMockGen
+treats -outheaderfile as -out-header-file.
 
 * -filter "[A-Z]" : CppMockGen excludes free functions of which name
    has no upper cases; system and standard functions.
@@ -499,6 +502,7 @@ ruby script/mockgen.rb mock  -filter "[A-Z]" -filterout NotMocked -source tested
 * -outheaderfile filename (shown later) : CppMockGen creates `filename`
   that contains include directives same as source files specified with
   -source options.
+* -systempath appends a system and compiler directory such as /opt.
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
