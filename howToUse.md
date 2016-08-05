@@ -14,19 +14,28 @@ no other namespaces and no classes.
 CppMockGen is a set of ruby scripts and launches the clang front-end
 internally. This is my environment to develop it.
 
-* Windows 10 64bit Edition
-* Cygwin 64bit version (2.5.2) or MinGW-w64
-* LLVM + clang 3.8.1 (Cygwin/MinGW)
-* gcc 5.4.0 (Cygwin), 4.9.2 (MinGW)
-* Ruby 2.2.5p319 (Cygwin), 2.3.1p112 (ActiveScriptRuby)
+* Windows 10 Anniversary Update 64bit Edition (Version 1607, OS build 14393.10)
+* Cygwin 64bit version (2.5.2), MinGW-w64 or Bash on Ubuntu on Windows
+* Google Test / Mock (1.7.0)
+* LLVM, gcc and ruby
+
+I tested CppMockGen with the following versions of tools.
+
+|Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
+|:------|:------|:------|:------|
+|LLVM + clang|3.8.1|3.8.1|3.4|
+|gcc|5.4.0|4.9.2|4.8.4|
+|Ruby|2.2.5p319|2.3.1p112(ActiveScriptRuby)|1.9.3p484|
 
 CppMockGen is executable on Linux but it needs changes on its Makefile
 to test CppMockGen with GNU _make_ on Linux. Note that clang++
 requires include paths to find g++ header files.
 
-Testing CppMockGen needs command line tools such as _echo_, _ls_,
-_grep_, _wc_, _ctags_ in Cygwin or Linux. To test CppMockGen on MinGW, add
-Cygwin /usr/bin directory to _PATH_ environment variable.
+CppMockGen needs command line tools such as _echo_, _ls_, _grep_,
+_wc_, _ctags_ in Cygwin or Linux. To run and test CppMockGen on MinGW,
+add Cygwin /usr/bin directory to _PATH_ environment variable.
+
+Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
 
 ### Sample codes
 

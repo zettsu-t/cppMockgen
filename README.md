@@ -7,10 +7,11 @@ Generating codes to test C++ codes. It makes
 ## Platform
 
 _CppMockGen_ is built on and runs on Cygwin with tools shown
-below. MinGW-w64 and Linux are also available.
+below. MinGW-w64, Bash on Ubuntu on Windows and Linux are also available.
 
-* Windows 10 64bit Edition
+* Windows 10 Anniversary Update 64bit Edition
 * Cygwin 64bit version (2.5.2)
+* Google Test / Mock (1.7.0)
 * LLVM and clang (3.8.1)
 * gcc (5.4.0)
 * Ruby (2.2.5p319)

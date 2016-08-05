@@ -49,9 +49,12 @@ runthrough_cxx:
 	$(MAKE) check
 	@$(ECHO) -e $(ECHO_START_BG)All tests have completed with $(CXX)$(ECHO_END_BG)
 
+# Bash on Ubuntu on Windows uses still Ruby 1.9.3p484 which causes errors in data driven testing.
 check:
 	$(TARGET_EXE)
+ifneq ($(BUILD_ON_BASH_ON_UBUNTU_ON_WINDOWS),yes)
 	$(RUBY) $(GENERATOR_SCRIPT_TEST)
+endif
 	$(RUBY) $(PREPROCESS_SCRIPT_TEST) $(PREPROCESS_SCRIPT_TEST_FILES)
 	$(MAKE) test_generate_each
 	$(MAKE) test_generate_bulk

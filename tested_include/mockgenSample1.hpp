@@ -1,7 +1,6 @@
 #include <functional>
 #include <sstream>
 #include <cstdlib>
-#include <boost/utility.hpp>
 
 #ifndef MOCKGEN_SAMPLE1_HPP
 #define MOCKGEN_SAMPLE1_HPP
@@ -12,6 +11,22 @@
 #else
 #define PACKED_PREFIX
 #define PACKED_ATTRIBUTE
+#endif
+
+#ifndef BOOST_NOT_INSTALLED
+#include <boost/utility.hpp>
+#define NONCOPYABLE_MIXIN boost::noncopyable
+#else
+// I have not installed boost C++ libraries on Bash on Ubuntu on Windows
+class TinyNonCopyable {
+protected:
+    TinyNonCopyable(void) = default;
+    ~TinyNonCopyable(void) = default;
+private:
+    TinyNonCopyable(const TinyNonCopyable&) = delete;
+    TinyNonCopyable& operator =(const TinyNonCopyable&) = delete;
+};
+#define NONCOPYABLE_MIXIN TinyNonCopyable
 #endif
 
 // In a platform clang cannot resolve unqualified size_t and treat
@@ -41,7 +56,7 @@ namespace Sample1 {
         };
 
         // Search no private base classes
-        class DerivedClass : public BaseClass, private boost::noncopyable {
+        class DerivedClass : public BaseClass, private NONCOPYABLE_MIXIN {
         public:
             DerivedClass(void);
             /* virtual ~DerivedClass(void); automatically generated */
@@ -58,7 +73,7 @@ namespace Sample1 {
             virtual void PrivateVirtualFunc(void) {};
         };
 
-        class ConstructorWithArg : public BaseClass, private boost::noncopyable {
+        class ConstructorWithArg : public BaseClass, private NONCOPYABLE_MIXIN {
         public:
             // No default constructor
             ConstructorWithArg(int value);
@@ -68,7 +83,7 @@ namespace Sample1 {
             int value_;
         };
 
-        class Counter : private boost::noncopyable {
+        class Counter : private NONCOPYABLE_MIXIN {
         public:
             Counter(void);
             virtual ~Counter(void) = default;
@@ -79,7 +94,7 @@ namespace Sample1 {
             int value_;
         };
 
-        class CountLater : private boost::noncopyable {
+        class CountLater : private NONCOPYABLE_MIXIN {
         public:
             CountLater(void);
             virtual ~CountLater(void);
@@ -91,7 +106,7 @@ namespace Sample1 {
             std::function<void(void)> pFunc_;
         };
 
-        class NonTypedBaseClass : private boost::noncopyable {
+        class NonTypedBaseClass : private NONCOPYABLE_MIXIN {
         public:
             NonTypedBaseClass(void) = default;
             virtual ~NonTypedBaseClass(void) = default;
@@ -118,7 +133,7 @@ namespace Sample1 {
 //      };
 
         template <size_t S, size_t V, typename... Ts>
-        class VariadicClass : private boost::noncopyable {
+        class VariadicClass : private NONCOPYABLE_MIXIN {
         public:
             VariadicClass(void) : sizeS_(S), sizeV_(V), sizeTs_(sizeof...(Ts)) {}
             size_t Get(void) const { return sizeS_ + sizeV_ * sizeTs_; }
