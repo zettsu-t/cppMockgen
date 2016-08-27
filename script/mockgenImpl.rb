@@ -227,6 +227,16 @@ module Mockgen
       getNonTypedFullname(getNamespace)
     end
 
+    # If this block defines a typename, return the typename
+    def getTypename
+      nil
+    end
+
+    # Return a type-specific initializer if defined
+    def getInitializer
+      nil
+    end
+
     def collectAliasesInBlock(typeAliasSet)
       @typedefBlock.collectAliasesInBlock(typeAliasSet) if @typedefBlock
       typeAliasSet
@@ -421,6 +431,10 @@ module Mockgen
       return !@typeAlias.nil?
     end
 
+    def getTypename
+      @typeAlias
+    end
+
     # set an alias after its definition
     def setAlias(name)
       @typeAlias = name unless (@actualTypeSet.size >= 1) && (@actualTypeSet[-1] == name)
@@ -431,6 +445,35 @@ module Mockgen
       actualTypeStr = @actualTypeSet.join(" ")
       typeAliasSet.add(@typeAlias, actualTypeStr)
       typeAliasSet
+    end
+  end
+
+  # Alias of a type or a namespace
+  class UsingBlock < BaseBlock
+    def initialize(line)
+      super
+      @aliasName, @actualName = parse(line)
+    end
+
+    def parse(line)
+      aliasName = nil
+      actualName = nil
+
+      # Handle only simple type aliases
+      unless line.split(/\s+/).any? { |word| ["namespace", "template"].any? { |key| word == key } }
+        if topMd = line.strip.match(/^\s*using\s+([^=]+)(=.+)/)
+          if md = topMd[2].tr(";{","").strip.match(/^=\s*(.+)/)
+            aliasName = topMd[1].strip
+            actualName = md[1]
+          end
+        end
+      end
+
+      return aliasName, actualName
+    end
+
+    def getTypedefBlock
+      @actualName ? TypedefBlock.new("typedef #{@actualName} #{@aliasName};") : nil
     end
   end
 
@@ -720,17 +763,32 @@ module Mockgen
       end
     end
 
-    # Need to improve to handle class-local typedefs
     def makeStubDef(className)
+      makeStubDefWithLocalType(className, nil)
+    end
+
+    def makeStubDefWithLocalType(className, localTypeTable)
       prefix = ""
       fullname = getFullname()
       varname = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
 
       found, canInitializeByZero = findType(@typeStr)
+      localType = (!localTypeTable.nil? && localTypeTable.key?(@typeStr)) ? localTypeTable[@typeStr] : nil
       unless found
-        prefix = className.empty? ? "" : "#{className}::"
+        # Class variable definitions require qualified names with their class names.
+        prefix = ""
+        classNamePrefix = "#{className}::"
+        unless @typeStr.match(/#{classNamePrefix}[^:]+$/)
+          # Convert to a qualified name if not so yet
+          prefix = (!className.empty? && localType) ? classNamePrefix : ""
+        end
       end
-      "#{prefix}#{@typeStr} #{varname};\n"
+
+      initialValue = localType ? localType.getInitializer : nil
+      # LLVM requires initializer of constant pointers (not pointers to const variables)
+      initialValue = "0" if @typeStr.match(/\*\s*const/)
+      initializer = initialValue ? " = #{initialValue}" : ""
+      "#{prefix}#{@typeStr} #{varname}#{initializer};\n"
     end
 
     ## Implementation detail (public for testing)
@@ -1095,6 +1153,8 @@ module Mockgen
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 
+      # clang -cc1 adds classname:: to a return type for a member function
+      # if the type is in a class scope.
       prefix = outerName.empty? ? "" : "#{outerName}::"
       str = "#{@returnType} #{prefix}#{@funcName}(#{@typedArgSetWithoutDefault}) #{constStr}{\n"
       returnType = @returnType.tr("&","").strip
@@ -1573,11 +1633,21 @@ module Mockgen
       # Base classes
       @baseClassNameSet = parseInheritance(body)
       @baseClassBlockSet = []
+
+      # Local typenames
+      @localTypeTable = {}
     end
 
     # Name an inner class
     def connect(child)
       super
+      name = child.getTypename
+      if name
+        @localTypeTable[name] = child
+        # clang -cc1 adds classname:: to types of static variables.
+        # It may cause errors if an outer class and namespace have the same name of this class.
+        @localTypeTable["#{@name}::#{name}"] = child
+      end
       child.setUniqueName if child.isClass?
     end
 
@@ -1616,6 +1686,10 @@ module Mockgen
 
     # Class and struct names can be treated as namespaces
     def getNamespace
+      @name
+    end
+
+    def getTypename
       @name
     end
 
@@ -2020,7 +2094,7 @@ module Mockgen
       end
 
       @undefinedVariableSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse?
+        src += member.makeStubDefWithLocalType(name, @localTypeTable) if member.canTraverse?
       end
 
       src
@@ -2058,7 +2132,7 @@ module Mockgen
     end
 
     def formatForwarderClass(forwarderName, mockClassName, baseName)
-      # Inherit a base class to refer class-local enums of the class
+      # Inherit a base class to refer class scope enums of the class
       # class can inherit struct
       str = getClassDefinition(@templateParam, forwarderName, baseName) + " {\n"
       str += "public:\n"
@@ -2213,6 +2287,55 @@ module Mockgen
     end
   end
 
+  # enum and enum class
+  class EnumBlock < BaseBlock
+    def initialize(line)
+      super
+      @name = nil
+      @zeroInitializer = nil
+      @initializer = nil
+      @prefix = ""
+
+      if md = line.tr("{;", "").match(/^enum\s+(class\s+)?(\S+)/)
+        @name = md[2]
+        @prefix = md[1].nil? ? "" : "#{@name}::"
+        # zero may not be a member of this enum type
+        @zeroInitializer = "static_cast<#{@name}>(0)"
+      end
+    end
+
+    def getTypename
+      @name
+    end
+
+    def getInitializer
+      @initializer ? @initializer : @zeroInitializer
+    end
+
+    def parseChildren(line)
+      if md = line.strip.match(/^([^\s=,]+)/)
+        @initializer = @prefix + md[1] unless @initializer
+      end
+
+      # return no blocks
+      nil
+    end
+  end
+
+  class UnionBlock < BaseBlock
+    def initialize(line)
+      super
+      @name = nil
+      if md = line.tr("{;", "").match(/^union\s+(\S+)/)
+        @name = md[1]
+      end
+    end
+
+    def getTypename
+      @name
+    end
+  end
+
   # Factory class for variant type blocks
   class BlockFactory
     def initialize(noMatchingTypesInCsource)
@@ -2254,6 +2377,10 @@ module Mockgen
           if words.any? { |word| word == "class" }
             newBlock = ClassBlock.new(line)
           end
+        when "enum"
+          newBlock = EnumBlock.new(line)
+        when "union"
+          newBlock = UnionBlock.new(line)
         end
       end
 
@@ -2263,6 +2390,9 @@ module Mockgen
           case words[0]
           when "typedef"
             newBlock = TypedefBlock.new(line)
+          when "using"
+            newBlock = UsingBlock.new(line)
+            newBlock = newBlock.getTypedefBlock
           when "extern"
             if (words.size >= 3 && words[-1][-1] == ")")
               newBlock = FreeFunctionBlock.new(line)

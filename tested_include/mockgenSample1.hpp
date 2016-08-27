@@ -182,8 +182,34 @@ public:
     virtual int FuncDefaultArgument(void* p=NULL);
     virtual int FuncPtrDefaultArgument(void(*funcptr)(int)=&defaultCallback);
     virtual int FuncMissingA(int32_t a);
-    virtual int FuncMissingB(MyInt64 a);  // Resolve the typedef to make a stub
+    virtual int FuncMissingB(MyInt64 a);     // Resolve the typedef to make a stub
     virtual CstyleStruct FuncMissingC(void);
+
+    struct LocalStruct {
+        int member_ {0};
+    };
+    union LocalUnion {
+        int member_ {0};
+    };
+    virtual LocalStruct FuncMissingD(void);
+    virtual LocalUnion  FuncMissingE(void);
+
+    enum EnumType {
+        // Has no members with value 0
+        FIRST_MEMBER = 1,
+        SECOND_MEMBER,
+    };
+    enum class EnumClassType {
+        // Has no members with value 0
+        FIRST_MEMBER_C = 1,
+        SECOND_MEMBER_C,
+    };
+
+    static LocalStruct localStruct_;
+    static LocalUnion  localUnion_;
+    static LocalStruct* const pLocalStruct_;
+    static EnumType    enumVar_;
+    static EnumClassType enumClassVar_;
 };
 
 // Testing to ignore operators
@@ -211,6 +237,7 @@ extern int TopLevelMissingFuncCwithoutExternC(size_t s);
 extern "C" {
     extern int TopLevelMissingFuncC(void);
 }
+extern int TopLevelMissingFuncD(Int64Alias a);
 
 // Testing to ignore attributes
 PACKED_ATTRIBUTE struct StructNotInstanciated1 {};

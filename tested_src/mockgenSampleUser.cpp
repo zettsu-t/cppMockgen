@@ -40,11 +40,19 @@ namespace Sample1 {
 }
 
 int TopLevelSampleFunc(void) {
+    TopLevelClass obj;
+    // Cause link errors for undefined pLocalStruct_
+    auto ptrS __attribute__((unused)) = TopLevelClass::pLocalStruct_;
+    auto varD __attribute__((unused)) = obj.FuncMissingD();
+    auto varE __attribute__((unused)) = obj.FuncMissingE();
+
     return ClassNotInstanciated::arrayMissing[0]
         + aTopLevelObject.GetValue() + localTopLevelObject.GetValue()
         + ClassNotInstanciated::inner_.Func()
-        + TopLevelMissingFuncC() + TopLevelMissingFuncCwithoutExternC(0)
-        + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace();
+        + TopLevelMissingFuncC() + TopLevelMissingFuncD(0) + TopLevelMissingFuncCwithoutExternC(0)
+        + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace()
+        + TopLevelClass::localStruct_.member_ + TopLevelClass::localUnion_.member_
+        + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2;
 }
 
 int FreeFunctionCalleeSample(void) {

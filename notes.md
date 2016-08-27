@@ -215,17 +215,20 @@ CppMockGen parses.
 
 CppMockGen does not support some C++ features such as
 
-* va_arg : I think it is more appropriate in C++ to use boost::any and
-  std::tuple to pass arbitrary type and number of arguments.
+* va_arg : Function declarations do not tell CppMockGen how to parse
+  variable argument lists.
 * Write an array of function pointers `T(f[])(args)` as an argument of
   function declarations : I think this is difficult to read and I
   would like to define and use its type alias.
-* Using directives as type aliases
+* Using directives as alias template types
 * Operator overloading
 * Perfect forwarding and move semantics `(T&&)`
 * CppMockGen does not make mocks for member functions with
   ref-qualifier (`&` and `&&`).
 
+Instead of using va_arg in C++, I think it is more appropriate to use
+boost::any and std::tuple to pass arbitrary type and number of
+arguments.
 
 ## Data structure and converting C++ code
 

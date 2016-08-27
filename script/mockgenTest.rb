@@ -444,6 +444,14 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal("", BaseBlock.new("Name").getFullNamespace)
   end
 
+  def test_getTypename
+    assert_nil(BaseBlock.new("Name").getTypename)
+  end
+
+  def test_getInitializer
+    assert_nil(BaseBlock.new("Name").getInitializer)
+  end
+
   def test_collectAliasesInBlock
     assert_nil(BaseBlock.new("Name").collectAliasesInBlock(nil))
   end
@@ -610,20 +618,23 @@ end
 
 class TestTypedefBlock < Test::Unit::TestCase
   data(
-    'direct typedef' => ["typedef unsigned int UINT32", ["unsigned", "int"], "UINT32"],
-    'indirect typedef' => ["typedef uint32_t UINT32", ["uint32_t"], "UINT32"],
-    'pointer' => ["typedef uint32_t *PUINT32", ["uint32_t", "*"], "PUINT32"])
+    'direct typedef' => ["typedef unsigned int UINT32", "using UINT32 = unsigned int", ["unsigned", "int"], "UINT32"],
+    'indirect typedef' => ["typedef uint32_t UINT32", "using UINT32 = uint32_t", ["uint32_t"], "UINT32"],
+    'pointer' => ["typedef uint32_t *PUINT32", "using PUINT32 = uint32_t*", ["uint32_t", "*"], "PUINT32"])
   def test_initializeTypedef(data)
-    line, expectedTypeSet, expectedAlias = data
-    block = TypedefBlock.new(line + ";")
-    assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeSet))
-    assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
-    assert_true(block.canTraverse?)
+    line, lineUsing, expectedTypeSet, expectedAlias = data
+    [TypedefBlock.new(line + ";"), UsingBlock.new(lineUsing + ";").getTypedefBlock].each do |block|
+      assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeSet))
+      assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
+      assert_true(block.canTraverse?)
+      assert_equal(expectedAlias, block.getTypename)
+    end
   end
 
   def test_initializeNotTypedef
     block = TypedefBlock.new("namespace A")
     assert_false(block.canTraverse?)
+    assert_nil(block.getTypename)
   end
 
   def test_collectAliasesInBlock
@@ -697,6 +708,17 @@ class TestTypedefBlock < Test::Unit::TestCase
     assert_equal("aStruct", rootBlock.resolveAlias("T"))
     assert_equal("aStruct", ecBlock.resolveAlias("T"))
     assert_equal("U", ecBlock.resolveAlias("U"))
+  end
+end
+
+class TestUsingBlock < Test::Unit::TestCase
+  data(
+    'empty' => "",
+    'namesapce' => "using namespace std;",
+    'malformed' => "using = int;",
+    'template' => "template <typename T> using Array = typename std::vector<T>;")
+  def test_initializeTypedef(data)
+    assert_nil(UsingBlock.new(data).getTypedefBlock)
   end
 end
 
@@ -1044,7 +1066,52 @@ class TestExternVariableStatement < Test::Unit::TestCase
 
     varBlock2 = ExternVariableStatement.new("LocalType a;")
     block.connect(varBlock2)
-    assert_equal("Name::LocalType Name::a;\n", varBlock2.makeStubDef("Name"))
+    assert_equal("LocalType Name::a;\n", varBlock2.makeStubDef("Name"))
+
+    [nil, {"OuterType" => true}].each do |table|
+      assert_equal("LocalType Name::a;\n", varBlock2.makeStubDefWithLocalType("Name", table))
+    end
+
+    assert_equal("Name::LocalType Name::a;\n", varBlock2.makeStubDefWithLocalType("Name", {"LocalType" => BaseBlock.new("")}))
+  end
+
+  def test_makeStubDefWithInitializer
+    block = ClassBlock.new("class Name {")
+    varBlock = ExternVariableStatement.new("static int * const pInt;")
+    block.connect(varBlock)
+    assert_equal("int * const Name::pInt = 0;\n", varBlock.makeStubDef(""))
+
+    varBlock = ExternVariableStatement.new("static const int * pIntValue;")
+    block.connect(varBlock)
+    assert_equal("const int * Name::pIntValue;\n", varBlock.makeStubDef(""))
+
+    block = ClassBlock.new("class Name {")
+    varBlock = ExternVariableStatement.new("static EnumType e;")
+    block.connect(varBlock)
+
+    child = BaseBlock.new("")
+    def child.getInitializer
+      "INIT"
+    end
+
+    table = {"EnumType" => child}
+    tableWithName = {"EnumType" => child, "Name::EnumType" => child}
+    assert_equal("Name::EnumType Name::e = INIT;\n", varBlock.makeStubDefWithLocalType("Name", table))
+    assert_equal("Name::EnumType Name::e = INIT;\n", varBlock.makeStubDefWithLocalType("Name", tableWithName))
+  end
+
+  def test_makeStubDefWithClassName
+    block = ClassBlock.new("class Name {")
+    varBlock = ExternVariableStatement.new("static Name::EnumType e;")
+    block.connect(varBlock)
+
+    child = BaseBlock.new("")
+    def child.getInitializer
+      "INIT"
+    end
+
+    tableWithName = {"Name::EnumType" => child}
+    assert_equal("Name::EnumType Name::e = INIT;\n", varBlock.makeStubDefWithLocalType("Name", tableWithName))
   end
 
   data(
@@ -2300,6 +2367,7 @@ class TestClassBlock < Test::Unit::TestCase
       assert_true(block.instance_variable_get(:@valid))
       assert_true(block.canTraverse?)
       assert_true(block.isClass?)
+      assert_equal(name, block.getTypename)
 
       assert_equal(name, block.getNamespace)
       assert_equal(name, block.instance_variable_get(:@name))
@@ -2331,6 +2399,9 @@ class TestClassBlock < Test::Unit::TestCase
     name = "Outer_in_Inner"
     assert_equal(name, innerBlockA.instance_variable_get(:@uniqueName))
     assert_equal("Outer_in_Inner_in_Name", innerBlockB.instance_variable_get(:@uniqueName))
+
+    assert_true(block.instance_variable_get(:@localTypeTable).key?("Inner"))
+    assert_true(innerBlockA.instance_variable_get(:@localTypeTable).key?("Name"))
 
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_MOCK}", innerBlockA.mockName)
     assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", innerBlockA.decoratorName)
@@ -3742,6 +3813,54 @@ class TestClassBlock < Test::Unit::TestCase
   # Test makeClassSet in testing CppFileParser
 end
 
+class TestEnumBlock < Test::Unit::TestCase
+  data(
+    'enum' => "enum Month",
+    'enum declaration' => "enum Month;",
+    'enum definition1' => "enum Month{",
+    'enum definition2' => "enum Month {",
+    'enum class' => "enum class Month{")
+  def test_construct(data)
+    block = EnumBlock.new(data)
+    assert_equal("Month", block.getTypename)
+    assert_equal("static_cast<Month>(0)", block.getInitializer)
+  end
+
+  def test_failToConstruct
+    block = EnumBlock.new("")
+    assert_nil(block.getTypename)
+    assert_nil(block.getInitializer)
+  end
+
+  def test_parseChildren
+    block = EnumBlock.new("enum Month {")
+    assert_equal("static_cast<Month>(0)", block.getInitializer)
+    assert_nil(block.parseChildren("January"))
+    assert_equal("January", block.getInitializer)
+    assert_nil(block.parseChildren("February"))
+    assert_equal("January", block.getInitializer)
+
+    block = EnumBlock.new("enum class Month {")
+    assert_nil(block.parseChildren("January"))
+    assert_equal("Month::January", block.getInitializer)
+  end
+end
+
+class TestUnionBlock < Test::Unit::TestCase
+  data(
+    'union' => "union Any",
+    'union declaration' => "union Any;",
+    'union definition1' => "union Any{",
+    'union definition2' => "union Any {")
+  def test_construct(data)
+    assert_equal("Any", UnionBlock.new(data).getTypename)
+  end
+
+  def test_failToConstruct
+    assert_nil(UnionBlock.new("").getTypename)
+  end
+end
+
 class TestBlockFactory < Test::Unit::TestCase
   def test_createRootBlock
     assert_true(BlockFactory.new(false).createRootBlock.canTraverse?)
@@ -3781,6 +3900,11 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "typedef unsigned int uint32_tj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse?)
 
+    line = "using uint32_ptr_t = unsigned int *;"
+    block = factory.createBlock(line, rootBlock)
+    assert_true(block.canTraverse?)
+    assert_true(block.is_a?(TypedefBlock))
+
     line = "extern const ClassName& obj;"
     assert_true(factory.createBlock(line, rootBlock).canTraverse?)
 
@@ -3790,6 +3914,22 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "extern void FuncDecl();"
     block = factory.createBlock(line, rootBlock)
     assert_false(block.instance_variable_get(:@noMatchingTypes))
+
+    line = "enum class EnumClassName {"
+    enumClassBlock = factory.createBlock(line, classBlock)
+    assert_equal("EnumClassName", enumClassBlock.getTypename)
+
+    line = "enum EnumName {"
+    enumBlock = factory.createBlock(line, classBlock)
+    assert_equal("EnumName", enumBlock.getTypename)
+
+    line = "FIRST_MEMBER,"
+    factory.createBlock(line, enumBlock)
+    assert_equal("FIRST_MEMBER", enumBlock.getInitializer)
+
+    line = "enum class UnionName {"
+    unionBlock = factory.createBlock(line, classBlock)
+    assert_equal("UnionName", unionBlock.getTypename)
 
     line = "public:"
     block = factory.createBlock(line, classBlock)
@@ -3811,6 +3951,16 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "typedef #{typeStr} tagName {"
     block = factory.createBlock(line, rootBlock)
     assert_not_nil(block.instance_variable_get(:@typedefBlock))
+  end
+
+  data(
+    'enum' => ["enum", "EnumBlock"],
+    'enum class' => ["enum class", "EnumBlock"],
+    'union' => ["union", "UnionBlock"])
+  def test_createUserDefinedType(data)
+    typeStr, className = data
+    line = "#{typeStr} Month {"
+    assert_equal("Month", Object.const_get(className).new(line).getTypename)
   end
 
   def test_noMatchingTypesInCsource

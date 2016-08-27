@@ -232,6 +232,14 @@ the callee calls. It leads that the test case needs all source files
 to test the caller alone. Making stubs automatically eases this
 burden.
 
+To avoid compilation errors, stub variables take their initializer
+that CppMockGen generates
+* 0 for constant pointers : T* const (not pointers to const variables
+  : const T*)
+* First members of enums and enum classes (may not be equal to 0)
+* Unspecified for other cases and implicitly defined default
+  initializers are used
+
 ### Arguments of constructors for generated classes
 
 The generated mock, forwarder and decorator class inherit a tested
@@ -485,7 +493,7 @@ change them.
 |Filename|Description|
 |:-------|:----------|
 |mock_*.hpp|Class definitions|
-|typeSwapper_*.hpp|Macors to swap tested class types to decorator classes types|
+|typeSwapper_*.hpp|Macros to swap tested class types to decorator classes types|
 |varDecl_*.hpp|Declarations of forwarder instances|
 |varSwapper_*.hpp|Macros to swap tested class instances to forwarder instances|
 |varDef_*.cpp|Definitions of class members|
