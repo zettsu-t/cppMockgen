@@ -1402,9 +1402,33 @@ class TestConstructorBlock < Test::Unit::TestCase
     assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
   end
 
-  def test_makeStubDef
-    block = ConstructorBlock.new("", "NameC")
-    assert_equal("NameC::NameC() {}\n", block.makeStubDef("NameC"))
+  def test_makeStubDefInClass
+    className = "NameC"
+    block = ConstructorBlock.new("#{className}()", className)
+    assert_equal("NameC::NameC() {}\n", block.makeStubDef(className))
+
+    classBlock = ClassBlock.new("class #{className} {")
+    classBlock.connect(block)
+    assert_equal("::NameC::NameC() {}\n", block.makeStubDef(className))
+  end
+
+  def test_makeStubDefInNamespace
+    className = "NameC"
+    block = ConstructorBlock.new("#{className}()", className)
+    nsBlock = NamespaceBlock.new("namespace A")
+    nsBlock.connect(block)
+    assert_equal("::A::NameC::NameC() {}\n", block.makeStubDef(className))
+  end
+
+  def test_makeStubDefInNamespaceAndClass
+    className = "NameC"
+    block = ConstructorBlock.new("#{className}()", className)
+    classBlock = ClassBlock.new("class #{className} {")
+    classBlock.connect(block)
+
+    nsBlock = NamespaceBlock.new("namespace A")
+    nsBlock.connect(classBlock)
+    assert_equal("::A::NameC::NameC() {}\n", block.makeStubDef(className))
   end
 
   def test_makeDefaultConstructor
@@ -1451,12 +1475,33 @@ class TestDestructorBlock < Test::Unit::TestCase
     assert_false(block.filterByUndefinedReferenceSet(TestMockRefMonoSetClass.new(refDestructor), className))
   end
 
-  def test_makeStubDef
+  def test_makeStubDefInClass
+    className = "NameD"
+    block = DestructorBlock.new("#{className}::~#{className}();", className)
+    assert_equal("NameD::~NameD(void) {}\n", block.makeStubDef(className))
+
+    classBlock = ClassBlock.new("class #{className} {")
+    classBlock.connect(block)
+    assert_equal("::NameD::~NameD(void) {}\n", block.makeStubDef(className))
+  end
+
+  def test_makeStubDefInNamespace
     className = "NameD"
     block = DestructorBlock.new("NameD::~NameD();", className)
     nsBlock = NamespaceBlock.new("namespace A")
     nsBlock.connect(block)
-    assert_equal("::A::NameD::~NameD() {}\n", block.makeStubDef(className))
+    assert_equal("::A::NameD::~NameD(void) {}\n", block.makeStubDef(className))
+  end
+
+  def test_makeStubDefInNamespaceAndClass
+    className = "NameD"
+    block = DestructorBlock.new("NameD::~NameD();", className)
+    classBlock = ClassBlock.new("class #{className} {")
+    classBlock.connect(block)
+
+    nsBlock = NamespaceBlock.new("namespace A")
+    nsBlock.connect(block)
+    assert_equal("::A::NameD::~NameD(void) {}\n", block.makeStubDef(className))
   end
 
   data(
@@ -3226,7 +3271,7 @@ class TestClassBlock < Test::Unit::TestCase
     'const' => ["const", "void Tested::FuncStub() const {\n    return;\n}\n"])
   def test_formatMockClassWithStub(data)
     postFunc, expected = data
-    expectedFuncStub = "Tested::~Tested() {}\n" + expected
+    expectedFuncStub = "Tested::~Tested(void) {}\n" + expected
     expectedVarStub = "int BaseClass::varStub;\n"
     expectedStub = expectedFuncStub + expectedVarStub
 

@@ -991,7 +991,9 @@ module Mockgen
     # Non-default constructive base classes are not supported yet
     def makeStubDef(className)
       fullname = getNonTypedFullname(@className)
-      "#{fullname}::#{@className}(#{@typedArgSet}) {}\n"
+      # Exclude redundant class name qualifiers
+      funcname = (@parent && @parent.isClass?) ? fullname : "#{fullname}::#{@className}"
+      "#{funcname}(#{@typedArgSet}) {}\n"
     end
 
     # Empty if call a constructor without arguments
@@ -1056,7 +1058,14 @@ module Mockgen
 
     def makeStubDef(className)
       fullname = getNonTypedFullname(@className)
-      "#{fullname}::~#{@className}() {}\n"
+      # Exclude redundant class name qualifiers
+      funcname = "#{fullname}::#{@name}"
+      if (@parent && @parent.isClass?)
+        pos = fullname.rindex(":")
+        funcname = fullname.insert(pos + 1, "~") if pos
+      end
+
+      "#{funcname}(void) {}\n"
     end
   end
 
