@@ -5100,7 +5100,9 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_true(status.success?)
 
     # assume /usr/bin/clang++ does not write a -internal-isystem list
-    check = stderrstr.match(/InstalledDir:\s+\/usr\/bin/) ? "" : Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH
+    keyInstalledDir = "InstalledDir:"
+    installedInDefaultDir = !stderrstr.include?(keyInstalledDir) || stderrstr.match(/#{keyInstalledDir}\s+\/usr\/bin/)
+    check = installedInDefaultDir ? "" : Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH
     args = ["mock", Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER,
             TestInputSourceFileForIsystem, check, "", "", "", "", ""]
     target = MockGenLauncher.new(args)
