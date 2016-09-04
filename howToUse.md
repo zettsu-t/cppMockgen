@@ -562,6 +562,7 @@ classes to make vtables of the classes.
 
 The -vtable option makes stubs for all virtual functions except
 destructors of a class if it meets all these conditions.
+
 1. The input link error log indicates that a vtable of the class is
    undefined.
 1. The input link error log indicates none of the member functions of
@@ -569,7 +570,7 @@ destructors of a class if it meets all these conditions.
    undefined and they are surely not referred.
 1. All constructors of the class are defined ("=default" is available
    in C++11) or not declared in LLVM. It is not allowed that they are
-   declared but not defined because it interferes the rule 2.
+   declared but not defined because it interferes the condition 2.
 
 ### Name generated files
 
