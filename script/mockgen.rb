@@ -5,7 +5,9 @@
 #
 # Usage:
 # $ mockgen.rb [stub|mock] [-nomock] [-filter pattern]* [-filterout pattern]*
-#     [-source filename] [-split num] 8-filenames clang-options
+#     [-source filename] [-split num] [-outheaderfile filename]
+#     [-systempath filename] [-checkinternalsystempath] [-vtable]
+#     8-filenames clang-options
 #
 # - String "stub" or "mock"
 #   stub : generate stubs
@@ -32,6 +34,11 @@
 #   - When num is specified and over 1, each of the files has a prefix
 #     with a serial number from 1.
 #   - When num is not specified, the file contains all mock classes.
+# - optional -outheaderfile filename
+# - optional -systempath filename
+# - optional -checkinternalsystempath
+# - optional -vtable
+#   See howToUse.md and notes.md
 #
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file

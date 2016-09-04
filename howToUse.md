@@ -520,10 +520,13 @@ treats -outheaderfile as -out-header-file.
   that contains include directives same as source files specified with
   -source options.
 * -systempath appends a system and compiler directory such as /opt.
+* -vtable makes stubs for all virtual functions that belong to a class
+  that needs its vtable (explained later).
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
-  `filename` includes recursively.
+  `filename` includes recursively. This can be a source (.cpp) file
+  but should be designated with the -source option if so.
 * Second filename (link_error.log) : A log text file _ld_ wrote. It
   may contain undefined symbols. It means no stubs needed that
   `link_error.log` does not exist or contains no undefined symbols.
@@ -552,6 +555,22 @@ argument types in a linker error log to filter free functions in the
 files. To change this behavior, you can set the constant
 `MODE_DEFAULT_NO_MATCHING_TYPES_IN_C_SOURCES` to false.
 
+The -vtable option is intended to make stubs for classes which are
+instantiated but not used. Even if member functions of the classes are
+not called, compilers require definitions of virtual functions of the
+classes to make vtables of the classes.
+
+The -vtable option makes stubs for all virtual functions except
+destructors of a class if it meets all these conditions.
+1. The input link error log indicates that a vtable of the class is
+   undefined.
+1. The input link error log indicates none of the member functions of
+   the class is undefined. It is possible these functions are
+   undefined and they are surely not referred.
+1. All constructors of the class are defined ("=default" is available
+   in C++11) or not declared in LLVM. It is not allowed that they are
+   declared but not defined because it interferes the rule 2.
+
 ### Name generated files
 
 *_Stub files contain codes that relate free functions and stubs.
@@ -572,4 +591,4 @@ which file a tested code should include. CppMockGen gives two options.
 
 ## And more
 
-More details are described as comments in script/mockgen.rb.
+More details are described in [notes.md](notes.md) and as comments in script/mockgen.rb.

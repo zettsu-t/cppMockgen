@@ -32,6 +32,21 @@ module Mockgen
     end
   end
 
+  class SymbolWithHeadNamespaceDelimiter
+    attr_reader :prefix, :fullname, :nameSet
+    def initialize(name, isClassName)
+      @prefix = ""
+      @nameSet = name.split("::").reject(&:empty?)
+
+      if (@nameSet.size <= (isClassName ? 1 : 2))
+        @fullname = name.dup
+      else
+        @prefix = "::"
+        @fullname = ((name[0..1] != "::") ? @prefix : "") + name
+      end
+    end
+  end
+
   # Block-scoped typedef set
   class TypeAliasSet
     # Public only to merge other instances
@@ -102,13 +117,14 @@ module Mockgen
     # definedReferenceSet : an instance of DefinedReferenceSet
     # undefinedReferenceSet : an instance of UndefinedReferenceSet
     # functionNameFilterSet, classNameFilterOutSet : an array of regrep strings
-    attr_reader :definedReferenceSet, :undefinedReferenceSet, :functionNameFilterSet, :classNameFilterOutSet
+    attr_reader :definedReferenceSet, :undefinedReferenceSet, :functionNameFilterSet, :classNameFilterOutSet, :fillVtable
 
-    def initialize(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet)
+    def initialize(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet, fillVtable)
       @definedReferenceSet = definedReferenceSet
       @undefinedReferenceSet = undefinedReferenceSet
       @functionNameFilterSet = functionNameFilterSet
       @classNameFilterOutSet = classNameFilterOutSet
+      @fillVtable = fillVtable
     end
   end
 
@@ -1818,6 +1834,13 @@ module Mockgen
         functionBlockSet << block if block.filterByReferenceSet(filter)
       end
 
+      # collect undefined functions to create vtables
+      if filter.fillVtable && functionBlockSet.empty? && filter.undefinedReferenceSet.needVtable?(fullname)
+        @allMemberFunctionSet.each do |block|
+          functionBlockSet << block if block.virtual
+        end
+      end
+
       # Assume instance variables do not appear in referenceSet
       @allMemberVariableSet.each do |block|
         variableBlockSet << block if block.filterByReferenceSet(filter)
@@ -2609,47 +2632,86 @@ module Mockgen
 
   # Undefined reference
   class UndefinedReference
-    attr_reader :classFullname, :fullname, :memberName, :argTypeStr, :postFunc
+    attr_reader :isVtable, :classFullname, :fullname, :memberName, :argTypeStr, :postFunc
 
     def initialize(line)
-      @classFullname, @fullname, @memberName, @argTypeStr, @postFunc = parse(line)
+      @isVtable, @classFullname, @fullname, @memberName, @argTypeStr, @postFunc = parse(line)
     end
 
-    def parse(line)
+    def parse(argLine)
+      fullname = nil
+      line = argLine.tr("'`", "").strip
+
+      isVtable, classFullname, fullname = parseVtable(line)
+      return isVtable, classFullname, fullname, nil, nil, nil if isVtable
+      return parseSymbol(line)
+    end
+
+    def parseVtable(line)
+      isVtable = false
+      classFullname = nil
       fullname = nil
 
-      if md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+\W([^\(]+)[\(']/)
-        symbol = md[1]
-        prefix = (symbol.scan("::").size > 1) ? "::" : ""
-        fullname = prefix + symbol
-
-        classFullname = ""
-        memberName = ""
-        nameSet = symbol.split("::")
-        if (!nameSet.nil? && !nameSet.empty?)
-          classFullname = prefix + nameSet[0..-2].join("::")
-          memberName = nameSet[-1]
-        end
-
-        argTypeStr = nil
-        postFuncSet = []
-        md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+([^\']+)/)
-        body = md[1]
-
-        phraseSet = Mockgen::Common::StringOfParenthesis.new(body.tr("`'","")).parse
-        phraseSet.reverse.each do |phrase, inParenthesis|
-          if inParenthesis
-            argTypeStr = inParenthesis
-            break
-          end
-          poststr = phrase.strip
-          # Remove override and final when it compares to references
-          postFuncSet << poststr
-        end
-        postFunc = argTypeStr ? postFuncSet.join("") : ""
+      if md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+vtable\s+for\s+(.+)/)
+        isVtable = true
+        classFullname, fullname, memberName = parseNameSet(md[1], isVtable)
       end
 
-      return classFullname, fullname, memberName, argTypeStr, postFunc
+      return isVtable, classFullname, fullname
+    end
+
+    def parseSymbol(line)
+      isVtable = false
+      classFullname = nil
+      fullname = nil
+      memberName = nil
+      argTypeStr = nil
+      postFunc = nil
+
+      # extract a function or variable name
+      unless md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+([^\(]+)/)
+        return isVtable, classFullname, fullname, memberName, argTypeStr, postFunc
+      end
+
+      symbol = md[1]
+      classFullname, fullname, memberName = parseNameSet(symbol, false)
+      argTypeStr = nil
+      postFuncSet = []
+
+      # extract a while declaration
+      md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+(.+)/)
+      body = md[1]
+
+      phraseSet = Mockgen::Common::StringOfParenthesis.new(body).parse
+      phraseSet.reverse.each do |phrase, inParenthesis|
+        if inParenthesis
+          argTypeStr = inParenthesis
+          break
+        end
+        poststr = phrase.strip
+        # Remove override and final when it compares to references
+        postFuncSet << poststr
+      end
+
+      postFunc = argTypeStr ? postFuncSet.join("") : ""
+      return isVtable, classFullname, fullname, memberName, argTypeStr, postFunc
+    end
+
+    def parseNameSet(symbol, isClass)
+      classFullname = ""
+      memberName = ""
+
+      symbolStr = SymbolWithHeadNamespaceDelimiter.new(symbol, isClass)
+      prefix = symbolStr.prefix
+      fullname = symbolStr.fullname
+      nameSet = symbolStr.nameSet
+
+      if (!nameSet.nil? && !nameSet.empty?)
+        memberName = nameSet.pop unless isClass
+        classFullname = prefix + nameSet[0..-1].join("::")
+      end
+
+      return classFullname, fullname, memberName
     end
   end
 
@@ -2659,6 +2721,7 @@ module Mockgen
 
     def initialize(filename)
       @valid = false
+      @vtableSet = {}
       @refSet = []
       @refFullnameSet = {}
       return unless filename
@@ -2666,7 +2729,7 @@ module Mockgen
       # Filename may not exist in clean build
       if File.exist?(filename)
         File.open(filename, "r") { |file|
-          @refSet, @refFullnameSet = readAllLines(file)
+          @vtableSet, @refSet, @refFullnameSet = readAllLines(file)
         }
       end
 
@@ -2680,19 +2743,28 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def readAllLines(file)
+      vtableSet = {}
       refSet = []
       refFullnameSet = {}
 
       while line = file.gets
         ref = UndefinedReference.new(line.encode("UTF-8").chomp)
-        add(ref, refSet, refFullnameSet)
+        if ref.isVtable
+          vtableSet[ref.classFullname] = ref
+        else
+          add(ref, refSet, refFullnameSet)
+        end
       end
 
-      return refSet, refFullnameSet
+      return vtableSet, refSet, refFullnameSet
     end
 
     def getReferenceSet(name, refMap, defaultSet)
       name.nil? ? defaultSet : (refMap.key?(name) ? refMap[name] : [])
+    end
+
+    def needVtable?(className)
+      @vtableSet.key?(className)
     end
 
     def add(ref, refSet, refFullnameSet)
@@ -2722,11 +2794,11 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
-    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource
+    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
-                   defaultNoForwardingToMock)
+                   defaultNoForwardingToMock, fillVtable)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -2736,6 +2808,7 @@ module Mockgen
       @classNameFilterOutSet = classNameFilterOutSet
       @sourceFilenameSet = sourceFilenameSet
       @defaultNoForwardingToMock = defaultNoForwardingToMock
+      @fillVtable = fillVtable
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -2790,7 +2863,7 @@ module Mockgen
 
       # Resolve aliases before finding undefined references of free functions
       collectTypedefs(@block)
-      filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet, parameterSet.classNameFilterOutSet)
+      filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet, parameterSet.classNameFilterOutSet, parameterSet.fillVtable)
       @functionSetArray = buildFreeFunctionSet(filter)
       makeFreeFunctionSet(@functionSetArray)
 
@@ -3419,6 +3492,7 @@ module Mockgen
       @defaultNoForwardingToMock = false
       @systemHeaderSet = Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET.dup
       @checkInternalSystemPath = false
+      @fillVtable = false
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -3436,6 +3510,10 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH
           argSet.shift
           @checkInternalSystemPath = true
+          caught = true
+        when Mockgen::Constants::ARGUMENT_FILL_VTABLE
+          argSet.shift
+          @fillVtable = true
           caught = true
         end
 
@@ -3521,7 +3599,7 @@ module Mockgen
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
-                                             @sourceFilenameSet, @defaultNoForwardingToMock)
+                                             @sourceFilenameSet, @defaultNoForwardingToMock, @fillVtable)
       parseHeader(parameterSet)
 
       # Value to return as process status code

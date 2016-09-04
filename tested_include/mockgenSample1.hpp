@@ -329,6 +329,32 @@ extern int switchedFunc10(void);
 extern int switchedFunc11(void);
 extern int switchedFunc12(void);
 
+class ClassNotDefined {
+public:
+    // need definitions of constructors in LLVM to make a vtable with
+    // the -vtable option
+    ClassNotDefined(void) = default;
+    virtual ~ClassNotDefined(void);
+    virtual int FuncMissing(int arg);
+};
+
+namespace NamespaceLevel1 {
+    class L1ClassNotDefined {
+    public:
+        L1ClassNotDefined(void) = default;
+        virtual ~L1ClassNotDefined(void) = default;
+        virtual int FuncMissing(int arg);
+    };
+    namespace Level2 {
+        class L2ClassNotDefined {
+        public:
+            L2ClassNotDefined(void) = default;
+            virtual ~L2ClassNotDefined(void) = default;
+            virtual int FuncMissing(int arg);
+        };
+    }
+}
+
 #endif // MOCKGEN_SAMPLE1_HPP
 
 /*

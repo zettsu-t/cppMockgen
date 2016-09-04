@@ -101,6 +101,17 @@ class TestMockRefSetClass
   end
 end
 
+class TestMockRefVatbleSetClass < TestMockRefSetClass
+  def initialize(valid, refSet, fullname)
+    super(valid, refSet)
+    @fullname = fullname
+  end
+
+  def needVtable?(fullname)
+    @fullname == fullname
+  end
+end
+
 class TestMockRefMonoSetClass
   attr_reader :valid
 
@@ -151,6 +162,43 @@ class TestTypeStringWithoutModifier < Test::Unit::TestCase
   def test_removeReservedWordWithModifier(data)
     arg, expected = data
     assert_equal(expected, TypeStringWithoutModifier.new([arg]).strSet)
+  end
+end
+
+class TestSymbolWithHeadNamespaceDelimiter < Test::Unit::TestCase
+  data(
+    'empty' => ["", "", "", []],
+    'simple short' => ["v", "", "v", ["v"]],
+    'simple long'  => ["var", "", "var", ["var"]],
+    '::simple' => ["::var", "", "::var", ["var"]],
+    'member short' => ["c::Member", "", "c::Member", ["c", "Member"]],
+    'member long'  => ["ClassName::Member", "", "ClassName::Member", ["ClassName", "Member"]],
+    '::member' => ["::ClassName::Member", "", "::ClassName::Member", ["ClassName", "Member"]],
+    'namespace short' => ["n::Class::Member", "::", "::n::Class::Member", ["n", "Class" ,"Member"]],
+    'namespace long'  => ["Name::Class::Member", "::", "::Name::Class::Member", ["Name", "Class" ,"Member"]],
+    '::namespace' => ["::Name::Class::Member", "::", "::Name::Class::Member", ["Name", "Class" ,"Member"]])
+  def test_parseMember(data)
+    name, expectedPrefix, expectedFullname, expectedNameSet = data
+    symbol = SymbolWithHeadNamespaceDelimiter.new(name, false)
+    assert_equal(expectedPrefix, symbol.prefix)
+    assert_equal(expectedFullname, symbol.fullname)
+    assert_equal(expectedNameSet, symbol.nameSet)
+  end
+
+  data(
+    'empty' => ["", "", "", []],
+    'simple short' => ["c", "", "c", ["c"]],
+    'simple long'  => ["Class", "", "Class", ["Class"]],
+    '::simple' => ["::Class", "", "::Class", ["Class"]],
+    'namespace short' => ["n::Class", "::", "::n::Class", ["n", "Class"]],
+    'namespace long'  => ["Name::Class", "::", "::Name::Class", ["Name", "Class"]],
+    '::namespace' => ["::Name::Class", "::", "::Name::Class", ["Name", "Class"]])
+  def test_parseClassname(data)
+    name, expectedPrefix, expectedFullname, expectedNameSet = data
+    symbol = SymbolWithHeadNamespaceDelimiter.new(name, true)
+    assert_equal(expectedPrefix, symbol.prefix)
+    assert_equal(expectedFullname, symbol.fullname)
+    assert_equal(expectedNameSet, symbol.nameSet)
   end
 end
 
@@ -269,18 +317,26 @@ class TestSymbolFilter < Test::Unit::TestCase
     undefinedReferenceSet = "b"
     functionNameFilterSet = ["c", "d"]
     classNameFilterOutSet = ["e", "f"]
+    fillVtable = "g"
 
-    filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet)
+    filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet, fillVtable)
     assert_equal(definedReferenceSet, filter.definedReferenceSet)
     assert_equal(undefinedReferenceSet, filter.undefinedReferenceSet)
     assert_equal(functionNameFilterSet, filter.functionNameFilterSet)
     assert_equal(classNameFilterOutSet, filter.classNameFilterOutSet)
+    assert_equal(fillVtable, filter.fillVtable)
   end
 end
 
 class MinimumSymbolFilter < SymbolFilter
   def initialize(definedReferenceSet, undefinedReferenceSet)
-    super(definedReferenceSet, undefinedReferenceSet, [], [])
+    super(definedReferenceSet, undefinedReferenceSet, [], [], false)
+  end
+end
+
+class MinimumVtableFilter < SymbolFilter
+  def initialize(definedReferenceSet, undefinedReferenceSet, fillVtable)
+    super(definedReferenceSet, undefinedReferenceSet, [], [], fillVtable)
   end
 end
 
@@ -1289,6 +1345,19 @@ end
 
 class TestConstructorBlock < Test::Unit::TestCase
   data(
+    '1' => "=",
+    '2' => " =",
+    '3' => " = ",
+    '4' => "= ")
+  def test_parseDefaultConstructor(data)
+    op = data
+    className = "NameC"
+    line = className + "()(void)#{op}default"
+    block = ConstructorBlock.new(line, className)
+    assert_true(block.canTraverse?)
+  end
+
+  data(
     'no args' =>
     ["NameC()", "", "", "", "", "", ""],
     'one arg' =>
@@ -1452,6 +1521,21 @@ class TestDestructorBlock < Test::Unit::TestCase
     className = "NameD"
     block = DestructorBlock.new(line, className)
     assert_true(block.canTraverse?)
+  end
+
+  data(
+    '1' => "=",
+    '2' => " =",
+    '3' => " = ",
+    '4' => "= ")
+  def test_parseDefaultDestructor(data)
+    ["", "virtual"].each do |prefix|
+      op = data
+      className = "NameD"
+      line = prefix + "~" + className + "()(void)#{op}default"
+      block = DestructorBlock.new(line, className)
+      assert_true(block.canTraverse?)
+    end
   end
 
   def test_filterByReferenceSet
@@ -2678,6 +2762,38 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   data(
+    'do nothing' => [false, false, "", 0],
+    'undefined without vtable' => [true, false, "", 6],
+    'undefined with vtable' => [true, true, "", 6],
+    'vtable' => [false, true, "", 4],
+    'other class' => [false, true, "A", 0])
+  def test_filterByVtable(data)
+    undefined, fillVtable, postfix, expected = data
+
+    classname = "Name"
+    block = ClassBlock.new("class " + classname)
+    assert_equal(0, block.instance_variable_get(:@undefinedFunctionSet).size)
+
+    assert_nil(block.parseChildren("public :"))
+    defSet = ["void FuncUndefined1();", "void FuncUndefined2();"]
+    undefSet = ["virtual void Undefined();", "virtual void Undefined(int);",
+                "virtual void Undefined() const;", "virtual void Undefined2(int);"]
+    allSet = [defSet, undefSet].flatten
+
+    allSet.each do |line|
+      child = block.parseChildren(line)
+      child.define_singleton_method(:filterByReferenceSet) { |filter| undefined }
+      block.connect(child)
+    end
+
+    refSet = TestMockRefVatbleSetClass.new(true, [], classname + postfix)
+    filter = MinimumVtableFilter.new(nil, refSet, fillVtable)
+
+    block.filterByReferenceSet(filter)
+    assert_equal(expected, block.instance_variable_get(:@undefinedFunctionSet).size)
+  end
+
+  data(
     'empty' => [[], true],
     'exact matching name' => [["NameC"], false],
     'partial matching name' => [["Name"], false],
@@ -2697,7 +2813,7 @@ class TestClassBlock < Test::Unit::TestCase
     nsBlock.connect(block)
 
     assert_true(block.canMock?)
-    block.filterByReferenceSet(SymbolFilter.new(nil, nil, [], arg))
+    block.filterByReferenceSet(SymbolFilter.new(nil, nil, [], arg, false))
     assert_equal(expected, block.canMock?)
   end
 
@@ -4279,6 +4395,23 @@ end
 
 class TestUndefinedReference < Test::Unit::TestCase
   data(
+    'toplevel' => ["undefined reference to vtable for `TopLevelClass'", "TopLevelClass"],
+    'in a namespace' => ["undefined reference to vtable for `A::TopLevelClass'", "::A::TopLevelClass"],
+    'in namespaces' => ["undefined reference to vtable for `A::B::TopLevelClass'", "::A::B::TopLevelClass"])
+  def test_parseVtable(data)
+    line, expectedFullname = data
+
+    ref = UndefinedReference.new(line)
+    assert_true(ref.isVtable)
+    assert_not_nil(ref.fullname)
+    assert_equal(expectedFullname, ref.fullname)
+    assert_equal(expectedFullname, ref.classFullname)
+    assert_nil(ref.memberName)
+    assert_nil(ref.argTypeStr)
+    assert_nil(ref.postFunc)
+  end
+
+  data(
     'toplevel' => ["undefined reference to `TopLevelClass::GetValue()'",
                    "TopLevelClass::GetValue", "TopLevelClass", "GetValue", "", ""],
     'destructor' => ["undefined reference to `TopLevelClass::~TopLevelClass()'",
@@ -4292,11 +4425,12 @@ class TestUndefinedReference < Test::Unit::TestCase
     'full sentence' => ["obj/file.o:file2.cpp:(.rdataSym+0x40): undefined reference to `funcMissing(long) const'",
                         "funcMissing", "", "funcMissing", "long", "const"]
   )
-  def test_parseUndefinedReference(data)
+  def test_parseSymbol(data)
     line, expectedFullname, expectedClassFullname,
     expectedMemberName, expectedArgTypeStr, expectedPostFunc = data
 
     ref = UndefinedReference.new(line)
+    assert_false(ref.isVtable)
     assert_not_nil(ref.fullname)
     assert_equal(expectedFullname, ref.fullname)
     assert_equal(expectedClassFullname, ref.classFullname)
@@ -4304,9 +4438,61 @@ class TestUndefinedReference < Test::Unit::TestCase
     assert_equal(expectedArgTypeStr, ref.argTypeStr)
     assert_equal(expectedPostFunc, ref.postFunc)
   end
+
+  data(
+    'empty' => ["", false, "", "", ""],
+    'variable' => ["var", false, "", "var", "var"],
+    'class' => ["ClassName", true, "ClassName", "ClassName", ""],
+    'variable in a namespace' => ["name::var", false, "name", "name::var", "var"],
+    'class in a namespace' => ["name::ClassName", true, "::name::ClassName", "::name::ClassName", ""],
+    'variable in two namespaces' => ["A::B::var", false, "::A::B", "::A::B::var", "var"],
+    'class in two namespaces' => ["A::B::ClassName", true, "::A::B::ClassName", "::A::B::ClassName", ""],
+    'variable in two namespaces 2' => ["::A::B::var", false, "::A::B", "::A::B::var", "var"],
+    'class in two namespaces 2' => ["::A::B::ClassName", true, "::A::B::ClassName", "::A::B::ClassName", ""],
+    'variable in three namespaces' => ["A::B::C::var", false, "::A::B::C", "::A::B::C::var", "var"],
+    'class in three namespaces' => ["A::B::C::ClassName", true, "::A::B::C::ClassName", "::A::B::C::ClassName", ""])
+  def test_parseNameSet(data)
+    symbol, isClass, expectedClassFullname, expectedFullname, expectedMemberName = data
+    ref = UndefinedReference.new("")
+    classFullname, fullname, memberName = ref.parseNameSet(symbol, isClass)
+    assert_equal(expectedClassFullname, classFullname)
+    assert_equal(expectedFullname, fullname)
+    assert_equal(expectedMemberName, memberName)
+  end
 end
 
 class TestUndefinedReferenceSet < Test::Unit::TestCase
+  def test_readAllLinesForVtable(data)
+    referenceSet = UndefinedReferenceSet.new(nil)
+
+    refClass = Struct.new(:isVtable, :classFullname)
+    nameSet = ["classA", "B::classA", "C::B::ClassA", "B::classA", nil]
+    lineSet = nameSet.compact.map { |name| "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} vtable for #{name}\n" }
+
+    file = Object.new
+    file.define_singleton_method(:gets) { lineSet.shift }
+    vtableSet, refSet, refFullnameSet = referenceSet.readAllLines(file)
+
+    expectedSet = ["classA", "::B::classA", "::C::B::ClassA"]
+    assert_true(expectedSet.all? { |name| vtableSet.key?(name) })
+    referenceSet.instance_variable_set(:@vtableSet, vtableSet)
+    assert_true(expectedSet.all? { |name| needVtable?(name) })
+  end
+
+  def test_readAllLinesForReferences
+    referenceSet = UndefinedReferenceSet.new(nil)
+
+    refClass = Struct.new(:isVtable, :classFullname)
+    nameSet = ["NameA", "B::NameA", "C::B::Name", "B::NameA", nil]
+    lineSet = nameSet.compact.map { |name| "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} `#{name}'\n" }
+
+    file = Object.new
+    file.define_singleton_method(:gets) { lineSet.shift }
+    vtableSet, refSet, refFullnameSet = referenceSet.readAllLines(file)
+    assert_true(vtableSet.empty?)
+    assert_true(refSet.size == nameSet.compact.size)
+  end
+
   def test_getReferenceSetByFullname
     referenceSet = UndefinedReferenceSet.new(nil)
 
@@ -4371,10 +4557,11 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     classNameFilterOutSet = ["g"]
     sourceFilenameSet = ["h"]
     defaultNoForwardingToMock = "i"
+    fillVtable = "j"
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
-                                           sourceFilenameSet, defaultNoForwardingToMock)
+                                           sourceFilenameSet, defaultNoForwardingToMock, fillVtable)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -4384,6 +4571,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(classNameFilterOutSet, parameterSet.classNameFilterOutSet)
     assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
     assert_equal(defaultNoForwardingToMock, parameterSet.defaultNoForwardingToMock)
+    assert_equal(fillVtable, parameterSet.fillVtable)
     assert_false(parameterSet.noMatchingTypesInCsource)
   end
 
@@ -4397,7 +4585,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     'mixed' => [["a.cpp", "b.c"], false])
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
-    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil)
+    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -4425,7 +4613,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false)
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false)
   end
 end
 
@@ -5084,6 +5272,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET,
                  target.instance_variable_get(:@systemHeaderSet))
     assert_false(target.instance_variable_get(:@checkInternalSystemPath))
+    assert_false(target.instance_variable_get(:@fillVtable))
   end
 
   def test_collectInternalIsystemFail
@@ -5305,6 +5494,13 @@ end
     args.concat(getOptionSet())
     target = MockGenLauncher.new(args)
     assert_false(target.instance_variable_get(:@checkInternalSystemPath))
+  end
+
+  def test_checkFillVtable
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_FILL_VTABLE]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@fillVtable))
   end
 
   data(
