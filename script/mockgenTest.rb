@@ -120,6 +120,10 @@ class TestMockRefMonoSetClass
     @refSet = [ref]
   end
 
+  def invalidate
+    @valid = false
+  end
+
   def getReferenceSetByFullname(fullname)
     @refSet
   end
@@ -937,42 +941,57 @@ class TestArgVariableSet < Test::Unit::TestCase
   end
 
   data(
-    'ConstructorNoArgs' => ["Func()", "", "", "Func",
+    'ConstructorNoArgs' => ["Func()", "", "", "Func", false,
                             "", "", "", ""],
-    'ConstructorOneArg' => ["Func(int a)", "", "", "Func",
+    'ConstructorOneArg' => ["Func(int a)", "", "", "Func", false,
                             "int a", "int a", "int", "a"],
-    'ConstructorTwoArgs' => ["Func (int a,long b)", "", "", "Func",
+    'ConstructorTwoArgs' => ["Func (int a,long b)", "", "", "Func", false,
                              "int a,long b", "int a,long b", "int,long", "a,b"],
-    'FuncTwoArgs' => ["int Func (int a,long b)", "int", "", "Func",
+    'FuncTwoArgs' => ["int Func (int a,long b)", "int", "", "Func", false,
                       "int a,long b", "int a,long b", "int,long", "a,b"],
-    'FuncTwoTypes' => ["void Func (int,long)", "void", "", "Func",
+    'FuncTwoTypes' => ["void Func (int,long)", "void", "", "Func", false,
                        "int dummy1,long dummy2", "int dummy1,long dummy2", "int,long", "dummy1,dummy2"],
-    'FuncTwoArgsPostfix' => ["void* Func (int a) const override", "void *", "const override",
-                             "Func", "int a", "int a", "int", "a"],
-    'FuncPtr1' => ["int Func (int(f)(int)) const", "int", "const", "Func",
+    'FuncTwoArgsPostfix' => ["void* Func (int a) const override", "void *", "const override", "Func",
+                             false, "int a", "int a", "int", "a"],
+    'FuncPtr1' => ["int Func (int(f)(int)) const", "int", "const", "Func", false,
                    "int (f) (int)", "int (f) (int)", "int () (int)", "f"],
-    'FuncPtr2' => ["int Func(long a,int(*f)(int))const", "int", "const", "Func",
+    'FuncPtr2' => ["int Func(long a,int(*f)(int))const", "int", "const", "Func", false,
                    "long a,int (*f) (int)", "long a,int (*f) (int)", "long,int (*) (int)", "a,f"],
-    'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const", "Func",
+    'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const", "Func", false,
                    "int (*f) (int),void (*g) (void*)", "int (*f) (int),void (*g) (void*)", "int (*) (int),void (*) (void*)", "f,g"],
-    'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func",
+    'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func", false,
                       "int a=0,long b=(long)0", "int a,long b", "int,long", "a,b"],
-    'DefaultNullArgs1' => ["int Func (void* p=<null expr>)", "int", "", "Func",
+    'DefaultNullArgs1' => ["int Func (void* p=<null expr>)", "int", "", "Func", false,
                            "void* p=NULL", "void* p", "void *", "p"],
-    'DefaultNullArgs2' => ["int Func(long a,int(*f)(int)=aFunc)const", "int", "const", "Func",
+    'DefaultNullArgs2' => ["int Func(long a,int(*f)(int)=aFunc)const", "int", "const", "Func", false,
                            "long a,int (*f) (int) =aFunc", "long a,int (*f) (int)", "long,int (*) (int)", "a,f"],
+    'Pure virtual' => ["int Func (int(f)(int)) const = 0", "int", "const", "Func", true,
+                   "int (f) (int)", "int (f) (int)", "int () (int)", "f"]
   )
   def test_splitByArgSet(data)
-    line, expectedPre, expectedPost, expectedFuncname, expectedSet, expectedSetWithoutDefault, expectedType, expectedName = data
+    line, expectedPre, expectedPost, expectedFuncname, expectedPureVirtual, expectedSet, expectedSetWithoutDefault, expectedType, expectedName = data
 
     argVariableSet = ArgVariableSet.new(line)
     assert_equal(expectedPre, argVariableSet.preFuncSet)
     assert_equal(expectedPost, argVariableSet.postFuncSet)
     assert_equal(expectedFuncname, argVariableSet.funcName)
+    assert_equal(expectedPureVirtual, argVariableSet.pureVirtual)
     assert_equal(expectedSet, argVariableSet.argSetStr)
     assert_equal(expectedSetWithoutDefault, argVariableSet.argSetWithoutDefault)
     assert_equal(expectedType, argVariableSet.argTypeStr)
     assert_equal(expectedName, argVariableSet.argNameStr)
+  end
+
+  data(
+    'no space' => ["int Func (void)=0", ""],
+    'one space' => ["int Func (void) =0", ""],
+    'two spaces' => ["int Func (void) = 0", ""],
+    'const' => ["int Func (void)const=0", "const"])
+  def test_pureVirtual(data)
+    line, expectedPost = data
+    argVariableSet = ArgVariableSet.new(line)
+    assert_true(argVariableSet.pureVirtual)
+    assert_equal(expectedPost, argVariableSet.postFuncSet)
   end
 
   data(
@@ -1654,7 +1673,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
      "Func_()",
      false, false, "void", true, "", "Func_", "Func_", "", "", false],
     'one word type and function post modifier' =>
-    ["int Func2(long a) const override {",
+    ["int Func2(long a) const override",
      "int Func2(long a) const override",
      "Func2(long)const",
      true, false, "int", false, "a", "Func2", "Func2_", "long a", "const override", false],
@@ -1681,6 +1700,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       block = MemberFunctionBlock.new(line + suffix)
       assert_true(block.valid)
       assert_true(block.canTraverse?)
+      assert_equal(suffix.include?("{"), block.instance_variable_get(:@definition))
       assert_equal(constMemfunc, block.instance_variable_get(:@constMemfunc))
       assert_equal(staticMemfunc, block.instance_variable_get(:@staticMemfunc))
       assert_equal(returnType, block.instance_variable_get(:@returnType))
@@ -1695,6 +1715,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_false(block.instance_variable_get(:@defaultNoForwardingToMock))
 
       assert_equal(virtual, block.virtual?)
+      assert_equal(!suffix.include?("{") && virtual, block.virtualDeclaration?)
       assert_equal([], block.instance_variable_get(:@superMemberSet))
       assert_nil(block.instance_variable_get(:@templateParam))
     end
@@ -1742,11 +1763,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
         rightBlock = MemberFunctionBlock.new("")
         leftBlock.instance_variable_set(:@argSignature, "Func(#{argSet[left]})")
         rightBlock.instance_variable_set(:@argSignature, "Func(#{argSet[right]})")
-        if (left == right)
-          assert_true(leftBlock.override?(rightBlock))
-        else
-          assert_false(leftBlock.override?(rightBlock))
-        end
+        assert_equal((left == right), leftBlock.override?(rightBlock))
+        assert_equal((left == right), rightBlock.override?(leftBlock))
       end
     end
 
@@ -1762,27 +1780,43 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     end
   end
 
+  def test_overridePureVirtual?
+    line = "virtual int Func(void) const"
+    leftBlock = MemberFunctionBlock.new(line + ";")
+    rightBlock = MemberFunctionBlock.new(line + " =0;")
+    assert_true(leftBlock.valid)
+    assert_true(rightBlock.valid)
+    assert_true(leftBlock.override?(rightBlock))
+    assert_true(rightBlock.override?(leftBlock))
+  end
+
   def test_addSuperMember
-    line = "void Func();"
-    baseBlock = MemberFunctionBlock.new("virtual #{line}")
-    middleBlock = MemberFunctionBlock.new("#{line}")
-    subBlock = MemberFunctionBlock.new("#{line}")
+    ["", "{", ";"].each do |suffix|
+      line = "void Func()" + suffix
+      baseBlock = MemberFunctionBlock.new("virtual #{line}")
+      middleBlock = MemberFunctionBlock.new("#{line}")
+      subBlock = MemberFunctionBlock.new("#{line}")
 
-    assert_true(baseBlock.virtual)
-    assert_false(middleBlock.virtual)
-    assert_false(subBlock.virtual)
+      assert_true(baseBlock.instance_variable_get(:@virtual))
+      assert_false(middleBlock.instance_variable_get(:@virtual))
+      assert_false(subBlock.instance_variable_get(:@virtual))
 
-    subBlock.addSuperMember(middleBlock)
-    middleBlock.addSuperMember(baseBlock)
-    assert_true([baseBlock, middleBlock, subBlock].all?(&:virtual?))
+      subBlock.addSuperMember(middleBlock)
+      middleBlock.addSuperMember(baseBlock)
 
-    assert_equal(0, baseBlock.instance_variable_get(:@superMemberSet).size)
-    assert_equal(1, middleBlock.instance_variable_get(:@superMemberSet).size)
-    assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+      [baseBlock, middleBlock, subBlock].each do |block|
+        assert_true(block.virtual?)
+        assert_equal(!suffix.include?("{"), block.virtualDeclaration?)
+      end
 
-    # Ignore an already bound block
-    subBlock.addSuperMember(middleBlock)
-    assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+      assert_equal(0, baseBlock.instance_variable_get(:@superMemberSet).size)
+      assert_equal(1, middleBlock.instance_variable_get(:@superMemberSet).size)
+      assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+
+      # Ignore an already bound block
+      subBlock.addSuperMember(middleBlock)
+      assert_equal(1, subBlock.instance_variable_get(:@superMemberSet).size)
+    end
   end
 
   data('off instance' => [false, false, "", " {false}"],
@@ -2005,19 +2039,6 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     line = data
     block = MemberFunctionBlock.new("")
     assert_false(block.parse(line))
-  end
-
-  data(
-    'empty' => "",
-    'const' => "const",
-    'override' => "const override")
-  def test_isPureVirtual?(data)
-    phrase = data
-    block = MemberFunctionBlock.new("")
-    assert_false(block.isPureVirtual?(phrase))
-    ["=0", "= 0", " = 0"].each do |suffix|
-      assert_true(block.isPureVirtual?("#{phrase}#{suffix}"))
-    end
   end
 
   data(
@@ -2755,7 +2776,7 @@ class TestClassBlock < Test::Unit::TestCase
     ref = TestMockRefClass.new(classname, funcname, funcname, "int", "const")
     refSet = TestMockRefSetClass.new(true, [ref])
 
-    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
+    block.filterByReferenceSetWithSuper(MinimumSymbolFilter.new(nil, refSet))
     assert_equal([childBlockU], block.instance_variable_get(:@undefinedFunctionSet))
     assert_true(block.canTraverse?)
     assert_true(block.needStub?)
@@ -2764,8 +2785,9 @@ class TestClassBlock < Test::Unit::TestCase
   data(
     'do nothing' => [false, false, "", 0],
     'undefined without vtable' => [true, false, "", 6],
-    'undefined with vtable' => [true, true, "", 6],
-    'vtable' => [false, true, "", 4],
+    'none of virtual functions is defined with vtable' => [false, true, "", 4],
+    'a non virtual function is defined with vtable 1' => [[true, false, false, false, false, false], true, "", 5],
+    'all non virtual functions are defined with vtable' => [true, true, "", 6],
     'other class' => [false, true, "A", 0])
   def test_filterByVtable(data)
     undefined, fillVtable, postfix, expected = data
@@ -2782,14 +2804,16 @@ class TestClassBlock < Test::Unit::TestCase
 
     allSet.each do |line|
       child = block.parseChildren(line)
-      child.define_singleton_method(:filterByReferenceSet) { |filter| undefined }
+      child.define_singleton_method(:filterByReferenceSet) do |filter|
+        undefined.kind_of?(Array) ? undefined.shift : undefined
+      end
       block.connect(child)
     end
 
     refSet = TestMockRefVatbleSetClass.new(true, [], classname + postfix)
     filter = MinimumVtableFilter.new(nil, refSet, fillVtable)
 
-    block.filterByReferenceSet(filter)
+    block.filterByReferenceSetWithSuper(filter)
     assert_equal(expected, block.instance_variable_get(:@undefinedFunctionSet).size)
   end
 
@@ -2817,11 +2841,21 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(expected, block.canMock?)
   end
 
+  def test_canFilterByReferenceSet
+    block = ClassBlock.new("class NameC")
+    assert_false(block.canFilterByReferenceSet(MinimumSymbolFilter.new(nil, nil)))
+
+    ref = TestMockRefMonoSetClass.new(nil)
+    assert_true(block.canFilterByReferenceSet(MinimumSymbolFilter.new(nil, ref)))
+    ref.invalidate
+    assert_false(block.canFilterByReferenceSet(MinimumSymbolFilter.new(nil, ref)))
+  end
+
   data(
     'destructor' => ["~NameC", "~NameC();"],
     'constructor' => ["NameC", "NameC();"],
-    'menber function' => ["Func", "int Func();"],
-    'menber variable' => ["a_", "static int a_;"])
+    'member function' => ["Func", "int Func();"],
+    'member variable' => ["a_", "static int a_;"])
   def test_needStub(data)
     memberName, line = data
     classname = "NameC"
@@ -2843,7 +2877,9 @@ class TestClassBlock < Test::Unit::TestCase
 
     ref = TestMockRefClass.new(classname, "#{classname}::#{memberName}", memberName, "", "")
 
-    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(ref)))
+    filter = MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(ref))
+    block.filterByReferenceSet(filter)
+    block.filterByReferenceSetWithSuper(filter)
     assert_true(block.needStub?)
     assert_true(block.canMock?)
   end
@@ -3402,7 +3438,10 @@ class TestClassBlock < Test::Unit::TestCase
     refDestructor = TestMockRefClass.new(testedName, "#{testedName}::~#{testedName}", "~#{testedName}", "", postFunc)
     refVar = TestMockRefClass.new(testedName, "#{testedName}::varStub", "varStub", "", "")
     refSet = TestMockRefSetClass.new(true, [refFunc, refDestructor, refVar])
-    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
+
+    filter = MinimumSymbolFilter.new(nil, refSet)
+    block.filterByReferenceSet(filter)
+    block.filterByReferenceSetWithSuper(filter)
 
     actualDecl, actualHpp, actualCpp = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_equal(expectedStub, block.formatStub)
@@ -3447,7 +3486,10 @@ class TestClassBlock < Test::Unit::TestCase
     assert_true(block.canTraverse?)
 
     # Do not filter the base class
-    blockBase.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
+    filter = MinimumSymbolFilter.new(nil, refSet)
+    blockBase.filterByReferenceSet(filter)
+    blockBase.filterByReferenceSetWithSuper(filter)
+
     actualDecl, actualHpp, actualCpp = blockBase.formatMockClass(mockName, decoratorName, forwarderName, baseName)
     assert_equal(2, actualDecl.scan("FuncStub").size)
     assert_equal(1, actualDecl.scan("FuncOther").size)
@@ -3467,7 +3509,10 @@ class TestClassBlock < Test::Unit::TestCase
     block, blockBase = getClassBlockWithDefault(testedName, baseName)
     refFunc = TestMockRefClass.new(testedName, "FuncStub", "FuncStub", "NameSpace::Enum", "")
     refSet = TestMockRefSetClass.new(true, [refFunc])
-    block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet))
+
+    filter = MinimumSymbolFilter.new(nil, refSet)
+    block.filterByReferenceSet(filter)
+    block.filterByReferenceSetWithSuper(filter)
 
     actualDecl, actualDef = block.formatMockClass(mockName, decoratorName, forwarderName, testedName)
     assert_true(actualDecl.include?("MOCK_METHOD1(FuncStub,void(NameSpace::Enum e));\n"))
@@ -4164,6 +4209,9 @@ class TestClassMock < Mockgen::BaseBlock
   def setDefaultNoForwardingToMock(defaultNoForwardingToMock)
     @defaultNoForwardingToMock = defaultNoForwardingToMock
   end
+
+  def filterByReferenceSetWithSuper(filter)
+  end
 end
 
 class TestClassInstance < Test::Unit::TestCase
@@ -4395,20 +4443,23 @@ end
 
 class TestUndefinedReference < Test::Unit::TestCase
   data(
-    'toplevel' => ["undefined reference to vtable for `TopLevelClass'", "TopLevelClass"],
-    'in a namespace' => ["undefined reference to vtable for `A::TopLevelClass'", "::A::TopLevelClass"],
-    'in namespaces' => ["undefined reference to vtable for `A::B::TopLevelClass'", "::A::B::TopLevelClass"])
+    'toplevel' => ["undefined reference to VTABLE for `TopLevelClass'", "TopLevelClass"],
+    'in a namespace' => ["undefined reference to VTABLE for `A::TopLevelClass'", "::A::TopLevelClass"],
+    'in namespaces' => ["undefined reference to VTABLE for `A::B::TopLevelClass'", "::A::B::TopLevelClass"])
   def test_parseVtable(data)
-    line, expectedFullname = data
+    ["vtable", "typeinfo"].each do |keyword|
+      rawLine, expectedFullname = data
+      line = rawLine.sub(/VTABLE/, keyword)
+      ref = UndefinedReference.new(line)
 
-    ref = UndefinedReference.new(line)
-    assert_true(ref.isVtable)
-    assert_not_nil(ref.fullname)
-    assert_equal(expectedFullname, ref.fullname)
-    assert_equal(expectedFullname, ref.classFullname)
-    assert_nil(ref.memberName)
-    assert_nil(ref.argTypeStr)
-    assert_nil(ref.postFunc)
+      assert_true(ref.isVtable)
+      assert_not_nil(ref.fullname)
+      assert_equal(expectedFullname, ref.fullname)
+      assert_equal(expectedFullname, ref.classFullname)
+      assert_nil(ref.memberName)
+      assert_nil(ref.argTypeStr)
+      assert_nil(ref.postFunc)
+    end
   end
 
   data(
@@ -4467,7 +4518,9 @@ class TestUndefinedReferenceSet < Test::Unit::TestCase
 
     refClass = Struct.new(:isVtable, :classFullname)
     nameSet = ["classA", "B::classA", "C::B::ClassA", "B::classA", nil]
-    lineSet = nameSet.compact.map { |name| "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} vtable for #{name}\n" }
+    lineSet = nameSet.compact.map do |name|
+      "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} vtable for #{name}\n"
+    end << "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} typeinfo for #{nameSet[-1]}\n"
 
     file = Object.new
     file.define_singleton_method(:gets) { lineSet.shift }

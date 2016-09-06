@@ -61,7 +61,7 @@
 # - Google Test/Mock directories
 #
 # Cygwin64 + bash:
-#   clang++ -cc1 -ast-print -fblocks -fgnu-keywords -x c++ -std=gnu++11
+#   clang++ -cc1 -ast-print -fgnu-keywords -x c++ -std=gnu++11
 #     -cxx-isystem /usr/include
 #     -cxx-isystem /usr/lib/gcc/x86_64-pc-cygwin/4.9.3/include/c++/x86_64-pc-cygwin
 #     -cxx-isystem /usr/lib/gcc/x86_64-pc-cygwin/4.9.3/include/c++
@@ -73,7 +73,7 @@
 #     input.hpp > output.hpp
 #
 # MinGW64 + cmd: directories must be double-quoted
-#   clang++ -cc1 -ast-print -fblocks -fgnu-keywords -x c++ -std=gnu++11
+#   clang++ -cc1 -ast-print -fgnu-keywords -x c++ -std=gnu++11
 #     -cxx-isystem "C:\Program Files\mingw-w64\x86_64-4.9.2-posix-seh-rt_v3-rev1\
 #                   mingw64\x86_64-w64-mingw32\include\c++\x86_64-w64-mingw32"
 #     -cxx-isystem "C:\Program Files\mingw-w64\x86_64-4.9.2-posix-seh-rt_v3-rev1\

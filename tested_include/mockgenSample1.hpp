@@ -41,6 +41,7 @@ namespace Sample1 {
             IObject(void) = default;
             virtual ~IObject(void) = default;
             virtual void Func(void) = 0;
+            virtual void PureVirtualWithDefinition(void) = 0;
         };
 
         // Search no std::* member functions
@@ -53,6 +54,7 @@ namespace Sample1 {
             virtual int Func(int a, const void** p);
             inline void FuncInline(void) {}
             __attribute__((unused)) static int StaticFunc(void);  // Attributes are discarded in mocks
+            virtual void PureVirtualWithDefinition(void) override { IObject::PureVirtualWithDefinition(); }
         };
 
         // Search no private base classes
@@ -329,13 +331,25 @@ extern int switchedFunc10(void);
 extern int switchedFunc11(void);
 extern int switchedFunc12(void);
 
-class ClassNotDefined {
+class BaseClassNotDefined {
+protected:
+    BaseClassNotDefined(void) = default;
+    virtual ~BaseClassNotDefined(void) = default;
+    virtual void FuncBase(void) {}
+    virtual int FuncMissingA(void);
+    virtual int FuncMissingB(int arg) = 0;
+};
+
+class DerivedClassNotDefined : public BaseClassNotDefined {
 public:
     // need definitions of constructors in LLVM to make a vtable with
     // the -vtable option
-    ClassNotDefined(void) = default;
-    virtual ~ClassNotDefined(void);
-    virtual int FuncMissing(int arg);
+    DerivedClassNotDefined(void) = default;
+    ~DerivedClassNotDefined(void) = default;
+    virtual void FuncDerived(void) {}
+    int FuncMissingA(void) override;  // implicit virtual
+    virtual int FuncMissingB(int arg) override;
+    virtual int FuncMissingB(int argA, long argB);
 };
 
 namespace NamespaceLevel1 {
@@ -345,6 +359,7 @@ namespace NamespaceLevel1 {
         virtual ~L1ClassNotDefined(void) = default;
         virtual int FuncMissing(int arg);
     };
+
     namespace Level2 {
         class L2ClassNotDefined {
         public:

@@ -12,6 +12,9 @@ TopLevelClass aTopLevelObject;
 
 using namespace Sample1::Types;
 
+// pure virtual functions can have their implementations
+void IObject::PureVirtualWithDefinition(void) {}
+
 BaseClass::BaseClass(void) {}
 BaseClass::~BaseClass(void) {}
 void BaseClass::Func(void) {}

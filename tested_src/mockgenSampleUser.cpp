@@ -59,9 +59,12 @@ int FreeFunctionCalleeSample(void) {
     return 0;
 }
 
-// These instantiations require vtables of their types but make
-// no invocations to their virtual functions.
-ClassNotDefined g_topLevelClassNotDefined;
+// These instantiations require vtables of their types
+// but make no invocations to their virtual functions.
+
+// a vtable of BaseClassNotDefined is required here implicitly
+DerivedClassNotDefined g_topLevelClassNotDefined;
+
 namespace NamespaceLevel1 {
     L1ClassNotDefined g_l1ClassNotDefined;
     namespace Level2 {

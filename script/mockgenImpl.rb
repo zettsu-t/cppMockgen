@@ -616,7 +616,7 @@ module Mockgen
 
   # Extract argument variables from a typed argument list
   class ArgVariableSet
-    attr_reader :preFuncSet, :postFuncSet, :funcName
+    attr_reader :preFuncSet, :postFuncSet, :funcName, :pureVirtual
     attr_reader :argSetStr, :argSetWithoutDefault, :argTypeStr, :argNameStr
 
     def initialize(line)
@@ -624,7 +624,7 @@ module Mockgen
       return unless line
 
       replacedLine = replaceNullExpression(line)
-      argSetStr, @preFuncSet, @postFuncSet, @funcName = splitByArgSet(replacedLine)
+      argSetStr, @preFuncSet, @postFuncSet, @funcName, @pureVirtual = splitByArgSet(replacedLine)
       @argSetStr, @argSetWithoutDefault, @argTypeStr, @argNameStr = extractArgSet(argSetStr) if argSetStr
     end
 
@@ -641,6 +641,7 @@ module Mockgen
       preFuncSet = []
       postFuncSet = []
       funcName = ""
+      pureVirtual = false
 
       phraseSet = Mockgen::Common::StringOfParenthesis.new(line).parse
       phraseSet.reverse.each do |phrase, inParenthesis|
@@ -664,7 +665,13 @@ module Mockgen
       preFuncWordSet = preFuncSet.reverse.join(" ").split(/([\*&\s]+)/)
       funcName = preFuncWordSet[-1].strip unless preFuncWordSet.empty?
       preFuncStr = (preFuncWordSet.size > 1) ? preFuncWordSet[0..-2].map(&:strip).join(" ").gsub(/\s+/, " ").strip : ""
-      return argSetStr, preFuncStr, postFuncSet.reverse.join(" "), funcName
+
+      postFuncPhrase = postFuncSet.reverse.join(" ")
+      md = postFuncPhrase.match(/([^=]*)=\s*0(.*)/)
+      pureVirtual = !md.nil?
+      postFuncStr = (md ? (md[1] + md[2]) : postFuncPhrase).rstrip
+
+      return argSetStr, preFuncStr, postFuncStr, funcName, pureVirtual
     end
 
     def extractArgSet(line)
@@ -1208,6 +1215,7 @@ module Mockgen
 
       @preFunc = argVariableSet.preFuncSet
       postFunc = argVariableSet.postFuncSet
+      pureVirtual = argVariableSet.pureVirtual
       funcName = argVariableSet.funcName
       @argTypeStr = argVariableSet.argTypeStr
       @argSet  = argVariableSet.argNameStr
@@ -1218,8 +1226,6 @@ module Mockgen
 
       # Exclude destructors
       return false if funcName.include?("~")
-      # Skip pure virtual functions
-      return false if isPureVirtual?(postFunc)
       # Operators are not supported
       return false if line.match(/\boperator\b/)
 
@@ -1233,12 +1239,9 @@ module Mockgen
       @funcName = funcName
       @switchName = switchName
       @postFunc = postFunc
+
       # va_arg is not supported
       @valid = true unless @argSignature.include?("...")
-    end
-
-    def isPureVirtual?(phrase)
-      phrase.gsub(/\s+/,"").include?("=0")
     end
 
     def isConstMemberFunction?(phrase)
@@ -1313,11 +1316,10 @@ module Mockgen
   # Class member function
   # Templates are not supported yet
   class MemberFunctionBlock < FunctionBlock
-    attr_reader :virtual
-
     def initialize(line)
       super
       @virtual = (@preFunc && @preFunc.match(/\bvirtual\b/)) ? true : false
+      @definition = line.match(/\{\s*$/) ? true : false
       @superMemberSet = []
       @templateParam = nil
     end
@@ -1335,6 +1337,10 @@ module Mockgen
 
     def virtual?
       @virtual || @superMemberSet.any?(&:virtual?)
+    end
+
+    def virtualDeclaration?
+      virtual? && !@definition
     end
 
     # Let definedStaticNameSet a Hash to make switches,
@@ -1623,7 +1629,6 @@ module Mockgen
       @typename = "class"  # class or struct
       @pub = false         # Now parsing public members
       @private = true      # Now parsing private members
-      @filtered = false    # Filter undefined functions
       @destructor = nil    # None or one instance
       @alreadyDefined = false
       @filteredOut = false
@@ -1811,16 +1816,14 @@ module Mockgen
 
     def filterByReferenceSet(filter)
       constructorBlockSet = []
-      functionBlockSet = []
       variableBlockSet = []
-      @filtered = false
 
       fullname = getFullname()
       @alreadyDefined = true if !filter.definedReferenceSet.nil? &&
                                 filter.definedReferenceSet.classDefined?(
                                   fullname, filter.definedReferenceSet.relativeNamespaceOnly)
       @filteredOut = filter.classNameFilterOutSet.any? { |pattern| fullname.match(/#{pattern}/) }
-      return if filter.undefinedReferenceSet.nil? || !filter.undefinedReferenceSet.valid
+      return unless canFilterByReferenceSet(filter)
 
       # Create a default destructor if it does not exist
       @destructor ||= DestructorBlock.new(nil, @uniqueName)
@@ -1830,26 +1833,38 @@ module Mockgen
         constructorBlockSet << block if block.filterByReferenceSet(filter)
       end
 
-      @allMemberFunctionSet.each do |block|
-        functionBlockSet << block if block.filterByReferenceSet(filter)
-      end
-
-      # collect undefined functions to create vtables
-      if filter.fillVtable && functionBlockSet.empty? && filter.undefinedReferenceSet.needVtable?(fullname)
-        @allMemberFunctionSet.each do |block|
-          functionBlockSet << block if block.virtual
-        end
-      end
-
       # Assume instance variables do not appear in referenceSet
       @allMemberVariableSet.each do |block|
         variableBlockSet << block if block.filterByReferenceSet(filter)
       end
 
       @undefinedConstructorSet = constructorBlockSet.uniq
-      @undefinedFunctionSet = functionBlockSet.uniq
       @undefinedVariableSet = variableBlockSet.uniq
-      @filtered = true
+    end
+
+    def filterByReferenceSetWithSuper(filter)
+      return unless canFilterByReferenceSet(filter)
+      functionBlockSet = []
+      fullname = getFullname()
+
+      @allMemberFunctionSet.each do |block|
+        functionBlockSet << block if block.filterByReferenceSet(filter)
+      end
+
+      # collect all undefined virtual functions to create vtables
+      # if none of the virtual functions is defined (implemented).
+      nonVirtualOnly = functionBlockSet.all? { |block| !block.virtual? }
+      if filter.fillVtable && nonVirtualOnly && filter.undefinedReferenceSet.needVtable?(fullname)
+        @allMemberFunctionSet.each do |block|
+          functionBlockSet << block if block.virtualDeclaration?
+        end
+      end
+
+      @undefinedFunctionSet = functionBlockSet.uniq
+    end
+
+    def canFilterByReferenceSet(filter)
+      !filter.undefinedReferenceSet.nil? && filter.undefinedReferenceSet.valid
     end
 
     ## Public methods added on the base class
@@ -2652,9 +2667,9 @@ module Mockgen
       classFullname = nil
       fullname = nil
 
-      if md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+vtable\s+for\s+(.+)/)
+      if md = line.match(/#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE}\s+(vtable|typeinfo)\s+for\s+(.+)/)
         isVtable = true
-        classFullname, fullname, memberName = parseNameSet(md[1], isVtable)
+        classFullname, fullname, memberName = parseNameSet(md[2], isVtable)
       end
 
       return isVtable, classFullname, fullname
@@ -3069,6 +3084,7 @@ module Mockgen
       # classSet : class name => block
       classSet = collectClasses(@block.children, filter)
       connectClasses(@block.children, classSet)
+      filterVirtualFunctions(@block.children, filter)
 
       varSet = collectVariables(@block.children)
       @classInstanceMap = makeTypeVarAliases(varSet, classSet)
@@ -3079,7 +3095,6 @@ module Mockgen
     def collectClasses(rootBlockSet, filter)
       classSet = {}  # class name => block
       lambdaToBlock = lambda do |block|
-        block.markMemberFunctionSetVirtual
         block.setDefaultNoForwardingToMock(@defaultNoForwardingToMock)
         block.filterByReferenceSet(filter)
         fullname = block.getFullname
@@ -3093,6 +3108,14 @@ module Mockgen
     def connectClasses(rootBlockSet, classSet)
       lambdaToBlock = lambda { |block| block.setBaseClass(classSet) }
       doForAllBlocks(rootBlockSet, lambdaToBlock, :isClass?)
+    end
+
+    def filterVirtualFunctions(rootBlockSet, filter)
+      # Check overriding after connecting super-sub classes
+      lambdaToMark = lambda { |block| block.markMemberFunctionSetVirtual }
+      doForAllBlocks(@block.children, lambdaToMark, :isClass?)
+      lambdaToFilter = lambda { |block| block.filterByReferenceSetWithSuper(filter) }
+      doForAllBlocks(@block.children, lambdaToFilter, :isClass?)
     end
 
     def collectVariables(rootBlockSet)

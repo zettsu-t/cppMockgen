@@ -86,6 +86,10 @@ CppMockGen does not generate codes for system headers, standard C/C++
 libraries, Boost C++ libraries, and compiler internal classes and
 functions.
 
+CppMockGen also creates mocks and stubs for pure virtual functions
+because pure virtual functions (which are declared with =0) must be
+overridden but are not prohibited having their implementation.
+
 All codes quoted below are in the subdirectories of CppMockGen.
 
 ### Mock
@@ -565,8 +569,9 @@ destructors of a class if it meets all these conditions.
 
 1. The input link error log indicates that a vtable of the class is
    undefined.
-1. The input link error log indicates none of the member functions of
-   the class is undefined. It is possible these functions are
+1. The input link error log does not indicate any of the virtual
+   member functions of the class are undefined. Non-virtual member
+   functions can be defined. It is possible these functions are
    undefined and they are surely not referred.
 1. All constructors of the class are defined ("=default" is available
    in C++11) or not declared in LLVM. It is not allowed that they are
