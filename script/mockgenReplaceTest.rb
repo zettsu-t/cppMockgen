@@ -57,6 +57,8 @@ class CppSymbolSet
   # Check a line in .hpp/.cpp files after preprocessing
   # Return true if all checks passes
   def checkLine(line)
+    return true if line.include?("NotDefined")
+
     # Collect candidates to be replaced
     wordSet = @checkWordSet.map { |word| line.include?(word) ? word : nil }.compact
 

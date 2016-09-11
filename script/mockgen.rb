@@ -4,14 +4,15 @@
 # Google Mock Generator from C++ header files
 #
 # Usage:
-# $ mockgen.rb [stub|mock] [-nomock] [-filter pattern]* [-filterout pattern]*
+# $ mockgen.rb [stub|mock|var] [-nomock] [-filter pattern]* [-filterout pattern]*
 #     [-source filename] [-split num] [-outheaderfile filename]
 #     [-systempath filename] [-checkinternalsystempath] [-vtable]
 #     8-filenames clang-options
 #
-# - String "stub" or "mock"
+# - String "stub", "mock" or "var"
 #   stub : generate stubs
 #   mock : generate stubs and mocks
+#   var  : append global variable stubs to existing .cpp files
 # - optional "-nomock"
 #   If the option is set, this script does not call a mock unless
 #   specified to call the mock. Default behavior is calling a mock

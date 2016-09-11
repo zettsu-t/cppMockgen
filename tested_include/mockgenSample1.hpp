@@ -359,6 +359,8 @@ public:
     virtual int FuncMissingB(int argA, long argB);
 };
 
+extern TopLevelClass g_undefinedObject0;
+extern int g_undefinedVar0;
 namespace NamespaceLevel1 {
     class L1ClassNotDefined {
     public:
@@ -366,6 +368,8 @@ namespace NamespaceLevel1 {
         virtual ~L1ClassNotDefined(void) = default;
         virtual int FuncMissing(int arg);
     };
+    extern TopLevelClass g_undefinedObject1;
+    extern long g_undefinedVar1;
 
     namespace Level2 {
         class L2ClassNotDefined {
@@ -374,6 +378,8 @@ namespace NamespaceLevel1 {
             virtual ~L2ClassNotDefined(void) = default;
             virtual int FuncMissing(int arg);
         };
+        extern TopLevelClass g_undefinedObject2;
+        extern MyInt64 g_undefinedVar2;
     }
 }
 

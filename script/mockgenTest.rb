@@ -4647,6 +4647,18 @@ end
 
 class TestUndefinedReference < Test::Unit::TestCase
   data(
+    'top level' => ["var", "NameC var;\n"],
+    'namespace' => ["A::var", "namespace A {\nNameC var;\n}\n"],
+    'two namespaces' => ["A::B::var", "namespace A {\nnamespace B {\nNameC var;\n}}\n"],
+    'three namespaces' => ["A::B::C::var", "namespace A {\nnamespace B {\nnamespace C {\nNameC var;\n}}}\n"])
+  def test_getGlobalVariableStub(data)
+    symbol, expected = data
+    line = "#{Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE} #{symbol}"
+    ref = UndefinedReference.new(line)
+    assert_equal(expected, ref.getGlobalVariableStub("NameC"))
+  end
+
+  data(
     'toplevel' => ["undefined reference to VTABLE for `TopLevelClass'", "TopLevelClass"],
     'in a namespace' => ["undefined reference to VTABLE for `A::TopLevelClass'", "::A::TopLevelClass"],
     'in namespaces' => ["undefined reference to VTABLE for `A::B::TopLevelClass'", "::A::B::TopLevelClass"])
@@ -4717,6 +4729,27 @@ class TestUndefinedReference < Test::Unit::TestCase
 end
 
 class TestUndefinedReferenceSet < Test::Unit::TestCase
+  def test_getGlobalVariableStub
+    referenceSet = UndefinedReferenceSet.new(nil)
+
+    ref1 = Object.new
+    ref2 = Object.new
+    def ref1.getGlobalVariableStub(typeName)
+      typeName + "1"
+    end
+
+    def ref2.getGlobalVariableStub(typeName)
+      typeName + "2"
+    end
+
+    refFullnameSet = {"var" => [ref1, ref2], "A::B::varC" => [ref2]}
+    referenceSet.instance_variable_set(:@refFullnameSet, refFullnameSet)
+    ["", "::"].each do |prefix|
+      assert_equal(["Name1", "Name2"], referenceSet.getGlobalVariableStub("#{prefix}var", "Name"))
+      assert_equal(["Class2"], referenceSet.getGlobalVariableStub("#{prefix}A::B::varC", "Class"))
+    end
+  end
+
   def test_readAllLinesForVtable(data)
     referenceSet = UndefinedReferenceSet.new(nil)
 
@@ -4816,10 +4849,12 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     defaultNoForwardingToMock = "i"
     fillVtable = "j"
     noOverloading = "k"
+    varOnly = "l";
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
-                                           sourceFilenameSet, defaultNoForwardingToMock, fillVtable, noOverloading)
+                                           sourceFilenameSet, defaultNoForwardingToMock,
+                                           fillVtable, noOverloading, varOnly)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -4831,6 +4866,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(defaultNoForwardingToMock, parameterSet.defaultNoForwardingToMock)
     assert_equal(fillVtable, parameterSet.fillVtable)
     assert_equal(noOverloading, parameterSet.noOverloading)
+    assert_equal(varOnly, parameterSet.varOnly)
     assert_false(parameterSet.noMatchingTypesInCsource)
   end
 
@@ -4844,7 +4880,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     'mixed' => [["a.cpp", "b.c"], false])
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
-    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false, false)
+    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false, false, false)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -4872,13 +4908,14 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false)
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false)
   end
 end
 
 class TestCppFileParser < Test::Unit::TestCase
   def test_parseLine
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
 
     originalBlock = parser.instance_variable_get(:@block)
     parser.parseLine("comment")
@@ -5185,6 +5222,21 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal({"LongCounter"=>"long long", "StructName"=>"tagStructName", "INT"=>"int"}, rootBlock.typeAliasSet.aliasSet)
   end
 
+  def test_makeVariableStubs
+    varSet = [["", "var1", "NameA"], ["", "var2", "NameB"], ["", "var1", "NameA"]]
+
+    refSet = Object.new
+    def refSet.getGlobalVariableStub(varFullname, typeName)
+      return varFullname + typeName
+    end
+
+    testFilter = Struct.new(:undefinedReferenceSet)
+    filter = testFilter.new(refSet)
+
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    assert_equal("var1NameA\nvar2NameB", parser.makeVariableStubs(varSet, filter))
+  end
+
   def test_makeTypeVarAliases
     classNameB = "Base"
     classNameD = "Derived"
@@ -5488,13 +5540,15 @@ end
 
 class TestMockGenLauncher < Test::Unit::TestCase
   data(
-    'stub' => ["stub", true],
-    'mock' => ["mock", false])
+    'stub' => ["stub", true,  false],
+    'mock' => ["mock", false, false],
+    'var' =>  ["var",  true,  true])
   def test_mode(data)
-    arg, expected = data
+    arg, expectedStubOnly, expectedVarOnly = data
     args = [arg, "", "", "", "", "", "", "", ""]
     target = MockGenLauncher.new(args)
-    assert_equal(expected, target.instance_variable_get(:@stubOnly))
+    assert_equal(expectedStubOnly, target.instance_variable_get(:@stubOnly))
+    assert_equal(expectedVarOnly, target.instance_variable_get(:@varOnly))
   end
 
   def test_selectSystemPath

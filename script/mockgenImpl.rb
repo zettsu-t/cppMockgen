@@ -2739,6 +2739,15 @@ module Mockgen
       @isVtable, @classFullname, @fullname, @memberName, @argTypeStr, @postFunc = parse(line)
     end
 
+    def getGlobalVariableStub(typeName)
+      namespaceSet = @fullname.split("::").reject(&:empty?)
+      varname = namespaceSet.pop
+
+      str = namespaceSet.empty? ? "" : namespaceSet.map { |name| "namespace #{name} {\n" }.join("")
+      str += "#{typeName} #{varname};\n"
+      str += namespaceSet.empty? ? "" : (("}" * namespaceSet.size) + "\n")
+    end
+
     def parse(argLine)
       fullname = nil
       line = argLine.tr("'`", "").strip
@@ -2837,6 +2846,13 @@ module Mockgen
       @valid = !@refSet.empty?
     end
 
+    # make a stub variable that is not a class static member
+    def getGlobalVariableStub(varFullname, typeName)
+      getReferenceSetByFullname(varFullname).map do |ref|
+        ref.getGlobalVariableStub(typeName)
+      end
+    end
+
     # Filter by a namespace::functionName
     def getReferenceSetByFullname(fullname)
       getReferenceSet(stripFullname(fullname), @refFullnameSet, @refSet)
@@ -2895,11 +2911,11 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
-    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable, :noOverloading
+    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable, :noOverloading, :varOnly
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
-                   defaultNoForwardingToMock, fillVtable, noOverloading)
+                   defaultNoForwardingToMock, fillVtable, noOverloading, varOnly)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -2911,6 +2927,7 @@ module Mockgen
       @defaultNoForwardingToMock = defaultNoForwardingToMock
       @fillVtable = fillVtable
       @noOverloading = noOverloading
+      @varOnly = varOnly
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -2946,11 +2963,13 @@ module Mockgen
       @inputFilename = parameterSet.inputFilename
       @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource)
       @stubOnly = parameterSet.stubOnly
+      @varOnly = parameterSet.varOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
       @classInstanceMap = ClassInstanceMap.new
+      @variableMockStr = ""
 
       # Allow nil for testing
       return unless @inputFilename
@@ -2987,6 +3006,8 @@ module Mockgen
       declFilenameSet = []
 
       classFilename, declFilename = writeStubSetToFile(filenameSet, beginNamespace, endNamespace, usingNamespace)
+      return 0 if @varOnly
+
       classFilenameSet << classFilename
       declFilenameSet << declFilename
 
@@ -3013,14 +3034,18 @@ module Mockgen
       declFilename = addPostfixToBasename(filenameSet.declFilename, postfix)
       defFilename = addPostfixToBasename(filenameSet.defFilename, postfix)
 
-      writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                            blockSet, :getStringToClassFile, nil, true, true)
-      writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                            blockSet, :getStringToDeclFile, nil, false, true)
-      writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                            blockSet, :getStringToSwapperFile, nil, false, true)
-      writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
-                            blockSet, :getStringOfStub, nil, false, false)
+      unless @varOnly
+        writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
+                              blockSet, :getStringToClassFile, nil, true, true)
+        writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
+                              blockSet, :getStringToDeclFile, nil, false, true)
+        writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
+                              blockSet, :getStringToSwapperFile, nil, false, true)
+        writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
+                              blockSet, :getStringOfStub, nil, false, false)
+      end
+      appendToFile(defFilename, @variableMockStr)
+
       unless @stubOnly
         writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
                               blockSet, :getStringOfVariableDefinition, "a", false, false)
@@ -3176,6 +3201,8 @@ module Mockgen
 
       varSet = collectVariables(@block.children)
       @classInstanceMap = makeTypeVarAliases(varSet, classSet)
+      @variableMockStr = makeVariableStubs(varSet, filter)
+
       # Leave free functions
       eliminateAllUnusedBlock(@block)
     end
@@ -3232,6 +3259,12 @@ module Mockgen
       rootTypedef = rootBlock.typeAliasSet
       typedefArray.each { |typedefSet| rootTypedef.merge(typedefSet) }
       rootBlock.typeAliasSet.removeSystemInternalSymbols
+    end
+
+    def makeVariableStubs(varSet, filter)
+      varSet.map do |varName, varFullname, typeName|
+        filter.undefinedReferenceSet.getGlobalVariableStub(varFullname, typeName)
+      end.flatten.compact.sort.uniq.join("\n")
     end
 
     def makeTypeVarAliases(varSet, classSet)
@@ -3441,6 +3474,12 @@ module Mockgen
       end
     end
 
+    def appendToFile(filename, str)
+      File.open(filename, "a") do |file|
+        file.puts str
+      end
+    end
+
     def writeClassFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
       File.open(filename, "w") do |file|
         file.puts getClassFileHeader(@inputFilename, filename, true)
@@ -3594,7 +3633,9 @@ module Mockgen
 
       argSet = argv.dup
       mode = argSet.shift
-      @stubOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_STUB)
+      @stubOnly = Mockgen::Constants::ARGUMENT_SET_STUB_ONLY.any? { |word| word == mode.strip }
+      @varOnly = (mode.strip == Mockgen::Constants::ARGUMENT_MODE_VAR)
+
       @functionNameFilterSet = []
       @classNameFilterOutSet = []
       @sourceFilenameSet = []
@@ -3715,7 +3756,8 @@ module Mockgen
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
-                                             @sourceFilenameSet, @defaultNoForwardingToMock, @fillVtable, @noOverloading)
+                                             @sourceFilenameSet, @defaultNoForwardingToMock,
+                                             @fillVtable, @noOverloading, @varOnly)
       parseHeader(parameterSet)
 
       # Value to return as process status code

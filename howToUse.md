@@ -242,7 +242,8 @@ that CppMockGen generates
   : const T*)
 * First members of enums and enum classes (may not be equal to 0)
 * Unspecified for other cases and implicitly defined default
-  initializers are used
+  initializers are used. It means stub variables must be default
+  constructive.
 
 ### Arguments of constructors for generated classes
 

@@ -55,6 +55,9 @@ int TopLevelSampleFunc(void) {
         + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace()
         + TopLevelMissingFuncE(nullptr, nullptr, nullptr)
         + TopLevelClass::localStruct_.member_ + TopLevelClass::localUnion_.member_
+        + g_undefinedObject0.GetValue() + g_undefinedVar0
+        + g_undefinedObject1.GetValue() + NamespaceLevel1::g_undefinedVar1
+        + g_undefinedObject2.GetValue() + NamespaceLevel1::Level2::g_undefinedVar2
         + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2;
 }
 

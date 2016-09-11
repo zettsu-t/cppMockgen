@@ -8,6 +8,8 @@ module Mockgen
     # Argument to specify mode
     ARGUMENT_MODE_STUB = "stub".freeze
     ARGUMENT_MODE_MOCK = "mock".freeze
+    ARGUMENT_MODE_VAR  = "var".freeze
+    ARGUMENT_SET_STUB_ONLY = [ARGUMENT_MODE_STUB, ARGUMENT_MODE_VAR].freeze
 
     # Discards hyphens between words in command line arguments
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze

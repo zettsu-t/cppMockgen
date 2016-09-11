@@ -146,6 +146,11 @@ tester code should include.
 All mocks for free functions are in one file to write _#include
 generated.hpp_ directives easily.
 
+Instead of the first argument "stub" or "mock", you can use "var" to
+append global variable stubs to existing .cpp files that already
+contain stubs. It is for missing variables at second linking. Other
+arguments should be same as when mocks and stubs are generated
+previously.
 
 ## Limitations
 
@@ -226,7 +231,8 @@ CppMockGen does not support some C++ features such as
 * CppMockGen does not make mocks for member functions with
   ref-qualifier (`&` and `&&`).
 * Matching argument types between link errors and header files handles
-  only simple syntax. This causes some missing stubs.
+  only simple syntax. This causes some missing stubs for references
+  for arrays, pointers to member functions and so on.
 
 Instead of using va_arg in C++, I think it is more appropriate to use
 boost::any and std::tuple to pass arbitrary type and number of

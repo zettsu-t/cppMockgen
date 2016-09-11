@@ -17,8 +17,11 @@ MAKEFILE_PARALLEL=-j 5
 
 ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
-.PHONY: all runthrough runthrough_llvm runthrough_gcc runthrough_cxx
-.PHONY: check generate test_generate_c_func test_generate_each test_generate_bulk
+.PHONY: all runthrough runthrough_llvm runthrough_gcc
+.PHONY: runthrough_default_no_mocks runthrough_cxx
+.PHONY: check target_with_var_stub compile generate generate_var
+.PHONY: test_generate_c_func test_generate_all_in_one_header
+.PHONY: test_generate_each test_generate_bulk
 .PHONY: clean clean_generated rebuild show showall FORCE
 
 all: $(TARGETS)
@@ -46,6 +49,7 @@ runthrough_cxx:
 	-$(MAKE) clean
 	-$(MAKE)
 	$(MAKE)
+	$(MAKE) target_with_var_stub
 	$(MAKE) check
 	@$(ECHO) -e $(ECHO_START_BG)All tests have completed with $(CXX)$(ECHO_END_BG)
 
@@ -67,6 +71,12 @@ $(TARGET_EXE): $(GENERATED_FILES) $(ALL_OBJS) $(PROCESSED_CPPS) FORCE
 	$(eval GENERATED_OBJS := $(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES))))
 	$(LD) $(LIBPATH) -o $@ $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
 
+target_with_var_stub: generate_var FORCE
+	$(MAKE) $(MAKEFILE_PARALLEL) -f $(MAKEFILE_SUB_COMPILE)
+	$(eval GENERATED_SOURCES := $(notdir $(wildcard $(GENERATED_FILE_DIR)/*.cpp)))
+	$(eval GENERATED_OBJS := $(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES))))
+	$(LD) $(LIBPATH) -o $(TARGET_EXE) $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
+
 # This assumes code is already generated
 compile:
 	$(MAKE) $(MAKEFILE_PARALLEL) -f $(MAKEFILE_SUB_COMPILE)
@@ -84,6 +94,9 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 	$(LS) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp
 	$(GREP) mockgenSample $(OUTPUT_HEADER_FILENAME) | $(WC) | $(GREP) "  2  "
 	$(GREP) $(GENERATOR_FILTERED_OUT_CLASSNAME) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp | $(WC) | $(GREP) "  0  "
+
+generate_var: $(ORIGINAL_HEADER)
+	$(RUBY) $(GENERATOR_SCRIPT) var $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 
 # Write stub functions in an link error log file
 test_generate_c_func: clean_generated
