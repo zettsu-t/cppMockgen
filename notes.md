@@ -225,6 +225,8 @@ CppMockGen does not support some C++ features such as
 * Perfect forwarding and move semantics `(T&&)`
 * CppMockGen does not make mocks for member functions with
   ref-qualifier (`&` and `&&`).
+* Matching argument types between link errors and header files handles
+  only simple syntax. This causes some missing stubs.
 
 Instead of using va_arg in C++, I think it is more appropriate to use
 boost::any and std::tuple to pass arbitrary type and number of
@@ -298,10 +300,8 @@ They are slightly different from outputs of libTooling and `clang
   access and inheritance.
 * Functions without arguments `f()` is same as `void` argument
   `f(void)` in C++.
-* CppMockGen does not create mocks for pure virtual
-  functions. Abstract classes cannot be instantiated and I assume they
-  are not tested solely and tested with their concrete derived
-  classes.
+* _ld_ writes link errors for [] in parameter lists as *. They are
+  equivalent in C.
 * If a member function is virtual, its overriding functions are always
   virtual with or without the virtual keyword. CppMockGen traverses a
   class hierarchy to check whether a member function is (implicitly)

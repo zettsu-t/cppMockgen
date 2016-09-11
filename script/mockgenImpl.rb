@@ -80,12 +80,10 @@ module Mockgen
 
       while true
         previousStr = actualNameStr.dup
-        newTypeSet = actualNameWordSet.map do |word|
-          @aliasSet.key?(word) ? @aliasSet[word] : word
-        end
-
+        newTypeSet = resolveLocal(actualNameWordSet)
         actualNameWordSet = newTypeSet
-        actualNameStr = newTypeSet.join(" ")
+        actualNameStr = removeRedundantSpaces(newTypeSet.join(" "))
+
         # Transform aliases until no more conversions needed
         break if actualNameStr == previousStr
       end
@@ -103,12 +101,22 @@ module Mockgen
     end
 
     def resolveAlias(typeStr)
-      typeStrSet = TypeStringWithoutModifier.new([typeStr]).strSet
+      removeRedundantSpaces(resolveLocal(TypeStringWithoutModifier.new([typeStr]).strSet).join(" "))
+    end
 
-      typeStrSet.map do |typeword|
-        word = typeword.strip
-        @aliasSet.key?(word) ? @aliasSet[word] : word
-      end.join(" ")
+    def resolveLocal(actualNameWordSet)
+      charSet = "\\(\\)\\*&,\\s"
+
+      actualNameWordSet.map do |phrase|
+        # resolve parameter lists in pointers to functions
+        phrase.split(/([#{charSet}]+)/).map do |word|
+          (!word.match(/[^#{charSet}]/).nil? && @aliasSet.key?(word)) ? @aliasSet[word] : word
+        end.join("")
+      end
+    end
+
+    def removeRedundantSpaces(str)
+      str.gsub(/\s+([\(\)])/, '\1').gsub(/([\(\)])\s+/, '\1')
     end
   end
 
@@ -117,14 +125,16 @@ module Mockgen
     # definedReferenceSet : an instance of DefinedReferenceSet
     # undefinedReferenceSet : an instance of UndefinedReferenceSet
     # functionNameFilterSet, classNameFilterOutSet : an array of regrep strings
-    attr_reader :definedReferenceSet, :undefinedReferenceSet, :functionNameFilterSet, :classNameFilterOutSet, :fillVtable
+    attr_reader :definedReferenceSet, :undefinedReferenceSet, :functionNameFilterSet
+    attr_reader :classNameFilterOutSet, :fillVtable, :noOverloading
 
-    def initialize(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet, fillVtable)
+    def initialize(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet, fillVtable, noOverloading)
       @definedReferenceSet = definedReferenceSet
       @undefinedReferenceSet = undefinedReferenceSet
       @functionNameFilterSet = functionNameFilterSet
       @classNameFilterOutSet = classNameFilterOutSet
       @fillVtable = fillVtable
+      @noOverloading = noOverloading
     end
   end
 
@@ -183,11 +193,18 @@ module Mockgen
 
     def resolveAlias(typeStr)
       result = typeStr.dup
-      block = self
+      previous = typeStr.dup
 
-      while(result == typeStr && block)
-        result = block.typeAliasSet.resolveAlias(typeStr)
-        block = block.parent
+      while true
+        block = self
+        while(block)
+          result = block.typeAliasSet.resolveAlias(result)
+          block = block.parent
+        end
+
+        # converged
+        break if result == previous
+        previous = result.dup
       end
 
       result
@@ -421,26 +438,90 @@ module Mockgen
     def initialize(line)
       super
 
-      @actualTypeSet = []
       @typeAlias = nil
-      @trailing = false
+      @actualTypeStr = ""
+
+      if line
+        body = line.tr(";", "")
+        @typeAlias, @actualTypeStr = parsePointerToFunction(body)
+        @typeAlias, @actualTypeStr = parseType(body) unless @actualTypeStr
+      end
+    end
+
+    def parseUsingDirective(aliasName, actualType)
+      @typeAlias = aliasName.strip
+
+      actualTypeStr = nil
+      phraseSet = splitPointerToFunction(actualType, 3)
+      if phraseSet
+        phraseSet[-2][0].gsub!(/[^\(\)\*&]/, "")
+        actualTypeStr = formatPointerToFunction(phraseSet)
+      else
+        actualTypeStr = formatType([actualType])
+      end
+
+      @actualTypeStr = actualTypeStr
+    end
+
+    def parsePointerToFunction(line)
+      phraseSet = splitPointerToFunction(line, 4)
+      return nil, nil unless phraseSet
+
+      # remove the typedef keyword
+      phraseSet.shift
+      charSet = "\\*&\\s"
+      md = phraseSet[-2][1].match(/([#{charSet}]*)([^#{charSet}]+)([#{charSet}]*)/)
+      return nil, nil unless md
+
+      typeAlias = md[2].strip
+      # remove the alias name
+      phraseSet[-2][0] = "(#{md[1]}#{md[3]})".tr(" ", "")
+      actualTypeStr = formatPointerToFunction(phraseSet)
+      return typeAlias, actualTypeStr
+    end
+
+    def splitPointerToFunction(line, minSize)
+      phraseSet = Mockgen::Common::StringOfParenthesis.new(line).parse
+      ((phraseSet.size < minSize) || phraseSet[-1][1].nil? || phraseSet[-2][1].nil?) ? nil : phraseSet
+    end
+
+    def formatPointerToFunction(phraseSet)
+      argSet = phraseSet.pop
+      ptrStr = phraseSet.pop
+
+      str = phraseSet.map do |phrase|
+        TypeStringWithoutModifier.new([phrase[0]]).strSet
+      end.flatten.join(" ")
+
+      str += ptrStr[0].tr(" ", "") + "("
+      str += argSet[1].split(",").map do |phrase|
+        TypeStringWithoutModifier.new([phrase]).strSet.join(" ")
+      end.join(",") + ")"
+    end
+
+    def parseType(line)
+      typeAlias = nil
       typeStrSet = []
 
       # clang splits the idiom which define a struct and its alias simultaniously,
       # from "typedef struct tagCstyleStruct {} CstyleStruct;"
       # to "struct tagCstyleStruct {}; and
       # "typedef struct tagCstyleStruct CstyleStruct;"
-      #
+
       # clang writes a typedef to a pointer in the form of
       # "Type *PTYPE", not "Type* PTYPE"
-      wordSet = TypeStringWithoutModifier.new([line.tr(";","")]).strSet
+      wordSet = TypeStringWithoutModifier.new([line]).strSet
       if (wordSet.size >= 3)
         # typedef struct Name Alias;
+        typeAlias = wordSet[-1]
         typeStrSet = wordSet[1..-2]
-        @typeAlias = wordSet[-1]
       end
 
-      @actualTypeSet = TypeStringWithoutModifier.new(typeStrSet).strSet
+      return typeAlias, formatType(typeStrSet)
+    end
+
+    def formatType(typeStrSet)
+      TypeStringWithoutModifier.new(typeStrSet).strSet.join(" ")
     end
 
     def canTraverse?
@@ -453,13 +534,12 @@ module Mockgen
 
     # set an alias after its definition
     def setAlias(name)
-      @typeAlias = name unless (@actualTypeSet.size >= 1) && (@actualTypeSet[-1] == name)
+      @typeAlias = name
     end
 
     def collectAliasesInBlock(typeAliasSet)
       return typeAliasSet if @typeAlias.nil?
-      actualTypeStr = @actualTypeSet.join(" ")
-      typeAliasSet.add(@typeAlias, actualTypeStr)
+      typeAliasSet.add(@typeAlias, @actualTypeStr)
       typeAliasSet
     end
   end
@@ -489,7 +569,9 @@ module Mockgen
     end
 
     def getTypedefBlock
-      @actualName ? TypedefBlock.new("typedef #{@actualName} #{@aliasName};") : nil
+      block = @actualName ? TypedefBlock.new(nil) : nil
+      block.parseUsingDirective(@aliasName, @actualName) if block
+      block
     end
   end
 
@@ -890,6 +972,7 @@ module Mockgen
 
     def compare
       result = false
+
       # Can disregard argument types in .c files
       if @refArgTypeStr && !@noMatchingTypes
         # Resolve typedefs because linkers know the exact type
@@ -921,8 +1004,9 @@ module Mockgen
     end
 
     def sortArgTypeStr(argTypeStr)
+      # Treat [] as * because [] in parameter lists is a syntactic sugar of *
       # Remove spaces between * and &
-      str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
+      str = argTypeStr.gsub(/\[[^\]]*\]/, "*").gsub(/([\*&,]+)\s*/, '\1')
       # Do not sort beyond * and &
       # Do not mix different types
       str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
@@ -1001,8 +1085,9 @@ module Mockgen
 
     def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@className)
+      noOverloading = filter.noOverloading
       filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
-        FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "", false).compare
+        FunctionReferenceSet.new(self, reference, fullname, @className, @argTypeStr, "", noOverloading).compare
       end
     end
 
@@ -1160,8 +1245,9 @@ module Mockgen
 
     def filterByReferenceSet(filter)
       fullname = getNonTypedFullname(@funcName)
+      noMatchingTypes = @noMatchingTypes || filter.noOverloading
       filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
-        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc, @noMatchingTypes).compare
+        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc, noMatchingTypes).compare
       end
     end
 
@@ -2809,11 +2895,11 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
-    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
+    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable, :noOverloading
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
-                   defaultNoForwardingToMock, fillVtable)
+                   defaultNoForwardingToMock, fillVtable, noOverloading)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -2824,6 +2910,7 @@ module Mockgen
       @sourceFilenameSet = sourceFilenameSet
       @defaultNoForwardingToMock = defaultNoForwardingToMock
       @fillVtable = fillVtable
+      @noOverloading = noOverloading
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -2878,7 +2965,8 @@ module Mockgen
 
       # Resolve aliases before finding undefined references of free functions
       collectTypedefs(@block)
-      filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet, parameterSet.classNameFilterOutSet, parameterSet.fillVtable)
+      filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, parameterSet.functionNameFilterSet,
+                                parameterSet.classNameFilterOutSet, parameterSet.fillVtable, parameterSet.noOverloading)
       @functionSetArray = buildFreeFunctionSet(filter)
       makeFreeFunctionSet(@functionSetArray)
 
@@ -3516,6 +3604,7 @@ module Mockgen
       @systemHeaderSet = Mockgen::Constants::CLANG_SYSTEM_HEADER_DEFAULT_SET.dup
       @checkInternalSystemPath = false
       @fillVtable = false
+      @noOverloading = false
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -3537,6 +3626,10 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_FILL_VTABLE
           argSet.shift
           @fillVtable = true
+          caught = true
+        when Mockgen::Constants::ARGUMENT_NO_OVERLOADING
+          argSet.shift
+          @noOverloading = true
           caught = true
         end
 
@@ -3622,7 +3715,7 @@ module Mockgen
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
-                                             @sourceFilenameSet, @defaultNoForwardingToMock, @fillVtable)
+                                             @sourceFilenameSet, @defaultNoForwardingToMock, @fillVtable, @noOverloading)
       parseHeader(parameterSet)
 
       # Value to return as process status code

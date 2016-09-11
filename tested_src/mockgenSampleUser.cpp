@@ -48,9 +48,12 @@ int TopLevelSampleFunc(void) {
 
     return ClassNotInstanciated::arrayMissing[0]
         + aTopLevelObject.GetValue() + localTopLevelObject.GetValue()
+        + aTopLevelObject.FuncMissingF(nullptr, nullptr, nullptr)
+        + aTopLevelObject.FuncMissingG(nullptr, 0)
         + ClassNotInstanciated::inner_.Func()
         + TopLevelMissingFuncC() + TopLevelMissingFuncD(0) + TopLevelMissingFuncCwithoutExternC(0)
         + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace()
+        + TopLevelMissingFuncE(nullptr, nullptr, nullptr)
         + TopLevelClass::localStruct_.member_ + TopLevelClass::localUnion_.member_
         + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2;
 }

@@ -262,6 +262,50 @@ class TestTypeAliasSet < Test::Unit::TestCase
     assert_equal(expected, typeAliasSet.aliasSet)
   end
 
+  def test_resolvePointerToFunction
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.resolve("uint32_t", "unsigned int")
+
+    name = "FuncPtr"
+    typeAliasSet.resolve(name, "void(*)(uint32_t)")
+    expected = {"uint32_t" => "unsigned int", name => "void(*)(unsigned int)"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+
+    name = "FuncPtr2"
+    typeAliasSet.resolve("UINT", "uint32_t")
+    typeAliasSet.resolve(name, "void(*)(UINT*)")
+    actual = typeAliasSet.aliasSet[name]
+    assert_equal("void(*)(unsigned int *)", actual)
+
+    name = "FuncPtr3"
+    typeAliasSet.resolve("PLONG", "long*")
+    typeAliasSet.resolve(name, "void(*)(PLONG)")
+    actual = typeAliasSet.aliasSet[name]
+    assert_equal("void(*)(long *)", actual)
+
+    name = "FuncPtr4"
+    typeAliasSet.resolve(name, "void(*)(Type&)")
+    actual = typeAliasSet.aliasSet[name]
+    assert_equal("void(*)(Type &)", actual)
+
+    name = "FuncPtr5"
+    typeAliasSet.resolve(name, "void(*)(FuncPtr2)")
+    actual = typeAliasSet.aliasSet[name]
+    assert_equal("void(*)(void(*)(unsigned int *))", actual)
+  end
+
+  def test_resolveNestedPointerToFunction
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.resolve("uint32_t", "unsigned int")
+    typeAliasSet.resolve("funcptr", "void(*)(uint32_t)")
+    typeAliasSet.resolve("outerptr", "void(*)(funcptr,uint32_t)")
+
+    expected = {"funcptr"=>"void(*)(unsigned int)",
+                "outerptr"=>"void(*)(void(*)(unsigned int),unsigned int)",
+                "uint32_t"=>"unsigned int"}
+    assert_equal(expected, typeAliasSet.aliasSet)
+  end
+
   def test_removeSystemInternalSymbols
     typeAliasSet = TypeAliasSet.new
     typeAliasSet.add("uint32_t", "unsigned int")
@@ -313,6 +357,39 @@ class TestTypeAliasSet < Test::Unit::TestCase
       assert_equal("Name", typeAliasSet.resolveAlias("Alias"))
     end
   end
+
+  data(
+    'primitive' => ["void(*)(uint32_t)", "void(*)(unsigned int)"],
+    'pointer' => ["void(*)(uint32_t*)", "void(*)(unsigned int *)"],
+    'unknown' => ["void(*)(int32_t)", "void(*)(int32_t)"],
+    'unknown pointer' => ["void(*)(int32_t*)", "void(*)(int32_t *)"])
+  def test_resolveAliasPointerToFunction(data)
+    typeAlias, expected = data
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("uint32_t", "unsigned int")
+    assert_equal(expected, typeAliasSet.resolveAlias(typeAlias))
+  end
+
+  data(
+    'empty' => [[], []],
+    'primitive' => [["uint32_t", "uint"], ["unsigned int", "uint"]],
+    'pointer' => [["uint32_t*"], ["unsigned int*"]],
+    'reference' => [["uint32_t&"], ["unsigned int&"]],
+    'multiple arguments' => [["uint32_t,uint32_t*,uint"], ["unsigned int,unsigned int*,uint"]],
+    'spaces' => [["uint32_t uint32_t* uint"], ["unsigned int unsigned int* uint"]],
+    'function' => [["(uint32_t,uint32_t*)"], ["(unsigned int,unsigned int*)"]])
+  def test_resolveLocal(data)
+    wordSet, expected = data
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("uint32_t", "unsigned int")
+    assert_equal(expected, typeAliasSet.resolveLocal(wordSet))
+  end
+
+  def test_removeRedundantSpaces
+    ["(v)", "  (v)", "(  v)", " ( v)", "(v) ", " (v  )", "( v )  "].each do |str|
+      assert_equal("(v)", TypeAliasSet.new.removeRedundantSpaces(str))
+    end
+  end
 end
 
 class TestSymbolFilter < Test::Unit::TestCase
@@ -322,25 +399,32 @@ class TestSymbolFilter < Test::Unit::TestCase
     functionNameFilterSet = ["c", "d"]
     classNameFilterOutSet = ["e", "f"]
     fillVtable = "g"
+    noOverloading = "h"
 
-    filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet, classNameFilterOutSet, fillVtable)
+    filter = SymbolFilter.new(definedReferenceSet, undefinedReferenceSet, functionNameFilterSet,
+                              classNameFilterOutSet, fillVtable, noOverloading)
     assert_equal(definedReferenceSet, filter.definedReferenceSet)
     assert_equal(undefinedReferenceSet, filter.undefinedReferenceSet)
     assert_equal(functionNameFilterSet, filter.functionNameFilterSet)
     assert_equal(classNameFilterOutSet, filter.classNameFilterOutSet)
     assert_equal(fillVtable, filter.fillVtable)
+    assert_equal(noOverloading, filter.noOverloading)
   end
 end
 
 class MinimumSymbolFilter < SymbolFilter
   def initialize(definedReferenceSet, undefinedReferenceSet)
-    super(definedReferenceSet, undefinedReferenceSet, [], [], false)
+    super(definedReferenceSet, undefinedReferenceSet, [], [], false, false)
+  end
+
+  def setNoOverloading
+    @noOverloading = true
   end
 end
 
 class MinimumVtableFilter < SymbolFilter
   def initialize(definedReferenceSet, undefinedReferenceSet, fillVtable)
-    super(definedReferenceSet, undefinedReferenceSet, [], [], fillVtable)
+    super(definedReferenceSet, undefinedReferenceSet, [], [], fillVtable, false)
   end
 end
 
@@ -678,13 +762,19 @@ end
 
 class TestTypedefBlock < Test::Unit::TestCase
   data(
-    'direct typedef' => ["typedef unsigned int UINT32", "using UINT32 = unsigned int", ["unsigned", "int"], "UINT32"],
-    'indirect typedef' => ["typedef uint32_t UINT32", "using UINT32 = uint32_t", ["uint32_t"], "UINT32"],
-    'pointer' => ["typedef uint32_t *PUINT32", "using PUINT32 = uint32_t*", ["uint32_t", "*"], "PUINT32"])
+    'direct typedef' => ["typedef unsigned int UINT32", "using UINT32 = unsigned int", "unsigned int", "UINT32"],
+    'indirect typedef' => ["typedef uint32_t UINT32", "using UINT32 = uint32_t", "uint32_t", "UINT32"],
+    'pointer' => ["typedef uint32_t *PUINT32", "using PUINT32 = uint32_t*", "uint32_t *", "PUINT32"],
+    'pointer to a function' => ["typedef void(*Func)(void)", "using Func = void(*)(void)", "void(*)(void)", "Func"],
+    'reference to a function' => ["typedef void(&Func)(void)", "using Func = void(&)(void)", "void(&)(void)", "Func"],
+    'funcptr and arguments' => ["typedef void(*Func)(int,long)", "using Func = void(*)(int,long)",
+                                "void(*)(int,long)", "Func"],
+    'funcptr and return type' => ["typedef const char*(*Func)(int,long)", "using Func = const char*(*)(int,long)",
+                                  "const char *(*)(int,long)", "Func"])
   def test_initializeTypedef(data)
     line, lineUsing, expectedTypeSet, expectedAlias = data
     [TypedefBlock.new(line + ";"), UsingBlock.new(lineUsing + ";").getTypedefBlock].each do |block|
-      assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeSet))
+      assert_equal(expectedTypeSet, block.instance_variable_get(:@actualTypeStr))
       assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
       assert_true(block.canTraverse?)
       assert_equal(expectedAlias, block.getTypename)
@@ -695,6 +785,87 @@ class TestTypedefBlock < Test::Unit::TestCase
     block = TypedefBlock.new("namespace A")
     assert_false(block.canTraverse?)
     assert_nil(block.getTypename)
+  end
+
+  data(
+    'one word' => ["UINT32", "uint32_t", "uint32_t"],
+    'words' => ["UINT32", "unsigned int", "unsigned int"],
+    'pointer' => ["UINT32", "unsigned int**", "unsigned int **"],
+    'reference' => ["UINT32", "unsigned int&", "unsigned int &"],
+    'pointer to a function' => ["Func", "void(*)(void)", "void(*)(void)"],
+    'reference to a function' => ["Func", "void(&)(void)", "void(&)(void)"],
+    'pointer to a function with spaces' => [" Func ", " void ( * ) ( void ) ", "void(*)(void)"],
+    'pointer to a function with arguments' => ["Func", "void(*)(int, long)", "void(*)(int,long)"],
+    'pointer to a function with return value' => ["Func", "const char*(*)(int, const int*)", "const char *(*)(int,const int *)"])
+  def test_parseUsingDirective(data)
+    aliasName, actualType, expectedType = data
+    block = TypedefBlock.new(nil)
+    block.parseUsingDirective(aliasName, actualType)
+    assert_equal(aliasName.strip, block.instance_variable_get(:@typeAlias))
+    assert_equal(expectedType, block.instance_variable_get(:@actualTypeStr))
+  end
+
+  data(
+    'using' => ["void (*)(void)", 3],
+    'typedef' => ["typedef void(*)(void)", 4])
+  def test_splitPointerToFunction(data)
+    line, minSize = data
+    block = TypedefBlock.new(nil)
+    phraseSet = block.splitPointerToFunction(line, minSize)
+    assert_not_nil(phraseSet)
+    assert_equal(minSize, phraseSet.size)
+    assert_equal("(*)", phraseSet[-2][0])
+  end
+
+  data(
+    '0' => "",
+    '1-1' => "var",
+    '1-2' => "(void)",
+    '2-1' => "Func(void)",
+    '2-2' => "(*)(void)",
+    '3-1' => "Func(void)const",
+    '3-2' => "Func * (void)")
+  def test_notSplitPointerToFunction(data)
+    line, minSize = data
+    block = TypedefBlock.new(nil)
+    phraseSet = block.splitPointerToFunction(line, 3)
+    assert_nil(phraseSet)
+  end
+
+  data(
+    'base' => [[["void",""],["(*)",""],["","void"]], "void(*)(void)"],
+    'result' => [[["const char*",""],["(*)",""],["","void"]], "const char *(*)(void)"],
+    'arguments' => [[["Type&",""],["(*)",""],["","int, const char*"]], "Type &(*)(int,const char *)"],
+    'redundant spaces' => [[[" Type & ",""],["( * )",""],[""," int, const char * "]], "Type &(*)(int,const char *)"])
+  def test_formatPointerToFunction(data)
+    phraseSet, expected = data
+    block = TypedefBlock.new(nil)
+    assert_equal(expected, block.formatPointerToFunction(phraseSet))
+  end
+
+  data(
+    'base' => ["void AliasType", "void"],
+    'multi words 1' => ["const Type* AliasType", "const Type *"],
+    'multi words 2' => ["const Type *AliasType", "const Type *"],
+    'redundant word' => ["enum Type& AliasType", "Type &"],
+    'redundant spaces' => [" const Type & AliasType ", "const Type &"])
+  def test_parseType(data)
+    line, expected = data
+    block = TypedefBlock.new(nil)
+
+    typeAlias, actual = block.parseType("typedef #{line}")
+    assert_equal("AliasType", typeAlias)
+    assert_equal(expected, actual)
+  end
+
+  data(
+    'base' => [["void"], "void"],
+    'multi' => [["const", "Type", "*"], "const Type *"],
+    'redundant spaces' => [[" const ", " Type ", " * "], "const Type *"])
+  def test_formatType(data)
+    typeStrSet, expected = data
+    block = TypedefBlock.new(nil)
+    assert_equal(expected, block.formatType(typeStrSet))
   end
 
   def test_collectAliasesInBlock
@@ -1270,6 +1441,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     referenceClass = Struct.new(:fullname, :memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refName, refArgTypeStr, "")
     block = BaseBlock.new("")
+
     assert_equal(expected, FunctionReferenceSet.new(block, reference, name, name, argTypeStr, "", true).compare())
   end
 
@@ -1284,7 +1456,9 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     referenceClass = Struct.new(:fullname, :memberName, :argTypeStr, :postFunc)
     reference = referenceClass.new(refName, refName, refArgTypeStr, refPostFunc)
     block = BaseBlock.new("")
+
     assert_false(FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc, false).compare())
+    assert_equal(refName == name, FunctionReferenceSet.new(block, reference, name, name, argTypeStr, postFunc, true).compare())
   end
 
   data(
@@ -1326,7 +1500,10 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     'a const pointer to an object' => ["char* const", "char * const"],
     'double pointer' => ["const char** const", "char const * * const"],
     'reference' => ["const char*&", "char const * &"],
-    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"])
+    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"],
+    '[] as *' => ["const char[]", "char const *"],
+    '[n] as *' => ["const char[100]", "char const *"],
+    '[][] as **' => ["const char[100][]", "char const * *"])
   def test_sortArgTypeStr(data)
     arg, expected = data
     block = BaseBlock.new("")
@@ -1484,10 +1661,24 @@ class TestConstructorBlock < Test::Unit::TestCase
     refSet = TestMockRefSetClass.new(true, [referenceOther, reference])
     assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
 
-    block = ConstructorBlock.new("NameC();", className)
-    assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
     block = ConstructorBlock.new("~NameC();", className)
     assert_false(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))))
+  end
+
+  def test_filterByReferenceSetNoOverloading
+    className = "NameC"
+    line = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE
+    line += " `#{className}::#{className}(int)'"
+    reference = UndefinedReference.new(line)
+
+    classBlock = ClassBlock.new("class #{className} {")
+    block = ConstructorBlock.new("#{className}();", className)
+    classBlock.connect(block)
+
+    filter = MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(reference))
+    assert_false(block.filterByReferenceSet(filter))
+    filter.setNoOverloading
+    assert_true(block.filterByReferenceSet(filter))
   end
 
   def test_makeStubDefInClass
@@ -1751,6 +1942,19 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
     refSet = TestMockRefSetClass.new(true, [refUnmatched1, refMatched1])
     assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
+  end
+
+  def test_filterByReferenceSetNoOverloading
+    className = "NameC"
+    classBlock = ClassBlock.new("class #{className} {")
+    block = MemberFunctionBlock.new("void Func1(void) const")
+    classBlock.connect(block)
+
+    refUnmatched = TestMockRefClass.new("", "#{className}::Func1", "Func1", "int*", "const")
+    filter = MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refUnmatched))
+    assert_false(block.filterByReferenceSet(filter))
+    filter.setNoOverloading
+    assert_true(block.filterByReferenceSet(filter))
   end
 
   def test_override?
@@ -2837,7 +3041,7 @@ class TestClassBlock < Test::Unit::TestCase
     nsBlock.connect(block)
 
     assert_true(block.canMock?)
-    block.filterByReferenceSet(SymbolFilter.new(nil, nil, [], arg, false))
+    block.filterByReferenceSet(SymbolFilter.new(nil, nil, [], arg, false, false))
     assert_equal(expected, block.canMock?)
   end
 
@@ -4611,10 +4815,11 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     sourceFilenameSet = ["h"]
     defaultNoForwardingToMock = "i"
     fillVtable = "j"
+    noOverloading = "k"
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
-                                           sourceFilenameSet, defaultNoForwardingToMock, fillVtable)
+                                           sourceFilenameSet, defaultNoForwardingToMock, fillVtable, noOverloading)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -4625,6 +4830,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(sourceFilenameSet, parameterSet.sourceFilenameSet)
     assert_equal(defaultNoForwardingToMock, parameterSet.defaultNoForwardingToMock)
     assert_equal(fillVtable, parameterSet.fillVtable)
+    assert_equal(noOverloading, parameterSet.noOverloading)
     assert_false(parameterSet.noMatchingTypesInCsource)
   end
 
@@ -4638,7 +4844,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     'mixed' => [["a.cpp", "b.c"], false])
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
-    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false)
+    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false, false)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -4666,7 +4872,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false)
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false)
   end
 end
 
@@ -5326,6 +5532,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
                  target.instance_variable_get(:@systemHeaderSet))
     assert_false(target.instance_variable_get(:@checkInternalSystemPath))
     assert_false(target.instance_variable_get(:@fillVtable))
+    assert_false(target.instance_variable_get(:@noOverloading))
   end
 
   def test_collectInternalIsystemFail
@@ -5445,7 +5652,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(expected.tr("/", "\\"), target.instance_variable_get(:@clangArgs))
 
     assert_false(target.instance_variable_get(:@defaultNoForwardingToMock))
-end
+  end
 
   def getOptionSet
     ["input.hpp", "converted.hpp", "linker_log.txt", "class.hpp", "typeSwapper.hpp",
@@ -5554,6 +5761,13 @@ end
     args.concat(getOptionSet())
     target = MockGenLauncher.new(args)
     assert_true(target.instance_variable_get(:@fillVtable))
+  end
+
+  def test_checkNoOverloading
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_NO_OVERLOADING]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@noOverloading))
   end
 
   data(

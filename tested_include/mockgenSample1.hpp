@@ -172,6 +172,9 @@ using Int64Alias = int64_t;
 typedef int64_t* PtrMyInt64;
 typedef struct tagCstyleStruct {} CstyleStruct;
 
+using FuncPtrAlias1 = void(*)(int);
+typedef const MyInt64*(*FuncPtrAlias2)(int,MyInt64);
+
 // Top-level namespace
 class TopLevelClass {
 public:
@@ -195,6 +198,9 @@ public:
     };
     virtual LocalStruct FuncMissingD(void);
     virtual LocalUnion  FuncMissingE(void);
+    virtual int FuncMissingF(const char pString[], FuncPtrAlias1 pF1, FuncPtrAlias2 pF2);
+    using FuncPtrAliasLocal = long(*)(FuncPtrAlias1);
+    virtual int FuncMissingG(FuncPtrAliasLocal, MyInt64);
 
     enum EnumType {
         // Has no members with value 0
@@ -240,6 +246,7 @@ extern "C" {
     extern int TopLevelMissingFuncC(void);
 }
 extern int TopLevelMissingFuncD(Int64Alias a);
+extern int TopLevelMissingFuncE(const char pString[], FuncPtrAlias1 pF1, FuncPtrAlias2 pF2);
 
 // Testing to ignore attributes
 PACKED_ATTRIBUTE struct StructNotInstanciated1 {};

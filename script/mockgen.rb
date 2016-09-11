@@ -40,6 +40,12 @@
 # - optional -vtable
 #   See howToUse.md and notes.md
 #
+# - optional -nooverloading
+#   This option makes this script assume no method overloading are
+#   used in input header files and skip checking argument types in
+#   the header files to create stubs. If stubs are missing, please try
+#   this option.
+#
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [input file]  LD output (link error log) file
