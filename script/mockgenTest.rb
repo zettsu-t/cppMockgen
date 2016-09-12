@@ -162,7 +162,9 @@ class TestTypeStringWithoutModifier < Test::Unit::TestCase
     'space' => ["  ", []],
     'primitive' => ["class T**", ["T", "**"]],
     'spaces' => ["class T * ", ["T", "*"]],
-    'reference' => ["struct S&", ["S", "&"]])
+    'reference' => ["struct S&", ["S", "&"]],
+    'array' => ["struct S[]", ["S", "[", "]"]],
+    'array with its size' => ["struct S[sizeof(T)]", ["S", "[", "sizeof(T)", "]"]])
   def test_removeReservedWordWithModifier(data)
     arg, expected = data
     assert_equal(expected, TypeStringWithoutModifier.new([arg]).strSet)
@@ -1482,7 +1484,10 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
   data(
     'empty' => ["", ""],
     'one arg' => ["const C*", "char const *"],
-    'multiple args' => ["volatile V*, const C*", "void volatile * , char const *"])
+    'multiple args' => ["volatile V*, const C*", "void volatile * , char const *"],
+    '[] as *' => ["const C[]", "char const *"],
+    '[n] as *' => ["const C[100]", "char const *"],
+    'multiple []s' => ["volatile V[], const C[]", "void volatile * , char const *"])
   def test_sortArgTypeSetStr(data)
     arg, expected = data
     block = BaseBlock.new("")
@@ -1500,10 +1505,7 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     'a const pointer to an object' => ["char* const", "char * const"],
     'double pointer' => ["const char** const", "char const * * const"],
     'reference' => ["const char*&", "char const * &"],
-    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"],
-    '[] as *' => ["const char[]", "char const *"],
-    '[n] as *' => ["const char[100]", "char const *"],
-    '[][] as **' => ["const char[100][]", "char const * *"])
+    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"])
   def test_sortArgTypeStr(data)
     arg, expected = data
     block = BaseBlock.new("")
@@ -4850,11 +4852,12 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     fillVtable = "j"
     noOverloading = "k"
     varOnly = "l";
+    updateChangesOnly = "m";
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
                                            sourceFilenameSet, defaultNoForwardingToMock,
-                                           fillVtable, noOverloading, varOnly)
+                                           fillVtable, noOverloading, varOnly, updateChangesOnly)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -4867,6 +4870,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(fillVtable, parameterSet.fillVtable)
     assert_equal(noOverloading, parameterSet.noOverloading)
     assert_equal(varOnly, parameterSet.varOnly)
+    assert_equal(updateChangesOnly, parameterSet.updateChangesOnly)
     assert_false(parameterSet.noMatchingTypesInCsource)
   end
 
@@ -4880,7 +4884,8 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     'mixed' => [["a.cpp", "b.c"], false])
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
-    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg, nil, false, false, false)
+    parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg,
+                                           nil, false, false, false, false)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -4908,11 +4913,28 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false)
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false)
   end
 end
 
 class TestCppFileParser < Test::Unit::TestCase
+  def test_getOutFilename
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    filename = "___FileNotExistInTesting___._cpp"
+    assert_equal(filename, parser.getOutFilename(filename))
+
+    parser.instance_variable_set(:@updateChangesOnly, true)
+    assert_equal(filename + ".new", parser.getOutFilename(filename))
+  end
+
+  def test_updateFile
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    filename = "___FileNotExistInTesting___._cpp"
+    # Nothing happens on filesystems
+    parser.updateFile(filename, filename)
+    parser.updateFile(filename + ".old", filename)
+  end
+
   def test_parseLine
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
@@ -5587,6 +5609,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_false(target.instance_variable_get(:@checkInternalSystemPath))
     assert_false(target.instance_variable_get(:@fillVtable))
     assert_false(target.instance_variable_get(:@noOverloading))
+    assert_false(target.instance_variable_get(:@updateChangesOnly))
   end
 
   def test_collectInternalIsystemFail
@@ -5822,6 +5845,24 @@ class TestMockGenLauncher < Test::Unit::TestCase
     args.concat(getOptionSet())
     target = MockGenLauncher.new(args)
     assert_true(target.instance_variable_get(:@noOverloading))
+  end
+
+  def test_checkUpdateChangesOnly1
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_UPDATE_CHANGES_ONLY]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@updateChangesOnly))
+    assert_equal(1, target.instance_variable_get(:@numberOfClassInFile))
+  end
+
+  def test_checkUpdateChangesOnly2
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_UPDATE_CHANGES_ONLY,
+            Mockgen::Constants::ARGUMENT_SPLIT_FILES_FILTER, "23"]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+
+    assert_true(target.instance_variable_get(:@updateChangesOnly))
+    assert_equal(1, target.instance_variable_get(:@numberOfClassInFile))
   end
 
   data(

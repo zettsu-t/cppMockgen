@@ -106,6 +106,7 @@ useful to confirm your changes quickly.
 |Argument of make|Actions|
 |:-------|:----------|
 |runthrough_llvm, runthrough_gcc| check all with either clang++ or g++ |
+|runthrough_update| check all with the -update-changes-only option |
 |all (or no arguments)| generate, compile, and link all source files |
 |check| test all without generating the executable |
 |compile| compile all source files without changing generated codes |

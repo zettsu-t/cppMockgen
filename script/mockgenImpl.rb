@@ -12,7 +12,8 @@
 #   functions or their mocks
 # + Stubs to undefined functions
 
-require "open3"
+require 'fileutils'
+require 'open3'
 require 'tempfile'
 require_relative './mockgenConst.rb'
 require_relative './mockgenCommon.rb'
@@ -24,7 +25,9 @@ module Mockgen
   class TypeStringWithoutModifier
     attr_reader :strSet
     def initialize(typeStrSet)
-      strSet = typeStrSet.map { |str| str.split(/([\s\*&]+)/) }.flatten
+      strSet = typeStrSet.map do |str|
+        str.split(/([\[\]])/).map { |substr| substr.split(/([\s\*&]+)/) }
+      end.flatten
       @strSet = strSet.reject do |typeword|
         word = typeword.strip
         word.empty? || Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_MAP.key?(word)
@@ -998,15 +1001,16 @@ module Mockgen
 
     def sortArgTypeSetStr(argTypeSetStr)
       originalTypeStr = argTypeSetStr.split(",").map do |argTypeStr|
-        @scopedBlock.resolveAlias(argTypeStr)
+        # Treat [] as * because [] in parameter lists is a syntactic sugar of *
+        # and convert it before resolved typenames
+        @scopedBlock.resolveAlias(argTypeStr.gsub(/\[[^\]]*\]/, "*"))
       end.join(",")
       sortArgTypeStr(originalTypeStr)
     end
 
     def sortArgTypeStr(argTypeStr)
-      # Treat [] as * because [] in parameter lists is a syntactic sugar of *
       # Remove spaces between * and &
-      str = argTypeStr.gsub(/\[[^\]]*\]/, "*").gsub(/([\*&,]+)\s*/, '\1')
+      str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
       # Do not sort beyond * and &
       # Do not mix different types
       str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
@@ -2911,11 +2915,12 @@ module Mockgen
     # convertedFilename : a file after processed by clang
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
-    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable, :noOverloading, :varOnly
+    attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
+    attr_reader :noOverloading, :varOnly, :updateChangesOnly
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
-                   defaultNoForwardingToMock, fillVtable, noOverloading, varOnly)
+                   defaultNoForwardingToMock, fillVtable, noOverloading, varOnly, updateChangesOnly)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -2928,6 +2933,7 @@ module Mockgen
       @fillVtable = fillVtable
       @noOverloading = noOverloading
       @varOnly = varOnly
+      @updateChangesOnly = updateChangesOnly
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -2965,6 +2971,7 @@ module Mockgen
       @stubOnly = parameterSet.stubOnly
       @varOnly = parameterSet.varOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
+      @updateChangesOnly = parameterSet.updateChangesOnly
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
@@ -2992,6 +2999,25 @@ module Mockgen
       buildClassTree(filter)
       makeClassSet
       @classInstanceMap.cleanUp
+    end
+
+    # write to a new file and replace it to file "filename" in update
+    def getOutFilename(filename)
+      newFilename = filename + ".new"
+      @updateChangesOnly ? newFilename : filename
+    end
+
+    def updateFile(filename, outFilename)
+      # if both files are identical, file "filename" already contains
+      # mocks and stubs that are created just now
+      if (filename != outFilename)
+        if system("cmp -s #{filename} #{outFilename}")
+          FileUtils.rm(outFilename, {:force => true})
+        else
+          # include cases where file "filename" does not exist
+          FileUtils.mv(outFilename, filename, {:force => true})
+        end
+      end
     end
 
     # Write generated codes to arg files
@@ -3428,7 +3454,13 @@ module Mockgen
       str
     end
 
-    def writeFile(filename, labelAttr, preStr, postStr, blockSet)
+    def writeAndUpdateFile(filename, labelAttr, preStr, postStr, blockSet)
+      outFilename = getOutFilename(filename)
+      writeFile(filename, outFilename, labelAttr, preStr, postStr, blockSet)
+      updateFile(filename, outFilename)
+    end
+
+    def writeFile(filename, outFilename, labelAttr, preStr, postStr, blockSet)
       lineDelimiter = "\n"
 
       strSet = []
@@ -3439,7 +3471,7 @@ module Mockgen
         end
       end
 
-      File.open(filename, "w") do |file|
+      File.open(outFilename, "w") do |file|
         file.puts preStr
         doForBlockSet(blockSet, lambdaToBlock)
         # Write each definition exactly once
@@ -3449,6 +3481,7 @@ module Mockgen
       end
     end
 
+    # always update stub files
     def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace,
                               blockSet, labelGetStr, mode, writeMacro, needGuard)
       filemode = mode
@@ -3481,7 +3514,9 @@ module Mockgen
     end
 
     def writeClassFile(filename, beginNamespace, endNamespace, usingNamespace, blockSet)
-      File.open(filename, "w") do |file|
+      outFilename = getOutFilename(filename)
+
+      File.open(outFilename, "w") do |file|
         file.puts getClassFileHeader(@inputFilename, filename, true)
         file.puts beginNamespace
         lambdaToBlock = lambda do |block|
@@ -3492,42 +3527,49 @@ module Mockgen
         file.puts endNamespace
         file.puts getIncludeGuardFooter
       end
+
+      updateFile(filename, outFilename)
     end
 
     def writeTypeSwapperFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
       preStr = getSwapperHeader(classFilename, filename, "Class")
       postStr = getIncludeGuardFooter
-      writeFile(filename, :typeSwapperStr, preStr, postStr, blockSet)
+      writeAndUpdateFile(filename, :typeSwapperStr, preStr, postStr, blockSet)
     end
 
     def writeVarSwapperFile(filename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
       preStr = getSwapperHeader(declFilename, filename, "Variable")
       postStr = getIncludeGuardFooter
-      writeFile(filename, :varSwapperStr, preStr, postStr, blockSet)
+      writeAndUpdateFile(filename, :varSwapperStr, preStr, postStr, blockSet)
     end
 
     def writeDeclFile(filename, classFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
       preStr = getDeclHeader(classFilename, filename) + "\n" + beginNamespace
       postStr = endNamespace + "\n" + getIncludeGuardFooter
-      writeFile(filename, :declStr, preStr, postStr, blockSet)
+      writeAndUpdateFile(filename, :declStr, preStr, postStr, blockSet)
     end
 
     def writeDefFile(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
       preStr = getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
       postStr = endNamespace + "\n" + usingNamespace
-      writeFile(filename, :defStr, preStr, postStr, blockSet)
-      writeSourceFile(filename, blockSet)
+
+      outFilename = getOutFilename(filename)
+      writeFile(filename, outFilename, :defStr, preStr, postStr, blockSet)
+      writeSourceFile(filename, outFilename, blockSet)
+      updateFile(filename, outFilename)
     end
 
     def writeStubFile(filename, inputFilename, blockSet)
-      File.open(filename, "w") do |file|
+      outFilename = getOutFilename(filename)
+      File.open(outFilename, "w") do |file|
         file.puts getIncludeDirective(inputFilename)
       end
-      writeSourceFile(filename, blockSet)
+      writeSourceFile(filename, outFilename, blockSet)
+      updateFile(filename, outFilename)
     end
 
-    def writeSourceFile(filename, blockSet)
-      File.open(filename, "a") do |file|
+    def writeSourceFile(filename, outFilename, blockSet)
+      File.open(outFilename, "a") do |file|
         lambdaToBlock = lambda do |block|
           str = block.getStringToSourceFile
           file.puts str if str && !str.empty?
@@ -3538,7 +3580,9 @@ module Mockgen
 
     # Write header files to include all
     def writeAggregatedFiles(filename, includedFilenameSet)
-      File.open(filename, "w") do |file|
+      outFilename = getOutFilename(filename)
+
+      File.open(outFilename, "w") do |file|
         file.puts "// Include files to all\n"
         file.puts "// This file is machine generated.\n\n"
         file.puts getIncludeGuardHeader(filename)
@@ -3548,6 +3592,8 @@ module Mockgen
         file.puts ""
         file.puts getIncludeGuardFooter
       end
+
+      updateFile(filename, outFilename)
     end
 
     def getClassFileHeader(inputFilename, outClassFilename, writeMacro)
@@ -3646,6 +3692,7 @@ module Mockgen
       @checkInternalSystemPath = false
       @fillVtable = false
       @noOverloading = false
+      @updateChangesOnly = false
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -3672,6 +3719,11 @@ module Mockgen
           argSet.shift
           @noOverloading = true
           caught = true
+        when Mockgen::Constants::ARGUMENT_UPDATE_CHANGES_ONLY
+          argSet.shift
+          @updateChangesOnly = true
+          @numberOfClassInFile = 1
+          caught = true
         end
 
         next if caught
@@ -3691,7 +3743,7 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_SPLIT_FILES_FILTER
           argSet.shift(2)
           value = optionValue.to_i
-          @numberOfClassInFile = value if value > 0
+          @numberOfClassInFile = value if (value > 0) && !@updateChangesOnly
         when Mockgen::Constants::ARGUMENT_OUT_HEADER_FILENAME
           argSet.shift(2)
           @outHeaderFilename = optionValue
@@ -3757,7 +3809,7 @@ module Mockgen
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
-                                             @fillVtable, @noOverloading, @varOnly)
+                                             @fillVtable, @noOverloading, @varOnly, @updateChangesOnly)
       parseHeader(parameterSet)
 
       # Value to return as process status code

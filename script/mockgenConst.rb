@@ -22,6 +22,7 @@ module Mockgen
     ARGUMENT_CHECK_INTERNAL_SYSTEM_PATH = "-checkinternalsystempath".freeze
     ARGUMENT_FILL_VTABLE = "-vtable".freeze
     ARGUMENT_NO_OVERLOADING = "-nooverloading".freeze
+    ARGUMENT_UPDATE_CHANGES_ONLY = "-updatechangesonly".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze

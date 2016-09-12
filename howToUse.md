@@ -527,6 +527,9 @@ treats -outheaderfile as -out-header-file.
 * -systempath appends a system and compiler directory such as /opt.
 * -vtable makes stubs for all virtual functions that belong to a class
   that needs its vtable (explained later).
+* -updatechangesonly prevents CppMockGen from updating mock files if
+  they exist and CppMockGen makes no changes on them. This reduces
+  dependency in the Makefile and has its build time shorter.
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
@@ -595,6 +598,9 @@ which file a tested code should include. CppMockGen gives two options.
   * Aggregated mock file (in arguments) : generated/converted_mockgenSample1.hpp
   * Output mock file (numbered) : mock_mockgenSample1_1.hpp
   * Output mock file (named after a tested class) : mock_mockgenSample1_DerivedClass.hpp
+
+The -update-changes-only option implies "-split 1" regardless of any
+other -split options.
 
 ## And more
 

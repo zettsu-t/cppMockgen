@@ -6,7 +6,7 @@
 # Usage:
 # $ mockgen.rb [stub|mock|var] [-nomock] [-filter pattern]* [-filterout pattern]*
 #     [-source filename] [-split num] [-outheaderfile filename]
-#     [-systempath filename] [-checkinternalsystempath] [-vtable]
+#     [-systempath filename] [-checkinternalsystempath] [-vtable] [-updatechangesonly]
 #     8-filenames clang-options
 #
 # - String "stub", "mock" or "var"
@@ -40,6 +40,10 @@
 # - optional -checkinternalsystempath
 # - optional -vtable
 #   See howToUse.md and notes.md
+#
+# - optional -updatechangesonly
+#   This option prevents this script from updating mock files without
+#   changes. This enables "-split 1" option implicitly.
 #
 # - optional -nooverloading
 #   This option makes this script assume no method overloading are
