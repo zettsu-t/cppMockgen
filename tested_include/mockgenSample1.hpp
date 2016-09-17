@@ -371,6 +371,14 @@ namespace NamespaceLevel1 {
     extern TopLevelClass g_undefinedObject1;
     extern long g_undefinedVar1;
 
+    class MultiConstructorBase {
+    protected:
+        MultiConstructorBase(void) = default;
+        MultiConstructorBase(int) {}
+        MultiConstructorBase(long*, int*) {}
+        virtual ~MultiConstructorBase(void) = default;
+    };
+
     namespace Level2 {
         class L2ClassNotDefined {
         public:
@@ -380,6 +388,15 @@ namespace NamespaceLevel1 {
         };
         extern TopLevelClass g_undefinedObject2;
         extern MyInt64 g_undefinedVar2;
+
+        class MultiConstructorDerived : public MultiConstructorBase {
+        public:
+            MultiConstructorDerived(void);
+            MultiConstructorDerived(int);
+            MultiConstructorDerived(int,long);
+            MultiConstructorDerived(long*,int*,int);
+            int GetValue(void) { return 0; }
+        };
     }
 }
 

@@ -208,6 +208,18 @@ class TestSymbolWithHeadNamespaceDelimiter < Test::Unit::TestCase
   end
 end
 
+class TestArgumentSplitter < Test::Unit::TestCase
+  data(
+    'empty' => ["", []],
+    'primitive' => ["int", ["int"]],
+    'primitives' => ["int, long", ["int", "long"]],
+    'pointer to a function' => ["int, void(*f)(int,long), long*", ["int", "void(*f)(int,long)", "long*"]])
+  def test_all(data)
+    line, expected = data
+    assert_equal(expected, ArgumentSplitter.new(line).argSet)
+  end
+end
+
 class TestTypeAliasSet < Test::Unit::TestCase
   def test_add
     typeAliasSet = TypeAliasSet.new
@@ -1114,41 +1126,43 @@ class TestArgVariableSet < Test::Unit::TestCase
   end
 
   data(
-    'ConstructorNoArgs' => ["Func()", "", "", "Func", false,
+    'ConstructorNoArgs' => ["Func()", "", "", "Func", false, 0,
                             "", "", "", ""],
-    'ConstructorOneArg' => ["Func(int a)", "", "", "Func", false,
+    'ConstructorOneArg' => ["Func(int a)", "", "", "Func", false, 1,
                             "int a", "int a", "int", "a"],
-    'ConstructorTwoArgs' => ["Func (int a,long b)", "", "", "Func", false,
+    'ConstructorTwoArgs' => ["Func (int a,long b)", "", "", "Func", false, 2,
                              "int a,long b", "int a,long b", "int,long", "a,b"],
-    'FuncTwoArgs' => ["int Func (int a,long b)", "int", "", "Func", false,
+    'FuncTwoArgs' => ["int Func (int a,long b)", "int", "", "Func", false, 2,
                       "int a,long b", "int a,long b", "int,long", "a,b"],
-    'FuncTwoTypes' => ["void Func (int,long)", "void", "", "Func", false,
+    'FuncTwoTypes' => ["void Func (int,long)", "void", "", "Func", false, 2,
                        "int dummy1,long dummy2", "int dummy1,long dummy2", "int,long", "dummy1,dummy2"],
     'FuncTwoArgsPostfix' => ["void* Func (int a) const override", "void *", "const override", "Func",
-                             false, "int a", "int a", "int", "a"],
-    'FuncPtr1' => ["int Func (int(f)(int)) const", "int", "const", "Func", false,
+                             false, 1, "int a", "int a", "int", "a"],
+    'FuncPtr1' => ["int Func (int(f)(int)) const", "int", "const", "Func", false, 1,
                    "int (f) (int)", "int (f) (int)", "int () (int)", "f"],
-    'FuncPtr2' => ["int Func(long a,int(*f)(int))const", "int", "const", "Func", false,
+    'FuncPtr2' => ["int Func(long a,int(*f)(int))const", "int", "const", "Func", false, 2,
                    "long a,int (*f) (int)", "long a,int (*f) (int)", "long,int (*) (int)", "a,f"],
-    'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const", "Func", false,
+    'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const", "Func", false, 2,
                    "int (*f) (int),void (*g) (void*)", "int (*f) (int),void (*g) (void*)", "int (*) (int),void (*) (void*)", "f,g"],
-    'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func", false,
+    'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func", false, 2,
                       "int a=0,long b=(long)0", "int a,long b", "int,long", "a,b"],
-    'DefaultNullArgs1' => ["int Func (void* p=<null expr>)", "int", "", "Func", false,
+    'DefaultNullArgs1' => ["int Func (void* p=<null expr>)", "int", "", "Func", false, 1,
                            "void* p=NULL", "void* p", "void *", "p"],
-    'DefaultNullArgs2' => ["int Func(long a,int(*f)(int)=aFunc)const", "int", "const", "Func", false,
+    'DefaultNullArgs2' => ["int Func(long a,int(*f)(int)=aFunc)const", "int", "const", "Func", false, 2,
                            "long a,int (*f) (int) =aFunc", "long a,int (*f) (int)", "long,int (*) (int)", "a,f"],
-    'Pure virtual' => ["int Func (int(f)(int)) const = 0", "int", "const", "Func", true,
+    'Pure virtual' => ["int Func (int(f)(int)) const = 0", "int", "const", "Func", true, 1,
                    "int (f) (int)", "int (f) (int)", "int () (int)", "f"]
   )
   def test_splitByArgSet(data)
-    line, expectedPre, expectedPost, expectedFuncname, expectedPureVirtual, expectedSet, expectedSetWithoutDefault, expectedType, expectedName = data
+    line, expectedPre, expectedPost, expectedFuncname, expectedPureVirtual, expectedArity,
+    expectedSet, expectedSetWithoutDefault, expectedType, expectedName = data
 
     argVariableSet = ArgVariableSet.new(line)
     assert_equal(expectedPre, argVariableSet.preFuncSet)
     assert_equal(expectedPost, argVariableSet.postFuncSet)
     assert_equal(expectedFuncname, argVariableSet.funcName)
     assert_equal(expectedPureVirtual, argVariableSet.pureVirtual)
+    assert_equal(expectedArity, argVariableSet.arity)
     assert_equal(expectedSet, argVariableSet.argSetStr)
     assert_equal(expectedSetWithoutDefault, argVariableSet.argSetWithoutDefault)
     assert_equal(expectedType, argVariableSet.argTypeStr)
@@ -1392,6 +1406,39 @@ class TestMemberVariableStatement < Test::Unit::TestCase
   end
 end
 
+class TestResolvedArgTypeSetStr < Test::Unit::TestCase
+  data(
+    'empty' => ["", ""],
+    'one arg' => ["const C*", "char const *"],
+    'multiple args' => ["volatile V*, const C*", "void volatile * , char const *"],
+    '[] as *' => ["const C[]", "char const *"],
+    '[n] as *' => ["const C[100]", "char const *"],
+    'multiple []s' => ["volatile V[], const C[]", "void volatile * , char const *"])
+  def test_sortArgTypeSetStr(data)
+    arg, expected = data
+    block = BaseBlock.new("")
+    def block.resolveAlias(str)
+      str.gsub("C","char").gsub("V","void")
+    end
+
+    assert_equal(expected, ResolvedArgTypeSetStr.new(block, arg).str)
+  end
+
+  data(
+    'empty' => ["", ""],
+    'primitive' => ["int", "int"],
+    'a pointer to a const object' => ["const char*", "char const *"],
+    'a const pointer to an object' => ["char* const", "char * const"],
+    'double pointer' => ["const char** const", "char const * * const"],
+    'reference' => ["const char*&", "char const * &"],
+    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"])
+  def test_sortArgTypeStr(data)
+    arg, expected = data
+    block = BaseBlock.new("")
+    assert_equal(expected, ResolvedArgTypeSetStr.new(block, "").sortArgTypeStr(arg))
+  end
+end
+
 class TestFunctionReferenceSet < Test::Unit::TestCase
   data(
     'all nils' => [nil, nil, nil, nil, nil, nil],
@@ -1481,35 +1528,15 @@ class TestFunctionReferenceSet < Test::Unit::TestCase
     assert_true(FunctionReferenceSet.new(block, reference, refName, refName, argTypeStr, "", false).compare())
   end
 
-  data(
-    'empty' => ["", ""],
-    'one arg' => ["const C*", "char const *"],
-    'multiple args' => ["volatile V*, const C*", "void volatile * , char const *"],
-    '[] as *' => ["const C[]", "char const *"],
-    '[n] as *' => ["const C[100]", "char const *"],
-    'multiple []s' => ["volatile V[], const C[]", "void volatile * , char const *"])
-  def test_sortArgTypeSetStr(data)
-    arg, expected = data
+  def test_sortArgTypeSetStr
+    arg = "volatile V[], const C[]"
+    expected = "void volatile * , char const *"
     block = BaseBlock.new("")
     def block.resolveAlias(str)
       str.gsub("C","char").gsub("V","void")
     end
 
     assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "", false).sortArgTypeSetStr(arg))
-  end
-
-  data(
-    'empty' => ["", ""],
-    'primitive' => ["int", "int"],
-    'a pointer to a const object' => ["const char*", "char const *"],
-    'a const pointer to an object' => ["char* const", "char * const"],
-    'double pointer' => ["const char** const", "char const * * const"],
-    'reference' => ["const char*&", "char const * &"],
-    'multiple args' => ["int,const char*&,T const &", "int , char const * & , T const &"])
-  def test_sortArgTypeStr(data)
-    arg, expected = data
-    block = BaseBlock.new("")
-    assert_equal(expected, FunctionReferenceSet.new(block, nil, "", "", "", "", false).sortArgTypeStr(arg))
   end
 
   data(
@@ -1557,30 +1584,32 @@ class TestConstructorBlock < Test::Unit::TestCase
 
   data(
     'no args' =>
-    ["NameC()", "", "", "", "", "", ""],
+    ["NameC()", 0, "", "", "", "", "", ""],
     'one arg' =>
-    ["NameC(long a)", "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
+    ["NameC(long a)", 1, "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
     'two args' =>
-    ["NameC(long a, const void* p)", "long a,const void* p", "long,const void *",
+    ["NameC(long a, const void* p)", 2, "long a,const void* p", "long,const void *",
      ", long a,const void* p", "", "a,p", "::A::NameC(a,p), "],
     'initializer list' =>
-    ["NameC(long a) : Base(a)", "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
+    ["NameC(long a) : Base(a)", 1, "long a", "long", ", long a", "", "a", "::A::NameC(a), "],
     'template' =>
-    ["NameC<T>(T* a) : Base(a)", "T* a", "T *", ", T* a", "<T>", "a", "::A::NameC<T>(a), "])
+    ["NameC<T>(T* a) : Base(a)", 1, "T* a", "T *", ", T* a", "<T>", "a", "::A::NameC<T>(a), "])
   def test_initializeAndAll(data)
-    line, expectedTASet, expectedATStr, expectedArgsBC,
-    expectedTypeStr, expectedArgSet, expectedCallBase = data
+    line, expectArity, expectedTASet, expectedATStr, expectedArgsBC,
+    expectedTypeStr, expectedArgSetStr, expectedCallBase = data
     name = "NameC"
 
     block = ConstructorBlock.new(line, name)
-    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSet = block.parse(line, name)
+    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr = block.parse(line, name)
     assert_true(valid)
     assert_true(block.canTraverse?)
+    assert_equal(expectArity, block.arity)
     assert_equal(expectedTASet, typedArgSet)
     assert_equal(expectedTASet, typedArgSetWithoutDefault)
     assert_equal(expectedATStr, argTypeStr)
     assert_equal(expectedTypeStr, typeStr)
-    assert_equal(expectedArgSet, argSet)
+    assert_equal(expectedArgSetStr, argSetStr)
+    assert_equal(expectedArgSetStr, block.argSetStr)
     assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
     assert_equal(expectedArgsBC, block.getTypedArgsWithoutValue)
     assert_equal("", block.getCallForBaseClassInitializer)
@@ -1648,6 +1677,24 @@ class TestConstructorBlock < Test::Unit::TestCase
     assert_equal("NameC(int a)", block.removeInitializerList(line))
   end
 
+  data(
+    'no resolving' => [false, "long , Type"],
+    'resolve' => [true, "long , int *"])
+  def test_getResolvedArgTypeStr(data)
+    resolving, expected = data
+    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock.connect(TypedefBlock.new("typedef int * Type;"))
+
+    className = "NameC"
+    classBlock = ClassBlock.new("class #{className} {")
+    rootBlock.connect(classBlock)
+
+    block = ConstructorBlock.new("#{className}(long a, Type b)", className)
+    classBlock.connect(block)
+    rootBlock.collectAliases if resolving
+    2.times { assert_equal(expected, block.getResolvedArgTypeStr(classBlock)) }
+  end
+
   def test_filterByReferenceSet
     line = Mockgen::Constants::KEYWORD_UNDEFINED_REFERENCE
     line += " `NameC::NameC(int)'"
@@ -1685,12 +1732,16 @@ class TestConstructorBlock < Test::Unit::TestCase
 
   def test_makeStubDefInClass
     className = "NameC"
-    block = ConstructorBlock.new("#{className}()", className)
-    assert_equal("NameC::NameC() {}\n", block.makeStubDef(className))
-
     classBlock = ClassBlock.new("class #{className} {")
+    def classBlock.getConstructorArgStrSet(arg)
+      ": Base() "
+    end
+
+    block = ConstructorBlock.new("#{className}()", className)
+    assert_equal("NameC::NameC() : Base() {}\n", block.makeStubDef(classBlock, className))
+
     classBlock.connect(block)
-    assert_equal("::NameC::NameC() {}\n", block.makeStubDef(className))
+    assert_equal("::NameC::NameC() : Base() {}\n", block.makeStubDef(classBlock, className))
   end
 
   def test_makeStubDefInNamespace
@@ -1698,7 +1749,13 @@ class TestConstructorBlock < Test::Unit::TestCase
     block = ConstructorBlock.new("#{className}()", className)
     nsBlock = NamespaceBlock.new("namespace A")
     nsBlock.connect(block)
-    assert_equal("::A::NameC::NameC() {}\n", block.makeStubDef(className))
+
+    classBlock = ClassBlock.new("class ClassName {")
+    def classBlock.getConstructorArgStrSet(arg)
+      ""
+    end
+
+    assert_equal("::A::NameC::NameC() {}\n", block.makeStubDef(classBlock, className))
   end
 
   def test_makeStubDefInNamespaceAndClass
@@ -1706,10 +1763,13 @@ class TestConstructorBlock < Test::Unit::TestCase
     block = ConstructorBlock.new("#{className}()", className)
     classBlock = ClassBlock.new("class #{className} {")
     classBlock.connect(block)
+    def classBlock.getConstructorArgStrSet(arg)
+      ": ::A::Base(0) "
+    end
 
     nsBlock = NamespaceBlock.new("namespace A")
     nsBlock.connect(classBlock)
-    assert_equal("::A::NameC::NameC() {}\n", block.makeStubDef(className))
+    assert_equal("::A::NameC::NameC() : ::A::Base(0) {}\n", block.makeStubDef(classBlock, className))
   end
 
   def test_makeDefaultConstructor
@@ -2834,6 +2894,7 @@ class TestClassBlock < Test::Unit::TestCase
     constructorLine = "NameC();"
     assert_not_nil(block.parseChildren(constructorLine))
     assert_not_equal([], block.instance_variable_get(:@constructorSet))
+    assert_not_equal([], block.subConstructorSet)
     assert_not_equal([], block.instance_variable_get(:@allConstructorSet))
 
     destructorLine = "~NameC();"
@@ -2849,6 +2910,17 @@ class TestClassBlock < Test::Unit::TestCase
     funcLine = "void FuncProtected();"
     assert_not_nil(block.parseChildren(funcLine))
     assert_false(block.instance_variable_get(:@protectedMemberFunctionSet).empty?)
+  end
+
+  def test_parseChildrenClassProtected
+    block = ClassBlock.new("class NameC")
+    block.parseChildren("protected:")
+
+    constructorLine = "NameC();"
+    assert_not_nil(block.parseChildren(constructorLine))
+    assert_equal([], block.instance_variable_get(:@constructorSet))
+    assert_not_equal([], block.subConstructorSet)
+    assert_not_equal([], block.instance_variable_get(:@allConstructorSet))
   end
 
   def test_parseChildrenClassPrivate
@@ -2869,6 +2941,7 @@ class TestClassBlock < Test::Unit::TestCase
     constructorLine = "NameC();"
     assert_not_nil(block.parseChildren(constructorLine))
     assert_equal([], block.instance_variable_get(:@constructorSet))
+    assert_equal([], block.subConstructorSet)
     assert_not_equal([], block.instance_variable_get(:@allConstructorSet))
   end
 
@@ -3129,6 +3202,207 @@ class TestClassBlock < Test::Unit::TestCase
     block = ClassBlock.new("")
     block.instance_variable_set(:@constructorSet, ctorSet)
     assert_equal(expected, block.getConstructorArity)
+  end
+
+  def test_getConstructorArgStrSet
+    baseBlock1 = ClassBlock.new("class Base1")
+    baseBlock1.parseChildren("public:")
+    baseBlock1.parseChildren("Base1(int a);")
+
+    ctorBlock = baseBlock1.subConstructorSet[0]
+    assert_equal("", baseBlock1.getConstructorArgStrSet(ctorBlock))
+
+    baseBlock2 = ClassBlock.new("class Base2")
+    baseBlock2.parseChildren("protected:")
+    baseBlock2.parseChildren("Base2(int b, long c);")
+
+    baseBlock3 = ClassBlock.new("class Base3")
+    baseBlock3.parseChildren("protected:")
+    baseBlock3.parseChildren("Base3(void);")
+
+    baseBlock4 = ClassBlock.new("class Base4")
+
+    derivedBlock = ClassBlock.new("class Derived : public Base1, public Base2, public Base3, public Base4")
+    ["public:", "Derived(int d, long e);"].each do |line|
+      derivedBlock.parseChildren(line)
+    end
+
+    table = {"Base1" => baseBlock1, "Base2" => baseBlock2, "Base3" => baseBlock3,
+             "Base4" => baseBlock4, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    ctorBlock = derivedBlock.subConstructorSet[0]
+    assert_equal(": Base1(d), Base2(d,e) ", derivedBlock.getConstructorArgStrSet(ctorBlock))
+  end
+
+  def test_makeConstructorArgStrVoid
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(void);")
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    ["public:", "Derived();", "Derived(int d);", "Derived(int d, char* p);"].each do |line|
+      derivedBlock.parseChildren(line)
+    end
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    derivedBlock.subConstructorSet.each do |ctorBlock|
+      assert_nil(derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+    end
+  end
+
+  def test_makeConstructorArgStrOne
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(int b);")
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+
+    testSet = [["Derived(void);", nil], ["Derived(int d);", "Base(d)"],
+               ["Derived(int);", "Base(dummy1)"], ["Derived(int d, char* p);", "Base(d)"],
+               ["Derived(long d);", nil]]
+    testSet.each do |line, expected|
+      derivedBlock.parseChildren(line)
+    end
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    testSet.each_with_index do |expected, i|
+      ctorBlock = derivedBlock.subConstructorSet[i]
+      assert_equal(expected[1], derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+    end
+  end
+
+  def test_makeConstructorArgStrMulti
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(int b1, int b2, void(*f)(int));")
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+
+    testSet = [["Derived(int d1);", nil],
+               ["Derived(int d1, int d2, char* p);", nil],
+               ["Derived(int d1, int d2, void(*g)(int));", "Base(d1,d2,g)"],
+               ["Derived(int d1, int d2, void(*g)(long));", nil],
+               ["Derived(int d1, int d2, void(*g)(int), long h);", "Base(d1,d2,g)"]]
+    testSet.each do |line, expected|
+      derivedBlock.parseChildren(line)
+    end
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    testSet.each_with_index do |expected, i|
+      ctorBlock = derivedBlock.subConstructorSet[i]
+      assert_equal(expected[1], derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+    end
+  end
+
+  def test_makeConstructorArgStrMatching
+    baseBlock = ClassBlock.new("class Base")
+    ["protected:", "Base(int b1);", "Base(int b1, int b2);",
+     "Base(long b1);", "Base(long b1, long b2);"].each do |line|
+      baseBlock.parseChildren(line)
+    end
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+
+    testSet = [["Derived(char d1);", nil],
+               ["Derived(int d1);", "Base(d1)"],
+               ["Derived(int d1, long d2);", "Base(d1)"],
+               ["Derived(int d1, int* d2);", "Base(d1)"],
+               ["Derived(int d1, int d2);", "Base(d1,d2)"],
+               ["Derived(int d1, int d2, int d3);", "Base(d1,d2)"],
+               ["Derived(long d1);", "Base(d1)"],
+               ["Derived(long d1, int d2);", "Base(d1)"],
+               ["Derived(long d1, long d2);", "Base(d1,d2)"],
+               ["Derived(long d1, long d2, long d3);", "Base(d1,d2)"]]
+    testSet.each do |line, expected|
+      derivedBlock.parseChildren(line)
+    end
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    testSet.each_with_index do |expected, i|
+      ctorBlock = derivedBlock.subConstructorSet[i]
+      assert_equal(expected[1], derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+    end
+  end
+
+  def test_makeConstructorArgStrTypedef
+    rootBlock = BlockFactory.new(false).createRootBlock
+    ["typedef int * PtrA;", "typedef long * PtrB;"].each do |line|
+      rootBlock.connect(TypedefBlock.new(line))
+    end
+
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(PtrA pA, long* pB);")
+    rootBlock.connect(baseBlock)
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+    derivedBlock.parseChildren("Derived(int* a, PtrB b, int c);")
+    rootBlock.connect(derivedBlock)
+    rootBlock.collectAliases
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    ctorBlock = derivedBlock.subConstructorSet[0]
+    assert_equal("Base(a,b)", derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+  end
+
+  def test_makeConstructorArgStrFuncPtrTypedef
+    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock.connect(TypedefBlock.new("typedef int MyInt;"))
+
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(void(*pB)(MyInt));")
+    rootBlock.connect(baseBlock)
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+    derivedBlock.parseChildren("Derived(void(*pD)(MyInt))")
+    rootBlock.connect(derivedBlock)
+    rootBlock.collectAliases
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+
+    ctorBlock = derivedBlock.subConstructorSet[0]
+    assert_equal("Base(pD)", derivedBlock.makeConstructorArgStr(ctorBlock, baseBlock))
+  end
+
+  data(
+    'empty' => ["", "", true],
+    'containts empty' => ["int", "", true],
+    'exact' => ["int", "int", true],
+    'pointer 1' => ["int*", "int", false],
+    'pointer 2' => ["int", "int*", false],
+    'subset'    => ["int, long", "int", true],
+    'pointer 3' => ["int, long*", "int, long", false],
+    'pointer 4' => ["int, long**", "int, long*", false],
+    'pointer 5' => ["int*, long", "int, long", false],
+    'pointer to a function 1' => ["void(*)(void)", "void(*)(void)", true],
+    'pointer to a function 2-1' => ["int, void(*)(int, long)", "int, void(*)(int, long)", true],
+    'pointer to a function 2-2' => ["int, void(*)(int, long)", "int", true],
+    'pointer to a function 3-1' => ["void(*)(int, long), int", "void(*)(int, long), int", true],
+    'pointer to a function 3-2' => ["void(*)(int, long), int", "void(*)(int, long)", true],
+    'pointer to a function 4' => ["int, void(*)(int, long)", "int, void(*)(int)", false],
+    'pointer to a function 5' => ["int, void(*)(int, long*)", "int, void(*)(int, long)", false])
+  def test_containArgList(data)
+    outer, inner, expected = data
+    block = ClassBlock.new("")
+    assert_equal(expected, block.containArgList?(outer, inner))
   end
 
   data(
@@ -3703,6 +3977,28 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("", actualHpp)
     assert_false(actualCpp.include?("FuncOther"))
     assert_true(blockBase.canTraverse?)
+  end
+
+  def test_formatStubClassWithConstructor
+    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock.connect(TypedefBlock.new("typedef int MyInt;"))
+
+    baseBlock = ClassBlock.new("class Base")
+    baseBlock.parseChildren("protected:")
+    baseBlock.parseChildren("Base(MyInt b);")
+    rootBlock.connect(baseBlock)
+
+    derivedBlock = ClassBlock.new("class Derived : public Base")
+    derivedBlock.parseChildren("public:")
+    line = "Derived(int d);"
+    derivedBlock.parseChildren(line)
+    rootBlock.connect(derivedBlock)
+    rootBlock.collectAliases
+
+    table = {"Base" => baseBlock, "Derived" => derivedBlock}
+    derivedBlock.setBaseClass(table)
+    derivedBlock.instance_variable_set(:@undefinedConstructorSet, derivedBlock.subConstructorSet)
+    assert_equal("Derived::Derived(int d) : Base(d) {}\n", derivedBlock.formatStub)
   end
 
   def test_formatMockClassWithDefault

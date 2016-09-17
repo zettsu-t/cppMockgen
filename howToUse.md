@@ -236,14 +236,50 @@ the callee calls. It leads that the test case needs all source files
 to test the caller alone. Making stubs automatically eases this
 burden.
 
+#### Functions except constructors
+
 To avoid compilation errors, stub variables take their initializer
 that CppMockGen generates
+
 * 0 for constant pointers : T* const (not pointers to const variables
   : const T*)
 * First members of enums and enum classes (may not be equal to 0)
 * Unspecified for other cases and implicitly defined default
   initializers are used. It means stub variables must be default
   constructive.
+
+#### Constructors
+
+If a constructor in a class are missing and the class inherits other
+classes that are non-default constructive, the constructor requires
+explicit base class initialization with arguments for one of
+constructors in the base class.
+
+In generating such constructors, CppMockGen tries to forward arguments
+of constructors to its base classes.
+
+* If parameter lists between derived and base classes are same,
+  generated constructors in the derived class initialize the base
+  class with same arguments.
+* If parameter lists of a constructor in the base is shorter than one
+  of the derived class, generated constructors in the derived class
+  initialize the base class with some of leading arguments as many as
+  possible.
+* If parameter lists of a constructor in the base is longer than one
+  of the derived class, CppMockGen does not match them.
+* These matching are based on whether each type in parameter lists are
+  same or not. Type aliases are resolved but standard conversions such
+  as int to long and casting pointers are not applied.
+
+If the derived and base classes have multiple constructors, CppMockGen
+matches them as much possible.
+
+If no matching for constructors between the derived and base classes
+is available, CppMockGen does not create an explicit initializer for
+the base class in generated constructors. If one of base classes is
+non-default constructive, this may lead compilation errors. This is
+valid on multiple inheritance for default constructive interface
+classes.
 
 ### Arguments of constructors for generated classes
 

@@ -233,11 +233,17 @@ CppMockGen does not support some C++ features such as
   ref-qualifier (`&` and `&&`).
 * Matching argument types between link errors and header files handles
   only simple syntax. This causes some missing stubs for references
-  for arrays, pointers to member functions and so on.
+  for arrays, pointers to functions with multiple arguments, pointers
+  to member functions and so on.
 
 Instead of using va_arg in C++, I think it is more appropriate to use
 boost::any and std::tuple to pass arbitrary type and number of
 arguments.
+
+Instead of writing types of pointers to functions as arguments
+directly, please consider to define their aliases and write them as
+arguments if available.
+
 
 ## Data structure and converting C++ code
 

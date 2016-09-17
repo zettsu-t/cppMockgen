@@ -50,6 +50,16 @@ module Mockgen
     end
   end
 
+  # split by commas except ones in pointers to functions
+  class ArgumentSplitter
+    attr_reader :argSet
+    def initialize(line)
+      @argSet = Mockgen::Common::StringOfParenthesis.new(line).parse.map do |element|
+        element[1].nil? ? element[0].gsub(/,/,",,") : element[0]
+      end.join("").split(/,,/).reject(&:empty?)
+    end
+  end
+
   # Block-scoped typedef set
   class TypeAliasSet
     # Public only to merge other instances
@@ -701,7 +711,7 @@ module Mockgen
 
   # Extract argument variables from a typed argument list
   class ArgVariableSet
-    attr_reader :preFuncSet, :postFuncSet, :funcName, :pureVirtual
+    attr_reader :preFuncSet, :postFuncSet, :funcName, :pureVirtual, :arity
     attr_reader :argSetStr, :argSetWithoutDefault, :argTypeStr, :argNameStr
 
     def initialize(line)
@@ -710,7 +720,7 @@ module Mockgen
 
       replacedLine = replaceNullExpression(line)
       argSetStr, @preFuncSet, @postFuncSet, @funcName, @pureVirtual = splitByArgSet(replacedLine)
-      @argSetStr, @argSetWithoutDefault, @argTypeStr, @argNameStr = extractArgSet(argSetStr) if argSetStr
+      @argSetStr, @argSetWithoutDefault, @argTypeStr, @argNameStr, @arity = extractArgSet(argSetStr) if argSetStr
     end
 
     def replaceNullExpression(line)
@@ -761,13 +771,14 @@ module Mockgen
 
     def extractArgSet(line)
       argSetStr = line.strip
-      return ["", "", "", ""] if argSetStr.empty? || (argSetStr == "void")
+      return ["", "", "", "", 0] if argSetStr.empty? || (argSetStr == "void")
 
       serial = 1
       argTypeSet = []
       argNameSet = []
       newArgStrSet = []
       argSetWithoutDefaultSet = []
+
       argSetStr.split(/,/).each do |argStr|
         argType, argName, newArgStr = TypedVariable.new(argStr.strip).parseAsArgument(serial)
         argTypeSet << argType
@@ -779,7 +790,7 @@ module Mockgen
         serial += 1
       end
 
-      return newArgStrSet.join(","), argSetWithoutDefaultSet.join(","), argTypeSet.join(","), argNameSet.join(",")
+      return newArgStrSet.join(","), argSetWithoutDefaultSet.join(","), argTypeSet.join(","), argNameSet.join(","), serial - 1
     end
   end
 
@@ -950,6 +961,31 @@ module Mockgen
     end
   end
 
+  class ResolvedArgTypeSetStr
+    attr_reader :str
+
+    def initialize(scopedBlock, argTypeSetStr)
+      @str = sortArgTypeSetStr(scopedBlock, argTypeSetStr)
+    end
+
+    def sortArgTypeSetStr(scopedBlock, argTypeSetStr)
+      originalTypeStr = argTypeSetStr.split(",").map do |argTypeStr|
+        # Treat [] as * because [] in parameter lists is a syntactic sugar of *
+        # and convert it before resolved typenames
+        scopedBlock.resolveAlias(argTypeStr.gsub(/\[[^\]]*\]/, "*"))
+      end.join(",")
+      sortArgTypeStr(originalTypeStr)
+    end
+
+    def sortArgTypeStr(argTypeStr)
+      # Remove spaces between * and &
+      str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
+      # Do not sort beyond * and &
+      # Do not mix different types
+      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
+    end
+  end
+
   # Compare argument types between a linker output and a source file
   class FunctionReferenceSet
     def initialize(block, reference, fullname, name, argTypeStr, postFunc, noMatchingTypes)
@@ -1000,20 +1036,7 @@ module Mockgen
     end
 
     def sortArgTypeSetStr(argTypeSetStr)
-      originalTypeStr = argTypeSetStr.split(",").map do |argTypeStr|
-        # Treat [] as * because [] in parameter lists is a syntactic sugar of *
-        # and convert it before resolved typenames
-        @scopedBlock.resolveAlias(argTypeStr.gsub(/\[[^\]]*\]/, "*"))
-      end.join(",")
-      sortArgTypeStr(originalTypeStr)
-    end
-
-    def sortArgTypeStr(argTypeStr)
-      # Remove spaces between * and &
-      str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
-      # Do not sort beyond * and &
-      # Do not mix different types
-      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
+      ResolvedArgTypeSetStr.new(@scopedBlock, argTypeSetStr).str
     end
 
     def postFunctionPhrase(phrase)
@@ -1039,11 +1062,20 @@ module Mockgen
   # Constructor with arbitrary number of arguments
   # Templates are not supported yet
   class ConstructorBlock < BaseBlock
+    attr_reader :arity, :argSetStr
+
     def initialize(line, className)
       super(line)
       @className = className
       @callBase = ""
-      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSet = parse(line, className)
+      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSetStr, @arity = parse(line, className)
+      @resolvedArgTypeStr = nil
+    end
+
+    def getResolvedArgTypeStr(classBlock)
+      # cache results
+      @resolvedArgTypeStr ||= ResolvedArgTypeSetStr.new(classBlock, @argTypeStr).str
+      @resolvedArgTypeStr
     end
 
     def parse(line, className)
@@ -1064,6 +1096,8 @@ module Mockgen
       typedArgSetWithoutDefault = ""
       argTypeStr = ""
       callBase = ""
+      argSetStr = ""
+      arity = 0
 
       if md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
         typedArgSet = md[1]
@@ -1071,12 +1105,13 @@ module Mockgen
         argVariableSet = ArgVariableSet.new(phrase)
         typedArgSet = argVariableSet.argSetStr
         typedArgSetWithoutDefault = argVariableSet.argSetWithoutDefault
-        argSet = argVariableSet.argNameStr
+        argSetStr = argVariableSet.argNameStr
         argTypeStr = argVariableSet.argTypeStr
+        arity = argVariableSet.arity
         valid = true
       end
 
-      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSet]
+      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr, arity]
     end
 
     def removeInitializerList(line)
@@ -1097,15 +1132,17 @@ module Mockgen
 
     def setBaseClassName(className)
       # Add a comma to cascade other initializer arguments
-      @callBase = (@argSet.empty?) ? "" : "#{className}#{@typeStr}(#{@argSet}), "
+      @callBase = (@argSetStr.empty?) ? "" : "#{className}#{@typeStr}(#{@argSetStr}), "
     end
 
     # Non-default constructive base classes are not supported yet
-    def makeStubDef(className)
+    def makeStubDef(classBlock, className)
       fullname = getNonTypedFullname(@className)
       # Exclude redundant class name qualifiers
       funcname = (@parent && @parent.isClass?) ? fullname : "#{fullname}::#{@className}"
-      "#{funcname}(#{@typedArgSet}) {}\n"
+
+      initializerStr = classBlock.getConstructorArgStrSet(self)
+      "#{funcname}(#{@typedArgSet}) #{initializerStr}{}\n"
     end
 
     # Empty if call a constructor without arguments
@@ -1707,6 +1744,8 @@ module Mockgen
   # Class and struct
   class ClassBlock < BaseBlock
     attr_reader :mockName, :decoratorName, :forwarderName
+    # public for its derived classes
+    attr_reader :subConstructorSet
 
     def initialize(line)
       super
@@ -1736,6 +1775,7 @@ module Mockgen
       # One or more constructors
       @destructor = nil
       @constructorSet = []
+      @subConstructorSet = []
       @publicMemberFunctionSet = []
       @protectedMemberFunctionSet = []
       @memberVariableSet = []
@@ -1826,9 +1866,8 @@ module Mockgen
         @destructor = destructorBlock
       elsif isConstructor?(line)
         newBlock = ConstructorBlock.new(line, @name)
-        if @pub
-          @constructorSet << newBlock if newBlock.canTraverse?
-        end
+        @constructorSet << newBlock if @pub && newBlock.canTraverse?
+        @subConstructorSet << newBlock if !@private && newBlock.canTraverse?
         @allConstructorSet << newBlock if newBlock.canTraverse?
       elsif isPointerToFunction?(line)
       # Not supported yet
@@ -1987,6 +2026,60 @@ module Mockgen
         (str.empty? || str == "void") ? 0 : str.count(",")
       end
       set.min
+    end
+
+    def getConstructorArgStrSet(ctorBlock)
+      strSet = @baseClassBlockSet.map do |baseBlock|
+        makeConstructorArgStr(ctorBlock, baseBlock)
+      end.compact
+
+      # Empty parameter lists in base classes imply they do not
+      # require explicit base class initialization.
+      strSet.empty? ? "": (": " + strSet.join(", ") + " ")
+    end
+
+    # Search for parameter lists of constructors in a base class of
+    # this class to find a constructor that has an exact or most
+    # likely argument list
+    def makeConstructorArgStr(ctorBlock, baseBlock)
+      argTypeStr = ctorBlock.getResolvedArgTypeStr(self)
+
+      # List constructors of which parameter lists the parameter list
+      # of the constructor in this class covers.
+      blockSet = baseBlock.subConstructorSet.map do |baseCtor|
+        baseArgTypeStr = baseCtor.getResolvedArgTypeStr(baseBlock)
+        containArgList?(argTypeStr, baseArgTypeStr) ? [baseArgTypeStr, baseCtor] : nil
+      end.compact.sort { |l, r| l[0] <=> r[0] }
+
+      # The last and longest parameter list is most likely or exact
+      # for the constructor of this class.
+      return nil if blockSet.empty?
+
+      # No explicit initializer needed for constructors without arguments
+      baseArgTypeStr = (blockSet[-1])[0]
+      return nil if baseArgTypeStr.empty?
+      argStr = ctorBlock.argSetStr
+
+      # Extract leading arguments
+      arity = (blockSet[-1])[1].arity
+      str = argStr.split(",")[0..(arity-1)].join(",")
+
+      # Return a base class initializer
+      str.empty? ? nil : (baseBlock.getFullname() + "(" + str + ")")
+    end
+
+    # Return true if the inner string begins from the outer string
+    # and return false if not
+    def containArgList?(outer, inner)
+      return true if inner.empty? || (outer == inner)
+      pos = outer.index(inner)
+      return false if pos.nil? || (pos != 0)
+
+      # False when sub matching between commas fails
+      innerSet = ArgumentSplitter.new(inner).argSet
+      outerSet = ArgumentSplitter.new(outer).argSet
+      return false if innerSet.empty? || outerSet.empty? || (innerSet.size > outerSet.size)
+      (0..([innerSet.size, outerSet.size].min-1)).all? { |i| innerSet[i] == outerSet[i] }
     end
 
     # Generate class definition texts
@@ -2219,7 +2312,7 @@ module Mockgen
       name = getFullname()
 
       @undefinedConstructorSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse?
+        src += member.makeStubDef(self, name) if member.canTraverse?
       end
 
       if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse?

@@ -33,6 +33,8 @@ make runthrough
   Google Test / Google Mock
 * Runs tests for _script/*.rb_ and reports its results
 
+Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
+
 ## And more
 
 Please read [howToUse.md](howToUse.md) and [notes.md](notes.md) to know more details.

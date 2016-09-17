@@ -39,6 +39,17 @@ namespace Sample1 {
     }
 }
 
+namespace NamespaceLevel1 {
+    L1ClassNotDefined g_l1ClassNotDefined;
+    namespace Level2 {
+        L2ClassNotDefined g_l2ClassNotDefined;
+        MultiConstructorDerived g_multiConstructorDerived1;
+        MultiConstructorDerived g_multiConstructorDerived2(static_cast<int>(1));
+        MultiConstructorDerived g_multiConstructorDerived3(static_cast<int>(2), static_cast<long>(3));
+        MultiConstructorDerived g_multiConstructorDerived4(nullptr, nullptr, static_cast<long>(4));
+    }
+}
+
 int TopLevelSampleFunc(void) {
     TopLevelClass obj;
     // Cause link errors for undefined pLocalStruct_
@@ -58,6 +69,10 @@ int TopLevelSampleFunc(void) {
         + g_undefinedObject0.GetValue() + g_undefinedVar0
         + g_undefinedObject1.GetValue() + NamespaceLevel1::g_undefinedVar1
         + g_undefinedObject2.GetValue() + NamespaceLevel1::Level2::g_undefinedVar2
+        + NamespaceLevel1::Level2::g_multiConstructorDerived1.GetValue()
+        + NamespaceLevel1::Level2::g_multiConstructorDerived2.GetValue()
+        + NamespaceLevel1::Level2::g_multiConstructorDerived3.GetValue()
+        + NamespaceLevel1::Level2::g_multiConstructorDerived4.GetValue()
         + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2;
 }
 
@@ -70,13 +85,6 @@ int FreeFunctionCalleeSample(void) {
 
 // a vtable of BaseClassNotDefined is required here implicitly
 DerivedClassNotDefined g_topLevelClassNotDefined;
-
-namespace NamespaceLevel1 {
-    L1ClassNotDefined g_l1ClassNotDefined;
-    namespace Level2 {
-        L2ClassNotDefined g_l2ClassNotDefined;
-    }
-}
 
 /*
 Local Variables:
