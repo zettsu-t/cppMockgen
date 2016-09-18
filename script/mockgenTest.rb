@@ -7,6 +7,7 @@ require 'test/unit'
 
 # Omit the module name in this testing
 include Mockgen
+include MockgenFeatures
 
 TestInputSourceFileForIsystem = "tested_src/linkErrorForTesting.c"
 TestInputSourceFileSet = ["tested_src/mockgenSampleBody.cpp", "tested_src/mockgenSampleUser.cpp"]
@@ -34,15 +35,36 @@ def getTestSwitchMockCondition(funcname, varname)
   "#{varname} && !#{funcname}_#{Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX}"
 end
 
+def checkIfExceptionCaught(expr)
+  [false, true].map do |ignore|
+    caught = false
+    MockgenFeatures.ignoreAllExceptions = ignore
+    begin
+      expr.call
+    rescue => e
+      caught = true
+    ensure
+      MockgenFeatures.ignoreAllExceptions = false
+    end
+    caught
+  end
+end
+
 class TestChompAfterDelimiter < Test::Unit::TestCase
   data(
-    'not split' => ["Func()", ":", "Func()", nil],
-    'constructor' => ["Derived() : Base()", ":", "Derived()", ": Base()"],
-    'assignment' => ["int a = 1", "=", "int a", "= 1"],
-    'mixed' => ["int a = (int)1", "=", "int a", "= (int)1"])
+    'empty 1' => ["", ":", "", "", nil],
+    'empty 2' => ["", ":", "::", "", nil],
+    'not split' => ["Func()", ":", "", "Func()", nil],
+    'constructor' => ["Derived() : Base()", ":", "", "Derived()", ": Base()"],
+    'assignment' => ["int a = 1", "=", "", "int a", "= 1"],
+    'mixed' => ["int a = (int)1", "=", "", "int a", "= (int)1"],
+    'ignore :: 1' => ["Derived(::) : Base", ":", "::", "Derived(::)", ": Base"],
+    'ignore :: 2' => ["::Name::Derived(::) : Base", ":", "::", "::Name::Derived(::)", ": Base"],
+    'ignore :: 3' => ["Derived(::) : Base { body", "{", "::", "Derived(::) : Base", "{ body"],
+    ': at end' => ["Derived() :", ":", "::", "Derived()", ":"])
   def test_chompAfterDelimiter(data)
-    line, delimiter, expected, expectedTail  = data
-    splitter = Mockgen::Common::ChompAfterDelimiter.new(line, delimiter)
+    line, delimiter, excludedStr, expected, expectedTail  = data
+    splitter = Mockgen::Common::ChompAfterDelimiter.new(line, delimiter, excludedStr)
     assert_equal(expected, splitter.str)
     assert_equal(expectedTail, splitter.tailStr)
   end
@@ -160,6 +182,22 @@ class TestConstants < Test::Unit::TestCase
 end
 
 class TestTypeStringWithoutModifier < Test::Unit::TestCase
+  def test_metaCharacters
+    Mockgen::Constants::REGEXP_META_CHARACTER_SET.each do |c|
+      [c, "Name" + c, c + "Name"].each do |str|
+        assert_true(RegexpMetaCharacter.new.contained?(str))
+      end
+    end
+  end
+
+  def test_nonMtaCharacters
+    ["", " ", ":", ",", "_"].each do |c|
+      assert_false(RegexpMetaCharacter.new.contained?(c))
+    end
+  end
+end
+
+class TestTypeStringWithoutModifier < Test::Unit::TestCase
   def test_removeReservedWord
     Mockgen::Constants::KEYWORD_USER_DEFINED_TYPE_SET.each do |key|
       name = "ConcreteName"
@@ -228,6 +266,22 @@ class TestArgumentSplitter < Test::Unit::TestCase
     line, expected, expectedWithSpaces = data
     assert_equal(expected, ArgumentSplitter.new(line).argSet)
     assert_equal(expectedWithSpaces, ArgumentSplitterWithSpaces.new(line).argSet)
+  end
+end
+
+class TestTemplateParameterListFilter < Test::Unit::TestCase
+  data(
+    'empty' => ["", ""],
+    'word' => ["int", "int"],
+    'words' => ["class Name", "class Name"],
+    'one' => ["template <typename T> class Name", "template <> class Name"],
+    'multi' => ["template <typename T> using Array = typename std::vector<T>;",
+                "template <> using Array = typename std::vector <> ;"],
+    'nested' => ["template <class T, class S = NameSpace::tmp<T>> Name",
+                 "template <> Name"])
+  def test_all(data)
+    line, expected = data
+    assert_equal(expected, TemplateParameterListFilter.new(line).str)
   end
 end
 
@@ -2870,6 +2924,7 @@ class TestClassBlock < Test::Unit::TestCase
   data(
     'base class' => ["class NameC", "NameC", "class", false, []],
     'derived class' => ["class NameC : public Base", "NameC", "class", false, ["Base"]],
+    'derived class and namespace' => ["class NameC : public A::Base", "NameC", "class", false, ["::A::Base"]],
     'derived struct' => ["struct NameS : Base", "NameS", "struct", true, ["Base"]])
   def test_initializeAndParse(data)
     line, name, typeName, pub, baseClassNameSet = data
@@ -3507,7 +3562,9 @@ class TestClassBlock < Test::Unit::TestCase
     'template class' => ["template <typename T> class ClassName",
                          true, "ClassName", "class", false],
     'template struct' => ["template <typename T, typename S> struct StructName",
-                          true, "StructName", "struct", true])
+                          true, "StructName", "struct", true],
+    'template class ::' => ["template <typename T = Name::Class> class ClassName",
+                            true, "ClassName", "class", false])
   def test_parseClassName(data)
     line, isTemplate, name, typename, pub = data
     block = ClassBlock.new("")
@@ -4095,6 +4152,17 @@ class TestClassBlock < Test::Unit::TestCase
     derivedBlock.setBaseClass(table)
     derivedBlock.instance_variable_set(:@undefinedConstructorSet, derivedBlock.subConstructorSet)
     assert_equal("Derived::Derived(int d) : Base(d) {}\n", derivedBlock.formatStub)
+  end
+
+
+  def test_formatStubRaise
+    block = ClassBlock.new("class Base")
+    block.instance_variable_set(:@undefinedConstructorSet, nil)
+
+    expr = -> {block.formatStub}
+    caught, ignored = checkIfExceptionCaught(expr)
+    assert_true(caught)
+    assert_false(ignored)
   end
 
   def test_formatMockClassWithDefault
@@ -5263,7 +5331,8 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
                                            sourceFilenameSet, defaultNoForwardingToMock,
-                                           fillVtable, noOverloading, varOnly, updateChangesOnly)
+                                           fillVtable, noOverloading, varOnly,
+                                           updateChangesOnly)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -5397,6 +5466,16 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_true(typedefBlock.canTraverse?)
   end
 
+  def test_parseLineRaise
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    parser.instance_variable_set(:@blockFactory, nil)
+
+    expr = -> {parser.parseLine("class Name {")}
+    caught, ignored = checkIfExceptionCaught(expr)
+    assert_true(caught)
+    assert_false(ignored)
+  end
+
   def test_eliminateUnusedBlock
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parentBlock = BaseBlock.new("Parent")
@@ -5499,6 +5578,27 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(3, actual.size)
     assert_equal(expected, actual[0].instance_variable_get(:@funcSet).size)
     assert_equal(expected, actual[1].instance_variable_get(:@funcSet).size)
+  end
+
+  def test_collectFreeFunctionsRaise
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    rootBlock = RootBlock.new("")
+    funcSetRoot = FreeFunctionSet.new(rootBlock)
+    funcRoot = FreeFunctionBlock.new("extern int Func1(int a);")
+    rootBlock.connect(funcRoot)
+
+    parser.collectFreeFunctions(funcSetRoot, rootBlock, ['Func\\d'])
+
+    MockgenFeatures.mockGenTestingException = true
+    caught = false
+    begin
+      parser.collectFreeFunctions(funcSetRoot, rootBlock, ['Func('])
+    rescue
+      caught = true
+    ensure
+      MockgenFeatures.mockGenTestingException = false
+    end
+    assert_true(caught)
   end
 
   data(
@@ -5812,6 +5912,16 @@ class TestCppFileParser < Test::Unit::TestCase
     assert_equal(expected, vsStr)
     assert_equal("extern #{className}#{postfix} #{varName}#{postfix};\n", declStr)
     assert_equal("#{className}#{postfix} #{varName}#{postfix}(#{varName},0,0);\n", defStr)
+  end
+
+  def test_makeClassSetRaise
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    parser.instance_variable_set(:@block, nil)
+
+    expr = -> {parser.makeClassSet}
+    caught, ignored = checkIfExceptionCaught(expr)
+    assert_true(caught)
+    assert_false(ignored)
   end
 
   def test_doForAllBlocksAndBlockSet
@@ -6269,6 +6379,29 @@ class TestMockGenLauncher < Test::Unit::TestCase
 
     assert_true(target.instance_variable_get(:@updateChangesOnly))
     assert_equal(1, target.instance_variable_get(:@numberOfClassInFile))
+  end
+
+  data(
+    'simple' => Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERROR,
+    'multi' => Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERRORS)
+  def test_ignoreInternalErrors(data)
+    assert_false(MockgenFeatures.ignoreAllExceptions)
+    MockgenFeatures.ignoreAllExceptions = false
+
+    caught = false
+    begin
+      args = [Mockgen::Constants::ARGUMENT_MODE_STUB, data]
+      args.concat(getOptionSet())
+      target = MockGenLauncher.new(args)
+      assert_true(MockgenFeatures.ignoreAllExceptions)
+    rescue => e
+      caught = true
+      raise e
+    ensure
+      MockgenFeatures.ignoreAllExceptions = false
+    end
+
+    assert_false(caught)
   end
 
   data(

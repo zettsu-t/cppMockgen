@@ -4,6 +4,12 @@
 # Common classes
 
 # String operations
+module MockgenFeatures
+  attr_accessor :mockGenTestingException, :ignoreAllExceptions
+  @@mockGenTestingException = false
+  @@ignoreAllExceptions = false
+end
+
 module Mockgen
   module Common
     # Remove CRLF on Cygwin and MinGW
@@ -20,8 +26,22 @@ module Mockgen
     class ChompAfterDelimiter
       attr_reader :str, :tailStr
 
-      def initialize(argStr, delimiter)
-        pos = argStr.index(delimiter)
+      def initialize(argStr, delimiter, excludedStr)
+        pos = nil
+        unless argStr.empty?
+          pos = 0
+          while(pos < argStr.size)
+            pos = argStr.index(delimiter, pos)
+            break if pos.nil?
+            break if excludedStr.empty?
+
+            # split with ":", not with "::"
+            endPos = [pos + excludedStr.size, argStr.size].min - 1
+            break if argStr[pos..endPos] != excludedStr
+            pos = endPos + 1
+          end
+        end
+
         @str = pos ? argStr[0..(pos-1)].rstrip : argStr.dup
         @tailStr = pos ? argStr[pos..-1] : nil
       end

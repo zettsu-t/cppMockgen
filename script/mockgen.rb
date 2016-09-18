@@ -51,6 +51,12 @@
 #   the header files to create stubs. If stubs are missing, please try
 #   this option.
 #
+# - optional -ignoreinternalerrors
+#   This option makes this script ignore internal exceptions in
+#   parsing input files and creating stubs and mocks. If this script
+#   fails due to C++ features that this script does not support,
+#   please enable this option for workarounds.
+#
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [input file]  LD output (link error log) file

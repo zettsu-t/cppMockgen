@@ -159,6 +159,12 @@ Limitations of CppMockGen come from both features of CppMockGen and
 behavior of the clang front end. To remove the later, I have to
 rewrite CppMockGen with C++ to call libTooling in LLVM directly.
 
+CppMockGen relies on code the clang front end writes. This means if
+you input C++ compliant code and proper include paths to the clang
+front end, it passes at least well-formed code to CppMockGen. When the
+clang front end reports errors, it may pass something suspicious code
+to CppMockGen and CppMockGen may also write or miss some outputs.
+
 ### Determine a symbol is in which file
 
 CppMockGen cannot determine each symbol is declared and defined in

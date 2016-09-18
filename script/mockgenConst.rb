@@ -23,6 +23,8 @@ module Mockgen
     ARGUMENT_FILL_VTABLE = "-vtable".freeze
     ARGUMENT_NO_OVERLOADING = "-nooverloading".freeze
     ARGUMENT_UPDATE_CHANGES_ONLY = "-updatechangesonly".freeze
+    ARGUMENT_IGNORE_INTERNAL_ERROR =  "-ignoreinternalerror".freeze
+    ARGUMENT_IGNORE_INTERNAL_ERRORS = "-ignoreinternalerrors".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
@@ -123,6 +125,10 @@ module Mockgen
     CTAGS_OPTIONS = "-x --c++-kinds=f".freeze
     # keywords in TAGS
     CTAGS_TYPENAME_FUNCTION_DEFINITION = "function".freeze
+
+    # Meta characters for Ruby regular expressions
+    # - is context dependent but always invalid for C++ symbols
+    REGEXP_META_CHARACTER_SET = ["-", "(", ")", "[", "]", "{", "}", ".", "?", "+", "*", "|", "\\"].map(&:freeze).freeze
   end
 end
 

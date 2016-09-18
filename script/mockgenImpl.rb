@@ -18,8 +18,19 @@ require 'tempfile'
 require_relative './mockgenConst.rb'
 require_relative './mockgenCommon.rb'
 
+include MockgenFeatures
+
 module Mockgen
   class MockgenRuntimeError < StandardError
+  end
+
+  class RegexpMetaCharacter
+    def initialize
+    end
+
+    def contained?(str)
+      Mockgen::Constants::REGEXP_META_CHARACTER_SET.any? { |c| str.include?(c) }
+    end
   end
 
   class TypeStringWithoutModifier
@@ -70,6 +81,16 @@ module Mockgen
     attr_reader :argSet
     def initialize(line)
       super(line, :parseAndKeepSpaces, " ")
+    end
+  end
+
+  # Discard template parameters
+  class TemplateParameterListFilter
+    attr_reader :str
+    def initialize(line)
+      @str = Mockgen::Common::StringOfAngleBrackets.new(line).parse.map do |element|
+        element[1].nil? ? element[0].strip : "<>"
+      end.join(" ")
     end
   end
 
@@ -611,7 +632,7 @@ module Mockgen
       # Remove default argument
       newArgStr = @line.dup
 
-      splitter = Mockgen::Common::ChompAfterDelimiter.new(@line, "=")
+      splitter = Mockgen::Common::ChompAfterDelimiter.new(@line, "=", "")
       mainBlock = splitter.str
       defaultValueBlock = splitter.tailStr
       str, arrayBlock = splitArrayBlock(mainBlock)
@@ -810,7 +831,7 @@ module Mockgen
         argNameSet << argName
         newArgStrSet << newArgStr
 
-        poststr = Mockgen::Common::ChompAfterDelimiter.new(newArgStr, "=").str
+        poststr = Mockgen::Common::ChompAfterDelimiter.new(newArgStr, "=", "").str
         argSetWithoutDefaultSet << poststr
         serial += 1
       end
@@ -865,7 +886,7 @@ module Mockgen
       genericSet = []
       @varSet = generic.split(",").map do |str|
         # Delete default type if specified
-        phrase = Mockgen::Common::ChompAfterDelimiter.new(str.strip, "=").str
+        phrase = Mockgen::Common::ChompAfterDelimiter.new(str.strip, "=", "").str
         genericSet << phrase
         wordSet = phrase.split(/[\s\.]+/)
         postfix = str.include?("...") ? "..." : ""
@@ -922,6 +943,9 @@ module Mockgen
         # Class variable definitions require qualified names with their class names.
         prefix = ""
         classNamePrefix = "#{className}::"
+
+        # Prevent from throwing RegexpError
+        return "" if RegexpMetaCharacter.new.contained?(classNamePrefix)
         unless @typeStr.match(/#{classNamePrefix}[^:]+$/)
           # Convert to a qualified name if not so yet
           prefix = (!className.empty? && localType) ? classNamePrefix : ""
@@ -952,12 +976,12 @@ module Mockgen
       return if typeName.empty? || varName.empty?
 
       @varName = varName
-      varStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[")
+      varStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[", "")
       @varNameNoCardinality = varStr.str
       @arrayStr = varStr.tailStr
       @arrayStr ||= ""
 
-      @className = Mockgen::Common::ChompAfterDelimiter.new(typeName, "[").str.split(/[\*&\s]+/)[-1]
+      @className = Mockgen::Common::ChompAfterDelimiter.new(typeName, "[", "").str.split(/[\*&\s]+/)[-1]
       @typeStr = typeName
       @canTraverse = true
     end
@@ -1124,7 +1148,9 @@ module Mockgen
       argSetStr = ""
       arity = 0
 
-      if md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
+      # Prevent from throwing RegexpError
+      if !RegexpMetaCharacter.new.contained?(className) &&
+         md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
         typedArgSet = md[1]
 
         argVariableSet = ArgVariableSet.new(phrase)
@@ -1140,7 +1166,7 @@ module Mockgen
     end
 
     def removeInitializerList(line)
-      Mockgen::Common::ChompAfterDelimiter.new(line, ":").str
+      Mockgen::Common::ChompAfterDelimiter.new(line, ":", "::").str
     end
 
     def canTraverse?
@@ -1573,6 +1599,7 @@ module Mockgen
       return @valid if filterSet.empty?
 
       @valid &= filterSet.any? do |funcFilter|
+        # If the funcFilter throws RegexpError, the caller should catch it
         !funcName.match(/#{funcFilter}/).nil?
       end
       @valid
@@ -1944,6 +1971,7 @@ module Mockgen
       str = Mockgen::Common::StringOfAngleBrackets.new(line).parse.select do |element|
         element[1].nil?
       end.join(" ")
+      # Already checked if @name contains meta characters
       str.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
     end
 
@@ -1951,7 +1979,8 @@ module Mockgen
     def isPointerToFunction?(line)
       # Recursive regular expression
       pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
-      newline = Mockgen::Common::ChompAfterDelimiter.new(Mockgen::Common::ChompAfterDelimiter.new(line, ";").str, "{").str
+      body = Mockgen::Common::ChompAfterDelimiter.new(line, ";", "").str
+      newline = Mockgen::Common::ChompAfterDelimiter.new(body, "{", "").str
       phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
 
       return false unless phraseSet
@@ -1976,7 +2005,11 @@ module Mockgen
       @alreadyDefined = true if !filter.definedReferenceSet.nil? &&
                                 filter.definedReferenceSet.classDefined?(
                                   fullname, filter.definedReferenceSet.relativeNamespaceOnly)
-      @filteredOut = filter.classNameFilterOutSet.any? { |pattern| fullname.match(/#{pattern}/) }
+
+      @filteredOut = filter.classNameFilterOutSet.any? do |pattern|
+        # Prevent from throwing RegexpError later
+        !RegexpMetaCharacter.new.contained?(pattern) && fullname.match(/#{pattern}/)
+      end
       return unless canFilterByReferenceSet(filter)
 
       # Create a default destructor if it does not exist
@@ -2146,12 +2179,12 @@ module Mockgen
 
     def parseClassHeader(line, typenameStr)
       # Discard words between class/struct keyword and a class name
-      wordSet = Mockgen::Common::ChompAfterDelimiter.new(line, ":").str.strip.split(" ")
+      wordSet = Mockgen::Common::ChompAfterDelimiter.new(line, ":", "::").str.strip.split(" ")
       name = wordSet.empty? ? "" : wordSet[-1]
 
       classLine = line
       if line.include?("template")
-        param = TemplateParameter.new(Mockgen::Common::ChompAfterDelimiter.new(line, ":").str)
+        param = TemplateParameter.new(Mockgen::Common::ChompAfterDelimiter.new(line, ":", "::").str)
         # Ignore specialized classes
         return false if param.specialized || param.type.empty?
         classLine = param.type
@@ -2159,7 +2192,8 @@ module Mockgen
       end
 
       if md = classLine.match(/^#{typenameStr}\s+(\S+)/)
-        @name = name
+        # Prevent from throwing RegexpError later
+        @name = name unless RegexpMetaCharacter.new.contained?(name)
       else
         return false
       end
@@ -2336,20 +2370,24 @@ module Mockgen
       src = ""
       name = getFullname()
 
-      @undefinedConstructorSet.each do |member|
-        src += member.makeStubDef(self, name) if member.canTraverse?
-      end
+      begin
+        @undefinedConstructorSet.each do |member|
+          src += member.makeStubDef(self, name) if member.canTraverse?
+        end
 
-      if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse?
-        src += @undefinedDestructor.makeStubDef(name)
-      end
+        if !@undefinedDestructor.nil? && @undefinedDestructor.canTraverse?
+          src += @undefinedDestructor.makeStubDef(name)
+        end
 
-      @undefinedFunctionSet.each do |member|
-        src += member.makeStubDef(name) if member.canTraverse?
-      end
+        @undefinedFunctionSet.each do |member|
+          src += member.makeStubDef(name) if member.canTraverse?
+        end
 
-      @undefinedVariableSet.each do |member|
-        src += member.makeStubDefWithLocalType(name, @localTypeTable) if member.canTraverse?
+        @undefinedVariableSet.each do |member|
+          src += member.makeStubDefWithLocalType(name, @localTypeTable) if member.canTraverse?
+        end
+      rescue => e
+        raise e unless MockgenFeatures.ignoreAllExceptions
       end
 
       src
@@ -2765,7 +2803,7 @@ module Mockgen
     def initialize(name)
       @name = nil
       if name
-        varname = Mockgen::Common::ChompAfterDelimiter.new(name, "[").str
+        varname = Mockgen::Common::ChompAfterDelimiter.new(name, "[", "").str
         @name = (varname.size >= 2 && varname[0..1] == "::") ? varname[2..-1] : varname.dup
       end
     end
@@ -2802,7 +2840,9 @@ module Mockgen
         end
       else
         found = @refClassNameSet[className].any? do |ref|
-          strippedName.match(/\b#{ref.relativeClassName}$/) ? true : false
+          # Prevent from throwing RegexpError
+          !RegexpMetaCharacter.new.contained?(ref.relativeClassName) &&
+            strippedName.match(/\b#{ref.relativeClassName}$/) ? true : false
         end
       end
 
@@ -3038,7 +3078,8 @@ module Mockgen
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
-                   defaultNoForwardingToMock, fillVtable, noOverloading, varOnly, updateChangesOnly)
+                   defaultNoForwardingToMock, fillVtable, noOverloading, varOnly,
+                   updateChangesOnly)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -3266,7 +3307,14 @@ module Mockgen
         parentBlock = @block.parent
         @block = parentBlock
       else
-        block = @blockFactory.createBlock(line, @block)
+        begin
+        # Discard all template parameter lists
+          block = @blockFactory.createBlock(line, @block)
+        rescue => e
+          raise e unless MockgenFeatures.ignoreAllExceptions
+          block = BaseBlock.new(line)
+        end
+
         # Connect "... {" and "... ;" lines
         @block.connect(block)
         # Beginning of a block
@@ -3426,8 +3474,8 @@ module Mockgen
       return "", "", "", "" unless block
 
       # should move this to a parse phase...
-      varNameStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[")
-      varFullnameStr = Mockgen::Common::ChompAfterDelimiter.new(varFullname, "[")
+      varNameStr = Mockgen::Common::ChompAfterDelimiter.new(varName, "[", "")
+      varFullnameStr = Mockgen::Common::ChompAfterDelimiter.new(varFullname, "[", "")
 
       mockName = className + Mockgen::Constants::CLASS_POSTFIX_DECORATOR
       actualClassName = block.decoratorName
@@ -3474,12 +3522,16 @@ module Mockgen
     end
 
     def makeClassSet
-      if @stubOnly
-        lambdaToBlock = lambda { |block| block.makeStubSet }
-      else
-        lambdaToBlock = lambda { |block| block.makeClassSet }
+      begin
+        if @stubOnly
+          lambdaToBlock = lambda { |block| block.makeStubSet }
+        else
+          lambdaToBlock = lambda { |block| block.makeClassSet }
+        end
+        doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
+      rescue => e
+        raise e unless MockgenFeatures.ignoreAllExceptions
       end
-      doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
 
       # Cascade another method
       self
@@ -3532,7 +3584,15 @@ module Mockgen
 
     def collectFreeFunctions(freeFunctionSet, argBlock, filterSet)
       newSetArray = collectFreeFunctionArray(freeFunctionSet, argBlock, filterSet)
-      newSetArray.each { |set| set.filter(filterSet) }
+      newSetArray.each do |set|
+        begin
+          set.filter(filterSet)
+        rescue => e
+          # If a filter throws RegexpError, ignore the filter
+          raise e if MockgenFeatures.mockGenTestingException
+        end
+      end
+
       newSetArray
     end
 
@@ -3842,6 +3902,11 @@ module Mockgen
           @updateChangesOnly = true
           @numberOfClassInFile = 1
           caught = true
+        # Continuous "when" clauses do not fall through. It is different from C++ switch-case.
+        when Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERROR, Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERRORS then
+          argSet.shift
+          MockgenFeatures.ignoreAllExceptions = true
+          caught = true
         end
 
         next if caught
@@ -3927,7 +3992,8 @@ module Mockgen
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
-                                             @fillVtable, @noOverloading, @varOnly, @updateChangesOnly)
+                                             @fillVtable, @noOverloading, @varOnly,
+                                             @updateChangesOnly)
       parseHeader(parameterSet)
 
       # Value to return as process status code
