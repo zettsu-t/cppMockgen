@@ -52,11 +52,17 @@ module Mockgen
     class StringOfParenthesis
       def initialize(line)
         @line = line
+        @pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
       end
 
       def parse
-        pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
-        StringOfBrackets.new(@line).parse(pattern, '\s*(\(|\))\s*')
+        StringOfBrackets.new(@line).parse(@pattern, '\s*(\(|\))\s*')
+      end
+
+      def parseAndKeepSpaces
+        StringOfBrackets.new(@line).parse(@pattern, '(\s*\(|\)\s*)').map do |elements|
+          elements.map { |element| element.nil? ? nil : element.strip }
+        end
       end
     end
 

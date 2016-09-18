@@ -51,12 +51,25 @@ module Mockgen
   end
 
   # split by commas except ones in pointers to functions
-  class ArgumentSplitter
+  class BaseArgumentSplitter
+    attr_reader :argSet
+    def initialize(line, parser, delimiter)
+      @argSet = Mockgen::Common::StringOfParenthesis.new(line).send(parser).map do |element|
+        element[1].nil? ? element[0].gsub(/,/,",,") : element[0]
+      end.join(delimiter).split(/,,/).reject(&:empty?)
+    end
+  end
+
+  class ArgumentSplitter < BaseArgumentSplitter
+    def initialize(line)
+      super(line, :parse, "")
+    end
+  end
+
+  class ArgumentSplitterWithSpaces < BaseArgumentSplitter
     attr_reader :argSet
     def initialize(line)
-      @argSet = Mockgen::Common::StringOfParenthesis.new(line).parse.map do |element|
-        element[1].nil? ? element[0].gsub(/,/,",,") : element[0]
-      end.join("").split(/,,/).reject(&:empty?)
+      super(line, :parseAndKeepSpaces, " ")
     end
   end
 
@@ -606,6 +619,7 @@ module Mockgen
       # Assume T(f)(args) as a pointer to a function
       # T(f[])(args) is not supported
       phraseSet = Mockgen::Common::StringOfParenthesis.new(str).parse
+
       if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
         return parseFuncPtrArg(phraseSet, defaultValueBlock, serial)
       end
@@ -685,20 +699,31 @@ module Mockgen
     end
 
     def extractFuncPtrName(argPhrase, serial)
-      argSet = argPhrase.include?("::*") ? argPhrase.split("::") : [argPhrase]
-      phrase = argSet[-1]
-      typePrefix = (argSet.size > 1) ? (argSet[0..-2].join("::") + "::") : ""
+      name = "dummy#{serial}"
+      argSet = argPhrase.split(/(::|\*|&|\s+)/).map{ |word| word.strip }.reject(&:empty?)
+      return "", name, name if argSet.empty?
 
-      argType = typePrefix + phrase.gsub(/[^\*]/, "")
-      name = phrase.tr("*", "")
-      argStr = typePrefix + phrase
-
-      if (name.empty?)
-        argType = typePrefix + (phrase.include?("*") ? phrase : "")
-        name = "dummy#{serial}"
-        argStr = argType + name
+      modifieCharSet = ["*", "&"]
+      pos = nil
+      (argSet.size-1).downto(0) do |i|
+        word = argSet[i]
+        break if word == "::"
+        next if modifieCharSet.any? { |key| word == key }
+        pos = i
+        break
       end
 
+      if pos
+        name = argSet[pos]
+        argSet.delete_at(pos)
+      end
+
+      modifierSet, bodySet = argSet.partition { |word| modifieCharSet.any? { |key| word == key } }
+      modifierStr = modifierSet.join("")
+      bodyStr = bodySet.join("")
+      memFn = bodyStr.include?("::")
+      argType = memFn ? (bodyStr + modifierStr) : (modifierStr + bodyStr)
+      argStr = memFn ? (bodyStr + modifierStr + name) :  (modifierStr + bodyStr + name)
       return argType, name, argStr
     end
 
@@ -779,7 +804,7 @@ module Mockgen
       newArgStrSet = []
       argSetWithoutDefaultSet = []
 
-      argSetStr.split(/,/).each do |argStr|
+      ArgumentSplitterWithSpaces.new(argSetStr).argSet.each do |argStr|
         argType, argName, newArgStr = TypedVariable.new(argStr.strip).parseAsArgument(serial)
         argTypeSet << argType
         argNameSet << argName
@@ -1295,7 +1320,7 @@ module Mockgen
     def makeMockDef(className, postfix)
       constStr = (@constMemfunc) ? "_CONST" : ""
 
-      numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
+      numberOfArgs = ArgumentSplitter.new(@typedArgSetWithoutDefault).argSet.size
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 
@@ -1308,7 +1333,7 @@ module Mockgen
     def makeStubDef(outerName)
       constStr = (@constMemfunc) ? "const " : ""
 
-      numberOfArgs = @typedArgSetWithoutDefault.split(/,/).size
+      numberOfArgs = ArgumentSplitter.new(@typedArgSetWithoutDefault).argSet.size
       # Treat void-only arg empty
       numberOfArgs = 0 if @argSet.empty?
 

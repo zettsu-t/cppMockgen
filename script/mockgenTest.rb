@@ -50,21 +50,30 @@ end
 
 class TestStringOfParenthesis < Test::Unit::TestCase
   data(
-    'empty' => ["", []],
-    'one' => ["()", [["()", ""]]],
-    'one+str1' => ["(a)", [["(a)", "a"]]],
-    'one+str2' => ["( a )", [["(a)", "a"]]],
-    'two' => ["()( )", [["()", ""], ["()", ""]]],
-    'two+str' => ["( a ) ( b )", [["(a)", "a"], ["(b)", "b"]]],
-    'nested' => ["((a))( ( ( b ) ) )", [["((a))", "(a)"], ["(((b)))", "((b))"]]],
-    'out1' => ["f()", [["f", nil], ["()", ""]]],
-    'out2' => ["f ()g", [["f", nil], ["()", ""], ["g", nil]]],
-    'funcPtr1' => [" result(*f)(arg)", [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]],
+    'empty' => ["", [], []],
+    'one' => ["()", [["()", ""]], [["()", ""]]],
+    'one+str1' => ["(a)", [["(a)", "a"]], [["(a)", "a"]]],
+    'one+str2' => ["( a )", [["(a)", "a"]], [["( a )", "a"]]],
+    'two' => ["()( )", [["()", ""], ["()", ""]], [["()", ""], ["( )", ""]]],
+    'two+str' => ["( a ) ( b )", [["(a)", "a"], ["(b)", "b"]], [["( a )", "a"], ["( b )", "b"]]],
+    'nested' => ["((a))( ( ( b ) ) )", [["((a))", "(a)"], ["(((b)))", "((b))"]], [["( (a) )", "(a)"], ["( ( ( b ) ) )", "( ( b ) )"]]],
+    'out1' => ["f()", [["f", nil], ["()", ""]], [["f", nil], ["()", ""]]],
+    'out2' => ["f ()g", [["f", nil], ["()", ""], ["g", nil]], [["f", nil], ["()", ""], ["g", nil]]],
+    'funcPtr1' => [" result(*f)(arg)", [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]],
+                   [["result", nil], ["(*f)", "*f"], ["(arg)", "arg"]]],
     'funcPtr2' => [" const T* (*func) (void) const; ",
-                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]]])
+                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]],
+                   [["const", nil], ["T*", nil], ["(*func)", "*func"], ["(void)", "void"], ["const;", nil]]],
+    'funcPtr3' => [" T (*func) (int, long);",
+                   [["T", nil], ["(*func)", "*func"], ["(int, long)", "int, long"], [";", nil]],
+                   [["T", nil], ["(*func)", "*func"], ["(int, long)", "int, long"], [";", nil]]],
+    'funcPtr4' => [" T*(*Class::func)(int, long); ",
+                   [["T*", nil], ["(*Class::func)", "*Class::func"], ["(int, long)", "int, long"], [";", nil]],
+                   [["T*", nil], ["(*Class::func)", "*Class::func"], ["(int, long)", "int, long"], [";", nil]]])
   def test_splitByOuterParenthesis(data)
-    line, expected = data
+    line, expected, expectedWithSpaces = data
     assert_equal(expected, Mockgen::Common::StringOfParenthesis.new(line).parse)
+    assert_equal(expectedWithSpaces, Mockgen::Common::StringOfParenthesis.new(line).parseAndKeepSpaces)
   end
 end
 
@@ -210,13 +219,15 @@ end
 
 class TestArgumentSplitter < Test::Unit::TestCase
   data(
-    'empty' => ["", []],
-    'primitive' => ["int", ["int"]],
-    'primitives' => ["int, long", ["int", "long"]],
-    'pointer to a function' => ["int, void(*f)(int,long), long*", ["int", "void(*f)(int,long)", "long*"]])
+    'empty' => ["", [], []],
+    'primitive' => ["int", ["int"], ["int"]],
+    'primitives' => ["int, long", ["int", "long"], ["int", " long"]],
+    'pointer to a function' => ["int, void(*f)(int,long), long*", ["int", "void(*f)(int,long)", "long*"],
+                                ["int", " void (*f) (int,long) ",  " long*"]])
   def test_all(data)
-    line, expected = data
+    line, expected, expectedWithSpaces = data
     assert_equal(expected, ArgumentSplitter.new(line).argSet)
+    assert_equal(expectedWithSpaces, ArgumentSplitterWithSpaces.new(line).argSet)
   end
 end
 
@@ -1038,11 +1049,20 @@ class TestTypedVariable < Test::Unit::TestCase
   data(
     'empty' => ["int a", "int", "a", "int a"],
     'array' => ["int a[1]", "int", "a[1]", "int a[1]"],
-    'pointer' => ["const void* p", "const void *", "p", "const void* p"],
-    'pointer to function' => ["int(*func)()", "int (*) ()", "func", "int (*func) ()"])
+    'pointer' => ["const void* p", "const void *", "p", "const void* p"])
   def test_parseAsMemberVariable(data)
     line, expectedArgType, expectedArgName, expectedArgStr = data
     argType, argName = TypedVariable.new(line).parseAsMemberVariable
+    assert_equal(expectedArgType, argType)
+    assert_equal(expectedArgName, argName)
+  end
+
+  data(
+    'pointer to a function' => ["int(*func)()", "int (*) ()", "func", "int (*func) ()"],
+    'pointer to a member function' => ["int(C::func*)()", "int (C::*) ()", "func", "int (C::func*) ()"])
+  def test_parseFuncPtr(data)
+    line, expectedArgType, expectedArgName, expectedArgStr = data
+    argType, argName = TypedVariable.new(line).parse(1)
     assert_equal(expectedArgType, argType)
     assert_equal(expectedArgName, argName)
   end
@@ -1090,10 +1110,26 @@ class TestTypedVariable < Test::Unit::TestCase
   data(
     'empty' => ["", "", "dummy1", "dummy1"],
     'ptr' => ["*", "*", "dummy1", "*dummy1"],
+    'ref' => ["&", "&", "dummy1", "&dummy1"],
     'name' => ["f", "", "f", "f"],
     'ptrName1' => ["*f", "*", "f", "*f"],
-    'ptrName2' => ["f**", "**", "f", "f**"],
-    'memFuncPtr' => ["ClassName::*f", "ClassName::*", "f", "ClassName::*f"])
+    'ptrName2' => ["f*", "*", "f", "*f"],
+    'refName1' => ["&f", "&", "f", "&f"],
+    'refName2' => ["f&", "&", "f", "&f"],
+    'memFuncPtr 1-1' => ["ClassName::f*", "ClassName::*", "f", "ClassName::*f"],
+    'memFuncPtr 1-2' => ["ClassName::*f", "ClassName::*", "f", "ClassName::*f"],
+    'memFuncPtr 1-3' => ["ClassName:: *f", "ClassName::*", "f", "ClassName::*f"],
+    'memFuncPtr 1-4' => ["*ClassName::f", "ClassName::*", "f", "ClassName::*f"],
+    'memFuncPtr 2-1' => ["ClassName::*", "ClassName::*", "dummy1", "ClassName::*dummy1"],
+    'memFuncPtr 2-2' => ["ClassName::*", "ClassName::*", "dummy1", "ClassName::*dummy1"],
+    'memFuncPtr 2-3' => ["*ClassName::", "ClassName::*", "dummy1", "ClassName::*dummy1"],
+    'memFuncRef 1-1' => ["ClassName::f&", "ClassName::&", "f", "ClassName::&f"],
+    'memFuncRef 1-2' => ["ClassName::&f", "ClassName::&", "f", "ClassName::&f"],
+    'memFuncRef 1-3' => ["ClassName::& f", "ClassName::&", "f", "ClassName::&f"],
+    'memFuncRef 1-4' => ["&ClassName::f", "ClassName::&", "f", "ClassName::&f"],
+    'memFuncRef 2-1' => ["ClassName::&", "ClassName::&", "dummy1", "ClassName::&dummy1"],
+    'memFuncRef 2-2' => ["ClassName::&", "ClassName::&", "dummy1", "ClassName::&dummy1"],
+    'memFuncRef 2-3' => ["&ClassName::", "ClassName::&", "dummy1", "ClassName::&dummy1"])
   def test_extractFuncPtrName(data)
     line, expectedArgType, expectedName, expectedArgStr = data
     argType, name, argStr = TypedVariable.new(nil).extractFuncPtrName(line, 1)
@@ -1145,7 +1181,7 @@ class TestArgVariableSet < Test::Unit::TestCase
     'FuncPtr3' => ["int Func (int(*f)(int),void(*g)(void*)) const", "int", "const", "Func", false, 2,
                    "int (*f) (int),void (*g) (void*)", "int (*f) (int),void (*g) (void*)", "int (*) (int),void (*) (void*)", "f,g"],
     'DefaultArgs' => ["int Func (int a=0,long b=(long)0)", "int", "", "Func", false, 2,
-                      "int a=0,long b=(long)0", "int a,long b", "int,long", "a,b"],
+                      "int a=0,long b= (long) 0", "int a,long b", "int,long", "a,b"],
     'DefaultNullArgs1' => ["int Func (void* p=<null expr>)", "int", "", "Func", false, 1,
                            "void* p=NULL", "void* p", "void *", "p"],
     'DefaultNullArgs2' => ["int Func(long a,int(*f)(int)=aFunc)const", "int", "const", "Func", false, 2,
@@ -1182,29 +1218,50 @@ class TestArgVariableSet < Test::Unit::TestCase
   end
 
   data(
-    'no args' => ["", "", ""],
-    'void arg' => ["void", "", ""],
-    'primitive' => ["int arg", "int", "arg"],
-    'array1' => ["T[] array", "T[]", "array"],
-    'array2' => ["T[2] array", "T[2]", "array"],
-    'reference1' => ["int& arg", "int &", "arg"],
-    'reference2' => ["int & arg", "int &", "arg"],
-    'pointer1' => ["void* arg", "void *", "arg"],
-    'pointer2' => ["void * arg", "void *", "arg"],
-    'pointer double' => ["void ** arg", "void * *", "arg"],
-    'pointer and const' => ["const void *  const arg", "const void * const", "arg"],
-    'pointer and reference' => ["void*& arg", "void * &", "arg"],
-    'multiple args' => ["int a,long b", "int,long", "a,b"],
-    'mixed args' => ["int a,long b,const void* p", "int,long,const void *", "a,b,p"])
+    'no args' => ["", "", "", 0],
+    'void arg' => ["void", "", "", 0],
+    'primitive' => ["int arg", "int", "arg", 1],
+    'array1' => ["T[] array", "T[]", "array", 1],
+    'array2' => ["T[2] array", "T[2]", "array", 1],
+    'reference1' => ["int& arg", "int &", "arg", 1],
+    'reference2' => ["int & arg", "int &", "arg", 1],
+    'pointer1' => ["void* arg", "void *", "arg", 1],
+    'pointer2' => ["void * arg", "void *", "arg", 1],
+    'pointer double' => ["void ** arg", "void * *", "arg", 1],
+    'pointer and const' => ["const void * const arg", "const void * const", "arg", 1],
+    'pointer and reference' => ["void*& arg", "void * &", "arg", 1],
+    'multiple args' => ["int a,long b", "int,long", "a,b", 2],
+    'mixed args' => ["int a,long b,const void* p", "int,long,const void *", "a,b,p", 3])
   def test_extractArgSet(data)
-    line, expectedArgTypeSet, expectedArgNameSet = data
-    argSetStr, argSetWithoutDefault, argTypeSet, argNameSet = ArgVariableSet.new(nil).extractArgSet(" #{line} ")
+    line, expectedArgTypeSet, expectedArgNameSet, expectedArity = data
+    argSetStr, argSetWithoutDefault, argTypeSet, argNameSet, arity = ArgVariableSet.new(nil).extractArgSet(" #{line} ")
 
     expected = (line == "void") ? "" : line
     assert_equal(expected, argSetStr)
     assert_equal(expected, argSetWithoutDefault)
     assert_equal(expectedArgTypeSet, argTypeSet)
     assert_equal(expectedArgNameSet, argNameSet)
+    assert_equal(expectedArity, arity)
+  end
+
+  data(
+    'pointer to a function' => ["int a,T(*f)(int, long)=FuncPtr,int b",
+                                "int a,T (*f) (int, long) =FuncPtr,int b",
+                                "int a,T (*f) (int, long),int b",
+                                "int,T (*) (int, long),int", "a,f,b", 3],
+    'pointer to a member function' => ["int a,T(C::f*)(int, long)=FuncPtr,int b",
+                                       "int a,T (C::*f) (int, long) =FuncPtr,int b",
+                                       "int a,T (C::*f) (int, long),int b",
+                                       "int,T (C::*) (int, long),int", "a,f,b", 3])
+  def test_extractFuncPtrArgSet(data)
+    line, expected, expectedWithoutDefault, expectedArgTypeSet, expectedArgNameSet, expectedArity = data
+    argSetStr, argSetWithoutDefault, argTypeSet, argNameSet, arity = ArgVariableSet.new(nil).extractArgSet(" #{line} ")
+
+    assert_equal(expected, argSetStr)
+    assert_equal(expectedWithoutDefault, argSetWithoutDefault)
+    assert_equal(expectedArgTypeSet, argTypeSet)
+    assert_equal(expectedArgNameSet, argNameSet)
+    assert_equal(expectedArity, arity)
   end
 
   data(
@@ -1944,7 +2001,17 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     ["inline T&* Func(T& a) const",
      "T & * Func(T& a) const",
      "Func(T &)const",
-     true, false, "T & *", false, "a", "Func", "Func_", "T& a", "const", false])
+     true, false, "T & *", false, "a", "Func", "Func_", "T& a", "const", false],
+    'pointer to a function' =>
+   ["void Func(int(*f)(int,long),char c)const",
+     "void Func(int (*f) (int,long),char c) const",
+     "Func(int (*) (int,long),char)const",
+     true, false, "void", true, "f,c", "Func", "Func_", "int (*f) (int,long),char c", "const", false],
+    'pointer to a member function' =>
+   ["void Func(int(Name::*f)(int,long),char c)const",
+     "void Func(int (Name::*f) (int,long),char c) const",
+     "Func(int (Name::*) (int,long),char)const",
+     true, false, "void", true, "f,c", "Func", "Func_", "int (Name::*f) (int,long),char c", "const", false])
   def test_initializeAndParse(data)
     line, decl, argSignature, constMemfunc, staticMemfunc, returnType, returnVoid,
     argSet, funcName, switchName, typedArgSet, postFunc, virtual = data
@@ -2004,6 +2071,18 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
     refSet = TestMockRefSetClass.new(true, [refUnmatched1, refMatched1])
     assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
+  end
+
+  def test_filterByPointerToFunction
+    refFreeFunction = TestMockRefClass.new("", "Func", "Func", "void (*)(int,long)", "const")
+    refMemberFunction = TestMockRefClass.new("", "Func", "Func", "void (Top::Class::*)(int,long)", "const")
+    blockFreeFunction = MemberFunctionBlock.new("void Func(void (*f)(int,long)) const")
+    blockMemberFunction = MemberFunctionBlock.new("void Func(void (Top::Class::*g)(int,long)) const")
+
+    assert_true(blockFreeFunction.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refFreeFunction))))
+    assert_true(blockMemberFunction.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refMemberFunction))))
+    assert_false(blockMemberFunction.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refFreeFunction))))
+    assert_false(blockFreeFunction.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(refMemberFunction))))
   end
 
   def test_filterByReferenceSetNoOverloading
@@ -2258,6 +2337,23 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
      assert_true(block.valid)
      assert_equal(decorator, block.makeDecoratorDef(className, {}, {}))
+  end
+
+  data(
+    'free function' =>
+    ["void Func(long (*)(void (*)(int)), long) const;",
+     "void Name::Func(long (*dummy1) (void(*)(int)),long dummy2) const {\n    return;\n}\n",
+     "    MOCK_CONST_METHOD2(Func,void(long (*dummy1) (void(*)(int)),long dummy2));\n"],
+    'member function' =>
+    ["const char* Func(int (Top::Class::*)(int, void const**)) const",
+     "const char * Name::Func(int (Top::Class::*dummy1) (int, void const**)) const {\n    const char * result = 0;\n    return result;\n}\n",
+     "    MOCK_CONST_METHOD1(Func,const char *(int (Top::Class::*dummy1) (int, void const**)));\n"])
+  def test_makeForPointerToFunction(data)
+    line, expectedStub, expectedDecorator = data
+    className = "Name"
+    block = MemberFunctionBlock.new(line)
+    assert_equal(expectedStub, block.makeStubDef(className))
+    assert_equal(expectedDecorator, block.makeMockDef(className, ""))
   end
 
   data(
@@ -5023,6 +5119,20 @@ class TestUndefinedReference < Test::Unit::TestCase
     assert_equal(expectedClassFullname, classFullname)
     assert_equal(expectedFullname, fullname)
     assert_equal(expectedMemberName, memberName)
+  end
+
+  data(
+    'free function' => ["Func(long (*)(void (*)(int)), long) const", "Func",
+                        "long(*)(void(*)(int)), long", "const"],
+    'member function' => ["Name::Func(int (Top::Class::*)(int, void const**)) const",
+                          "Name::Func", "int(Top::Class::*)(int, void const**)", "const"])
+  def test_parsePointerToFunction(data)
+    line, expectedFullname, expectedArgTypeStr, expectedPostFunc = data
+
+    ref = UndefinedReference.new("undefined reference to `" + line + "`")
+    assert_equal(expectedFullname, ref.fullname)
+    assert_equal(expectedArgTypeStr, ref.argTypeStr)
+    assert_equal(expectedPostFunc, ref.postFunc)
   end
 end
 

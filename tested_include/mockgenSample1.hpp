@@ -201,6 +201,13 @@ public:
     virtual int FuncMissingF(const char pString[], FuncPtrAlias1 pF1, FuncPtrAlias2 pF2);
     using FuncPtrAliasLocal = long(*)(FuncPtrAlias1);
     virtual int FuncMissingG(FuncPtrAliasLocal, MyInt64);
+    virtual int FuncMissingH(int(*f)(int,const void**));
+    virtual int FuncMissingH(int(Sample1::Types::BaseClass::*f)(int,const void**));
+
+    using PtrToFn = int(*)(int,const void**);
+    using PtrToMemFn = int(Sample1::Types::BaseClass::*)(int,const void**);
+    virtual int FuncMissingI(PtrToFn f);
+    virtual int FuncMissingI(PtrToMemFn f);
 
     enum EnumType {
         // Has no members with value 0
