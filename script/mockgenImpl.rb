@@ -21,6 +21,9 @@ require_relative './mockgenCommon.rb'
 include MockgenFeatures
 
 module Mockgen
+  class MockgenInvalidArgumentError < StandardError
+  end
+
   class MockgenRuntimeError < StandardError
   end
 
@@ -164,6 +167,34 @@ module Mockgen
 
     def removeRedundantSpaces(str)
       str.gsub(/\s+([\(\)])/, '\1').gsub(/([\(\)])\s+/, '\1')
+    end
+  end
+
+  class NameFilter
+    def initialize(value)
+      @filterSet = []
+      return unless value
+
+      @nameSet = []
+      internalFilter = -> name { ((name.size > 2) && (name[0..1] == "__")) }
+
+      case value
+      when "testing"
+        @nameSet << "testing"
+      when "internal"
+        @nameSet << "testing"
+        @filterSet << internalFilter
+      when "std"
+        @nameSet.concat("testing", "std", "boost", "mpl_")
+        @filterSet << internalFilter
+      end
+
+      nameFilter = -> name { @nameSet.any? { |keyword| keyword == name } }
+      @filterSet << nameFilter
+    end
+
+    def excludeNamespace?(name)
+      @filterSet.any? { |filter| filter.call(name) }
     end
   end
 
@@ -2631,8 +2662,9 @@ module Mockgen
 
   # Factory class for variant type blocks
   class BlockFactory
-    def initialize(noMatchingTypesInCsource)
+    def initialize(noMatchingTypesInCsource, nameFilter)
       @noMatchingTypesInCsource = noMatchingTypesInCsource
+      @nameFilter = nameFilter.nil? ? NameFilter.new(nil) : nameFilter
     end
 
     # Top-level namespace
@@ -2641,6 +2673,7 @@ module Mockgen
     end
 
     def createBlock(argLine, parentBlock)
+      skip = false
       line = LineWithoutAttribute.new(argLine).str
       block = BaseBlock.new(line)
       newBlock = nil
@@ -2659,6 +2692,7 @@ module Mockgen
         case words[0]
         when "namespace"
           newBlock = NamespaceBlock.new(line)
+          skip = @nameFilter.excludeNamespace?(newBlock.getNamespace)
         when "extern"
           newBlock = ExternCBlock.new(line) if words[1] == '"C"'
         when "class"
@@ -2704,7 +2738,8 @@ module Mockgen
         block = newBlock
         block.attachTypedefBlock(typedefBlock)
       end
-      block
+
+      return block, skip
     end
   end
 
@@ -3074,12 +3109,12 @@ module Mockgen
     attr_reader :cppNameSpace, :inputFilename, :linkLogFilename, :convertedFilename
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
     attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
-    attr_reader :noOverloading, :varOnly, :updateChangesOnly
+    attr_reader :noOverloading, :varOnly, :updateChangesOnly, :discardNamespaceValue
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
                    defaultNoForwardingToMock, fillVtable, noOverloading, varOnly,
-                   updateChangesOnly)
+                   updateChangesOnly, discardNamespaceValue)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -3093,6 +3128,7 @@ module Mockgen
       @noOverloading = noOverloading
       @varOnly = varOnly
       @updateChangesOnly = updateChangesOnly
+      @discardNamespaceValue = discardNamespaceValue
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -3124,9 +3160,10 @@ module Mockgen
   # Parse input file lines and format output strings
   class CppFileParser
     def initialize(parameterSet)
+      nameFilter = NameFilter.new(parameterSet.discardNamespaceValue)
       @cppNameSpace = parameterSet.cppNameSpace
       @inputFilename = parameterSet.inputFilename
-      @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource)
+      @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource, nameFilter)
       @stubOnly = parameterSet.stubOnly
       @varOnly = parameterSet.varOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
@@ -3285,31 +3322,46 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def readAllLines(file)
+      currentDepth = 0   # current nesting level of {}
+      keyDepth = nil     # discard {} blocks at this or deeper nesting level
+
       while rawLine = file.gets
         line = Mockgen::Common::LineWithoutCRLF.new(rawLine.encode("UTF-8")).line.strip
         next if line.empty?
-        parseLine(line.strip)
+        currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
       end
     end
 
     # line : leading and trailing spaces and CRLF must be removed
     # Parse and discard inline function definitions
-    def parseLine(line)
+    def parseLine(line, currentDepth, keyDepth)
+      newDepth = [currentDepth + line.count("{") - line.count("}"), 0].max
+      skipInner = parseBlock(line, !keyDepth.nil?, (!keyDepth.nil? && (newDepth < keyDepth))) && (newDepth > currentDepth)
+      skipping = !keyDepth.nil? && (newDepth >= keyDepth)
+      newKeyDepth = (keyDepth.nil? && skipInner) ? (currentDepth + 1) : (skipping ? keyDepth : nil)
+      return [newDepth, newKeyDepth]
+    end
+
+    def parseBlock(line, skipping, closing)
+      skipInner = false
+
       # } else {
       if (line[0] == "}") && (line[-1] == "{")
       # End of a block
       elsif (line[0] == "}")
-        # End of a block
-        wordSet = line.tr(";", "").split(" ")
-        @block.setTypedef(wordSet[1]) if wordSet.size > 1
+        if (!skipping || closing)
+          # End of a block
+          wordSet = line.tr(";", "").split(" ")
+          @block.setTypedef(wordSet[1]) if wordSet.size > 1
 
-        childBlock = @block
-        parentBlock = @block.parent
-        @block = parentBlock
-      else
+          childBlock = @block
+          parentBlock = @block.parent
+          @block = parentBlock
+        end
+      elsif !skipping
         begin
-        # Discard all template parameter lists
-          block = @blockFactory.createBlock(line, @block)
+          # Discard all template parameter lists
+          block, skipInner = @blockFactory.createBlock(line, @block)
         rescue => e
           raise e unless MockgenFeatures.ignoreAllExceptions
           block = BaseBlock.new(line)
@@ -3322,6 +3374,8 @@ module Mockgen
           @block = block
         end
       end
+
+      skipInner
     end
 
     def eliminateUnusedBlock(block)
@@ -3871,6 +3925,7 @@ module Mockgen
       @fillVtable = false
       @noOverloading = false
       @updateChangesOnly = false
+      @discardNamespaceValue = nil
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -3912,6 +3967,10 @@ module Mockgen
         next if caught
         break if argSet.size < 2
 
+        if (!optionValue.empty? && optionValue[0] == "-")
+          raise MockgenInvalidArgumentError, "Invalid option value #{optionWord} #{optionValue}"
+        end
+
         stopParsing = false
         case optionWord
         when Mockgen::Constants::ARGUMENT_FUNCTION_NAME_FILTER
@@ -3933,7 +3992,14 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_SYSTEM_PATH
           argSet.shift(2)
           @systemHeaderSet << optionValue
+        when Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACE, Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACES then
+          argSet.shift(2)
+          @discardNamespaceValue = optionValue
         else
+          if (!optionWord.empty? && optionWord[0] == "-")
+            raise MockgenInvalidArgumentError, "Invalid option #{optionWord}"
+          end
+
           stopParsing = true
         end
 
@@ -3993,7 +4059,7 @@ module Mockgen
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
                                              @fillVtable, @noOverloading, @varOnly,
-                                             @updateChangesOnly)
+                                             @updateChangesOnly, @discardNamespaceValue)
       parseHeader(parameterSet)
 
       # Value to return as process status code

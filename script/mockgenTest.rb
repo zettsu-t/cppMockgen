@@ -471,6 +471,54 @@ class TestTypeAliasSet < Test::Unit::TestCase
   end
 end
 
+class TestNameFilter < Test::Unit::TestCase
+  def filterNameSet(filter)
+    ["_name", "_Name", "userDefined", "user__Defined"].all? do |name|
+      assert_false(filter.excludeNamespace?(name))
+    end
+  end
+
+  def test_empty
+    filter = NameFilter.new(nil)
+    filterNameSet(filter)
+    ["__cxxabiv1", "__gnu_cxx", "__gnu_debug", "std", "boost", "mpl_", "testing"].all? do |name|
+      assert_false(filter.excludeNamespace?(name))
+    end
+  end
+
+  def test_testing
+    filter = NameFilter.new("testing")
+    filterNameSet(filter)
+
+    assert_true(filter.excludeNamespace?("testing"))
+    ["__cxxabiv1", "__gnu_cxx", "__gnu_debug", "std", "boost", "mpl_"].all? do |name|
+      assert_false(filter.excludeNamespace?(name))
+    end
+  end
+
+  def test_internal
+    filter = NameFilter.new("internal")
+    filterNameSet(filter)
+
+    ["testing", "__cxxabiv1", "__gnu_cxx", "__gnu_debug"].all? do |name|
+      assert_true(filter.excludeNamespace?(name))
+    end
+
+    ["std", "boost", "mpl_"].all? do |name|
+      assert_false(filter.excludeNamespace?(name))
+    end
+  end
+
+  def test_std
+    filter = NameFilter.new("internal")
+    filterNameSet(filter)
+
+    ["__cxxabiv1", "__gnu_cxx", "__gnu_debug", "std", "boost", "mpl_"].all? do |name|
+      assert_true(filter.excludeNamespace?(name))
+    end
+  end
+end
+
 class TestSymbolFilter < Test::Unit::TestCase
   def test_all
     definedReferenceSet = 1
@@ -974,7 +1022,7 @@ class TestTypedefBlock < Test::Unit::TestCase
   end
 
   def test_collectAliases
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     block = BaseBlock.new("Parent")
     rootBlock.connect(block)
     typeName = "tagName"
@@ -1000,7 +1048,7 @@ class TestTypedefBlock < Test::Unit::TestCase
   end
 
   def test_resolveAliasInHierarchy
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     rootTypedefBlockA = TypedefBlock.new("typedef int32 MyInt;")
     rootTypedefBlockB = TypedefBlock.new("typedef aStruct T;")
     rootBlock.connect(rootTypedefBlockA)
@@ -1793,7 +1841,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     'resolve' => [true, "long , int *"])
   def test_getResolvedArgTypeStr(data)
     resolving, expected = data
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     rootBlock.connect(TypedefBlock.new("typedef int * Type;"))
 
     className = "NameC"
@@ -3488,7 +3536,7 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   def test_makeConstructorArgStrTypedef
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     ["typedef int * PtrA;", "typedef long * PtrB;"].each do |line|
       rootBlock.connect(TypedefBlock.new(line))
     end
@@ -3512,7 +3560,7 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   def test_makeConstructorArgStrFuncPtrTypedef
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     rootBlock.connect(TypedefBlock.new("typedef int MyInt;"))
 
     baseBlock = ClassBlock.new("class Base")
@@ -4133,7 +4181,7 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   def test_formatStubClassWithConstructor
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     rootBlock.connect(TypedefBlock.new("typedef int MyInt;"))
 
     baseBlock = ClassBlock.new("class Base")
@@ -4735,80 +4783,87 @@ end
 
 class TestBlockFactory < Test::Unit::TestCase
   def test_createRootBlock
-    assert_true(BlockFactory.new(false).createRootBlock.canTraverse?)
+    assert_true(BlockFactory.new(false, nil).createRootBlock.canTraverse?)
   end
 
   def test_createBlock
-    factory = BlockFactory.new(false)
+    factory = BlockFactory.new(false, nil)
     rootBlock = factory.createRootBlock
 
     line = "namespace NameSpaceA {"
-    assert_equal("NameSpaceA", factory.createBlock(line, rootBlock).getNamespace)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_equal("NameSpaceA", block.getNamespace)
+    assert_false(skip)
 
     line = 'extern "C"'
-    assert_equal("", factory.createBlock(line, rootBlock).getNamespace)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_equal("", block.getNamespace)
 
     line = "class ClassName {"
-    classBlock = factory.createBlock(line, rootBlock)
+    classBlock, skip = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
 
     # Define as a private member
     line = "class InnerClass {"
-    innerClassBlock = factory.createBlock(line, classBlock)
+    innerClassBlock, skip = factory.createBlock(line, classBlock)
     assert_false(innerClassBlock.isClass?)
 
     line = "struct ClassName {"
-    classBlock = factory.createBlock(line, rootBlock)
+    classBlock, skip = factory.createBlock(line, rootBlock)
     assert_true(classBlock.isClass?)
 
     # Define as a public member
     line = "class InnerClass {"
-    innerClassBlock = factory.createBlock(line, classBlock)
+    innerClassBlock, skip = factory.createBlock(line, classBlock)
     assert_true(innerClassBlock.isClass?)
 
     line = "template <typename T> class ClassName {"
-    assert_true(factory.createBlock(line, rootBlock).isClass?)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(block.isClass?)
 
     line = "typedef unsigned int uint32_tj;"
-    assert_true(factory.createBlock(line, rootBlock).canTraverse?)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(block.canTraverse?)
 
     line = "using uint32_ptr_t = unsigned int *;"
-    block = factory.createBlock(line, rootBlock)
+    block, skip = factory.createBlock(line, rootBlock)
     assert_true(block.canTraverse?)
     assert_true(block.is_a?(TypedefBlock))
 
     line = "extern const ClassName& obj;"
-    assert_true(factory.createBlock(line, rootBlock).canTraverse?)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(block.canTraverse?)
 
     line = "extern void FuncDef() {"
-    assert_false(factory.createBlock(line, rootBlock).canTraverse?)
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_false(block.canTraverse?)
 
     line = "extern void FuncDecl();"
-    block = factory.createBlock(line, rootBlock)
+    block, skip = factory.createBlock(line, rootBlock)
     assert_false(block.instance_variable_get(:@noMatchingTypes))
 
     line = "enum class EnumClassName {"
-    enumClassBlock = factory.createBlock(line, classBlock)
+    enumClassBlock, skip = factory.createBlock(line, classBlock)
     assert_equal("EnumClassName", enumClassBlock.getTypename)
 
     line = "enum EnumName {"
-    enumBlock = factory.createBlock(line, classBlock)
+    enumBlock, skip = factory.createBlock(line, classBlock)
     assert_equal("EnumName", enumBlock.getTypename)
 
     line = "FIRST_MEMBER,"
-    factory.createBlock(line, enumBlock)
+    block, skip = factory.createBlock(line, enumBlock)
     assert_equal("FIRST_MEMBER", enumBlock.getInitializer)
 
     line = "enum class UnionName {"
-    unionBlock = factory.createBlock(line, classBlock)
+    unionBlock, skip = factory.createBlock(line, classBlock)
     assert_equal("UnionName", unionBlock.getTypename)
 
     line = "public:"
-    block = factory.createBlock(line, classBlock)
+    block, skip = factory.createBlock(line, classBlock)
     assert_not_nil(block)
 
     line = "void Func(int a)"
-    block = factory.createBlock(line, classBlock)
+    block, skip = factory.createBlock(line, classBlock)
     assert_not_nil(block)
   end
 
@@ -4817,11 +4872,11 @@ class TestBlockFactory < Test::Unit::TestCase
     'class' => "class")
   def test_createBlockWithTypedef(data)
     typeStr = data
-    factory = BlockFactory.new(false)
+    factory = BlockFactory.new(false, nil)
     rootBlock = factory.createRootBlock
 
     line = "typedef #{typeStr} tagName {"
-    block = factory.createBlock(line, rootBlock)
+    block, skip = factory.createBlock(line, rootBlock)
     assert_not_nil(block.instance_variable_get(:@typedefBlock))
   end
 
@@ -4835,11 +4890,24 @@ class TestBlockFactory < Test::Unit::TestCase
     assert_equal("Month", Object.const_get(className).new(line).getTypename)
   end
 
+  def test_skipBlock
+    filter = TestNameFilter.new(nil)
+    def filter.excludeNamespace?(name)
+      true
+    end
+
+    factory = BlockFactory.new(false, filter)
+    rootBlock = factory.createRootBlock
+    line = "namespace NameSpaceA {"
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(skip)
+  end
+
   def test_noMatchingTypesInCsource
-    factory = BlockFactory.new(true)
+    factory = BlockFactory.new(true, nil)
     rootBlock = factory.createRootBlock
     line = "extern void Func();"
-    block = factory.createBlock(line, rootBlock)
+    block, skip = factory.createBlock(line, rootBlock)
     assert_true(block.instance_variable_get(:@noMatchingTypes))
   end
 end
@@ -5325,14 +5393,15 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     defaultNoForwardingToMock = "i"
     fillVtable = "j"
     noOverloading = "k"
-    varOnly = "l";
-    updateChangesOnly = "m";
+    varOnly = "l"
+    updateChangesOnly = "m"
+    discardNamespaceValue = "n"
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
                                            sourceFilenameSet, defaultNoForwardingToMock,
                                            fillVtable, noOverloading, varOnly,
-                                           updateChangesOnly)
+                                           updateChangesOnly, discardNamespaceValue)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -5346,6 +5415,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(noOverloading, parameterSet.noOverloading)
     assert_equal(varOnly, parameterSet.varOnly)
     assert_equal(updateChangesOnly, parameterSet.updateChangesOnly)
+    assert_equal(discardNamespaceValue, parameterSet.discardNamespaceValue)
     assert_false(parameterSet.noMatchingTypesInCsource)
   end
 
@@ -5360,7 +5430,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
     parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg,
-                                           nil, false, false, false, false)
+                                           nil, false, false, false, false, nil)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -5388,7 +5458,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false)
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false, nil)
   end
 end
 
@@ -5410,56 +5480,144 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.updateFile(filename + ".old", filename)
   end
 
-  def test_parseLine
+  data(
+    'empty' => ["", 0, nil, false, 0, nil, false, false],
+    'enter a block' => ["{", 0, nil, false, 1, nil, false, false],
+    'enter a inner block' => ["{", 1, nil, false, 2, nil, false, false],
+    'enter a key block 1' => ["{", 0, nil, true, 1, 1, false, false],
+    'enter a key block 2' => ["{", 1, nil, true, 2, 2, false, false],
+    'enter a key block with multi level 1' => ["{{",  1, nil, true, 3, 2, false, false],
+    'enter a key block with multi level 2' => ["{{{", 0, nil, true, 3, 1, false, false],
+    'reenter a key block 1' => ["{",  1, 1, true, 2, 1, true, false],
+    'reenter a key block 2' => ["{{", 2, 1, true, 4, 1, true, false],
+    'else clause 1' => ["} else {", 0, nil, false, 0, nil, false, false],
+    'else clause 2' => ["} else {", 1, nil, false, 1, nil, false, false],
+    'else clause 3' => ["} else {", 1, nil, true,  1, nil, false, false],
+    'else clause skipped 1' => ["} else {", 1, 1, false, 1, 1, true, false],
+    'else clause skipped 2' => ["} else {", 2, 1, false, 2, 1, true, false],
+    'exit a block 1' => ["}", 1, nil, false, 0, nil, false, false],
+    'exit blocks' =>   ["}}", 3, nil, false, 1, nil, false, false],
+    'exit too many blocks' => ["}}}", 1, nil, false, 0, nil, false, false],
+    'exit not a key block' => ["}", 2, 1, false, 1, 1, true, false],
+    'exit a key block' => ["}",  1, 1, false, 0, nil, true, true],
+    'exit a key and not key blocks' => ["}}", 2, 1, false, 0, nil, true, true],
+    'exit too many key blocks 1' => ["}}}", 3, 1, false, 0, nil, true, true],
+    'exit too many key blocks 2' => ["}}}", 1, 1, false, 0, nil, true, true]
+  )
+  def test_parseLine(data)
+    line, currentDepth, keyDepth, skipInner, expectedDepth, expectedKeyDepth, expectedSkipping, expectedClosing = data
+
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
+    actualSkipping = nil
+    actualClosing = nil
+    parser.define_singleton_method(:parseBlock) do |line, skipping, closing|
+      actualSkipping = skipping
+      actualClosing = closing
+      skipInner
+    end
+
+    newDepth, newKeyDepth = parser.parseLine(line, currentDepth, keyDepth)
+    assert_equal(expectedDepth, newDepth)
+    assert_equal(expectedKeyDepth, newKeyDepth)
+    assert_equal(expectedSkipping, actualSkipping)
+    assert_equal(expectedClosing, actualClosing)
+  end
+
+  def test_parseLineAndBlock
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
 
+    [["comment", 0, 0],
+     ["class Base {", 0, 1],
+     ["public:", 1, 1],
+     ["void FuncA() {", 1, 2],
+     ["if (0) {", 2, 3],
+     ["} else {", 3, 3],
+     ["}", 3, 2],
+     ["}", 2, 1],
+     ["void FuncB();", 1, 1],
+     ["};", 1, 0],
+     ["};", 1, 0]].each do |line, currentDepth, expectedDepth|
+      depth, newKeyDepth = parser.parseLine(line, currentDepth, nil)
+      assert_equal(expectedDepth, depth)
+      assert_nil(newKeyDepth)
+    end
+  end
+
+  def test_parseBlock
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
+
+    argSet = [false, false]
     originalBlock = parser.instance_variable_get(:@block)
-    parser.parseLine("comment")
+    assert_false(parser.parseBlock("comment", *argSet))
     assert_equal(originalBlock, parser.instance_variable_get(:@block))
 
-    parser.parseLine("class Base {")
+    parser.parseBlock("class Base {", *argSet)
     classBlock = parser.instance_variable_get(:@block)
     assert_not_equal(originalBlock, classBlock)
 
-    parser.parseLine("public:")
-    parser.parseLine("void FuncA() {")
+    parser.parseBlock("public:", *argSet)
+    parser.parseBlock("void FuncA() {", *argSet)
     funcBlockA = parser.instance_variable_get(:@block)
     assert_not_equal(classBlock, funcBlockA)
 
-    parser.parseLine("if (0) {")
+    parser.parseBlock("if (0) {", *argSet)
     ifBlock = parser.instance_variable_get(:@block)
     assert_not_equal(funcBlockA, ifBlock)
 
-    parser.parseLine("} else {")
+    parser.parseBlock("} else {", *argSet)
     assert_equal(ifBlock, parser.instance_variable_get(:@block))
 
-    parser.parseLine("}")
+    parser.parseBlock("}", *argSet)
     assert_equal(funcBlockA, parser.instance_variable_get(:@block))
-    parser.parseLine("}")
+    parser.parseBlock("}", *argSet)
     assert_equal(classBlock, parser.instance_variable_get(:@block))
     assert_equal(classBlock, funcBlockA.parent)
 
-    parser.parseLine("void FuncB();")
+    parser.parseBlock("void FuncB();", *argSet)
     assert_equal(classBlock, parser.instance_variable_get(:@block))
 
-    parser.parseLine("};")
+    parser.parseBlock("};", *argSet)
     assert_equal(originalBlock, parser.instance_variable_get(:@block))
     assert_equal(3, classBlock.children.size)
     assert_equal(funcBlockA, classBlock.children[1])
     assert_false(classBlock.instance_variable_get(:@publicMemberFunctionSet).empty?)
   end
 
+  def test_parseSkippedBlock
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    assert_true(parser.instance_variable_get(:@variableMockStr).empty?)
+    factory = parser.instance_variable_get(:@blockFactory)
+    factory.define_singleton_method(:createBlock) { |argLine, parentBlock| [BaseBlock.new(""), true] }
+
+    [["namespace A {", false, false, true, true],
+     ["namespace B {", false, false, true, true],
+     ["namespace C {", true,  false, false, false],
+     ["class Name {",  true,  false, false, false],
+     ["};", true, false, false, false],
+     ["}",  true, true,  false, true],
+     ["}", false, true,  false, true],
+     ["}", false, false, false, true]].each do |line, skipping, closing, expectedSkipInner, updated|
+      originalBlock = parser.instance_variable_get(:@block)
+      assert_equal(expectedSkipInner, parser.parseBlock(line, skipping, closing))
+      assert_equal(originalBlock, parser.instance_variable_get(:@block)) unless updated
+      assert_not_equal(originalBlock, parser.instance_variable_get(:@block)) if updated
+    end
+  end
+
   def test_parseTypedefAndStruct
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
 
-    parser.parseLine("typedef class tagName {")
+    argSet = [false, false]
+    parser.parseBlock("typedef class tagName {", *argSet)
     block = parser.instance_variable_get(:@block)
     assert_true(block.isClass?)
     assert_not_nil(block)
 
-    parser.parseLine("void FuncA();")
-    parser.parseLine("} Name;")
+    parser.parseBlock("void FuncA();", *argSet)
+    parser.parseBlock("} Name;", *argSet)
 
     typedefBlock = block.instance_variable_get(:@typedefBlock)
     assert_not_nil(typedefBlock)
@@ -5470,7 +5628,8 @@ class TestCppFileParser < Test::Unit::TestCase
     parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
     parser.instance_variable_set(:@blockFactory, nil)
 
-    expr = -> {parser.parseLine("class Name {")}
+    argSet = [false, false]
+    expr = -> {parser.parseBlock("class Name {", *argSet)}
     caught, ignored = checkIfExceptionCaught(expr)
     assert_true(caught)
     assert_false(ignored)
@@ -5499,7 +5658,7 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.eliminateAllUnusedBlock(childBlock)
     assert_not_nil(childBlock.parent)
 
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     nsBlock = NamespaceBlock.new("namespace std {")
     rootBlock.connect(nsBlock)
     nsBlock.connect(parentBlock)
@@ -5943,7 +6102,7 @@ class TestCppFileParser < Test::Unit::TestCase
   end
 
   def test_collectTopLevelTypedefSet
-    rootBlock = BlockFactory.new(false).createRootBlock
+    rootBlock = BlockFactory.new(false, nil).createRootBlock
     ecBlock1 = ExternCBlock.new('extern "C" {')
     ecBlock2 = ExternCBlock.new('extern "C" {')
     rootBlock.connect(ecBlock1)
@@ -6089,6 +6248,19 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_equal(expectedVarOnly, target.instance_variable_get(:@varOnly))
   end
 
+  def test_invalidOption
+    option = "-unknownKey"
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, option, "1"]
+    args.concat(getOptionSet())
+    assert_raise(MockgenInvalidArgumentError, "Invalid option #{option}") { MockGenLauncher.new(args) }
+  end
+
+  def test_invalidOptionValue
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_FUNCTION_NAME_FILTER, "-file"]
+    args.concat(getOptionSet())
+    assert_raise(MockgenInvalidArgumentError, "Invalid option -filter -file") { MockGenLauncher.new(args) }
+  end
+
   def test_selectSystemPath
     serial = 1
     argSet = []
@@ -6126,6 +6298,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_false(target.instance_variable_get(:@fillVtable))
     assert_false(target.instance_variable_get(:@noOverloading))
     assert_false(target.instance_variable_get(:@updateChangesOnly))
+    assert_nil(target.instance_variable_get(:@discardNamespaceValue))
   end
 
   def test_collectInternalIsystemFail
@@ -6405,10 +6578,20 @@ class TestMockGenLauncher < Test::Unit::TestCase
   end
 
   data(
+    'simple' => Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACE,
+    'multi' => Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACES)
+  def test_discardNamespaces(data)
+    value = "SystemInternal"
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, data, value]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_equal(value, target.instance_variable_get(:@discardNamespaceValue))
+  end
+
+  data(
     'each' => ["1", 1],
     'bind' => ["2", 2],
     'zero invalid' => ["0", nil],
-    'negative invalid' => ["-1", nil],
     'empty' => ["", nil],
     'not a number' => ["abc", nil])
   def test_parseSplitFiles(data)

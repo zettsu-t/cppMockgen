@@ -25,6 +25,8 @@ module Mockgen
     ARGUMENT_UPDATE_CHANGES_ONLY = "-updatechangesonly".freeze
     ARGUMENT_IGNORE_INTERNAL_ERROR =  "-ignoreinternalerror".freeze
     ARGUMENT_IGNORE_INTERNAL_ERRORS = "-ignoreinternalerrors".freeze
+    ARGUMENT_DISCARD_NAMESPACE = "-discardnamespace".freeze
+    ARGUMENT_DISCARD_NAMESPACES = "-discardnamespaces".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze

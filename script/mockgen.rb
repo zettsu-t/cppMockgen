@@ -57,6 +57,13 @@
 #   fails due to C++ features that this script does not support,
 #   please enable this option for workarounds.
 #
+# - optional -discardnamespaces [testing|internal|std]
+#   This option forces this script to discard namespace blocks.
+#   It makes the script faster but may lead wrong outputs.
+#   + testing  : the Google Test/Mock namespace
+#   + internal : namespaces that begins with "__" adding to the above
+#   + std      : std, boost and mpl_ adding to the above
+#
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [input file]  LD output (link error log) file

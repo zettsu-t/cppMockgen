@@ -566,6 +566,7 @@ treats -outheaderfile as -out-header-file.
 * -updatechangesonly prevents CppMockGen from updating mock files if
   they exist and CppMockGen makes no changes on them. This reduces
   dependency in the Makefile and has its build time shorter.
+* -discardnamespaces forces CppMockGen to discard namespace blocks.
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
@@ -588,6 +589,17 @@ files that the source files include.
 Instead of this, CppMockGen creates an all-in-one header when -source
 and -outheaderfile options are specified. The created (output) header
 file can be same as the first (input) header file of arguments.
+
+CppMockGen discards namespaces in parsing when _-discardnamespaces_
+_level_ is designated. It is useful to parse faster but may lead wrong
+outputs. These strings are valid for the argument _level_.
+
+* testing : the Google Test/Mock namespace _testing_
+* internal : namespaces that begins with "__" adding to the above
+* std : std, boost and mpl_ adding to the above
+
+CppMockGen fails on unknown options and trailing parameters of options
+beginning with "-" cause errors.
 
 ```bash
 ruby script/mockgen.rb (omitted) -source file1.cpp -source file2.cpp -outheaderfile ./generated/allInOne.hpp ./generated/allInOne.hpp ./generated/link_error.log (omitted)
