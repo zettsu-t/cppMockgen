@@ -185,7 +185,7 @@ module Mockgen
         @nameSet << "testing"
         @filterSet << internalFilter
       when "std"
-        @nameSet.concat("testing", "std", "boost", "mpl_")
+        @nameSet.concat(["testing", "std", "boost", "mpl_"])
         @filterSet << internalFilter
       end
 
@@ -2038,8 +2038,14 @@ module Mockgen
                                   fullname, filter.definedReferenceSet.relativeNamespaceOnly)
 
       @filteredOut = filter.classNameFilterOutSet.any? do |pattern|
-        # Prevent from throwing RegexpError later
-        !RegexpMetaCharacter.new.contained?(pattern) && fullname.match(/#{pattern}/)
+        result = false
+        begin
+          result = fullname.match(/#{pattern}/)
+        rescue RegexpError => e
+          # The filter should convert the pattern to a Regexp and check if it is valid
+        ensure
+          result
+        end
       end
       return unless canFilterByReferenceSet(filter)
 

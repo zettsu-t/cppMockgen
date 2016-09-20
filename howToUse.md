@@ -552,8 +552,8 @@ treats -outheaderfile as -out-header-file.
 
 * -filter "[A-Z]" : CppMockGen excludes free functions of which name
    has no upper cases; system and standard functions.
-* -filterout NotMocked : CppMockGen excludes classes of which name
-   matches regular expression /NotMocked/
+* -filterout "NotMock(ed)?" : CppMockGen excludes classes of which name
+   matches regular expression /NotMock(ed)?/
 * -source filename : CppMockGen does not swap free functions in
    `filename`. We have to avoid swapping definitions of tested
    functions and need to set this option.
@@ -599,7 +599,7 @@ outputs. These strings are valid for the argument _level_.
 * std : std, boost and mpl_ adding to the above
 
 CppMockGen fails on unknown options and trailing parameters of options
-beginning with "-" cause errors.
+beginning with "-".
 
 ```bash
 ruby script/mockgen.rb (omitted) -source file1.cpp -source file2.cpp -outheaderfile ./generated/allInOne.hpp ./generated/allInOne.hpp ./generated/link_error.log (omitted)

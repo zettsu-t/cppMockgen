@@ -3319,6 +3319,27 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal(expected, block.canMock?)
   end
 
+  data(
+    'empty pattern' => [[], false],
+    'empty string' => [["^$"], false],
+    'invalid' => [["*(*"], false],
+    'valid' => [["Name"], true],
+    'invalid and valid' => [["*(*", "Name"], true],
+    'valid and invalid' => [["Name", "*(*"], true])
+  def test_filterInvalidRegexp(data)
+    patternSet, expected = data
+    classname = "TargetNameA"
+    block = ClassBlock.new("class " + classname)
+
+    def block.canFilterByReferenceSet(filter)
+      false
+    end
+
+    filter = Struct.new(:definedReferenceSet, :classNameFilterOutSet).new(nil, patternSet)
+    block.filterByReferenceSet(filter)
+    assert_equal(expected, block.instance_variable_get(:@filteredOut))
+  end
+
   def test_canFilterByReferenceSet
     block = ClassBlock.new("class NameC")
     assert_false(block.canFilterByReferenceSet(MinimumSymbolFilter.new(nil, nil)))

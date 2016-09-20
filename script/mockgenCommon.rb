@@ -5,9 +5,10 @@
 
 # String operations
 module MockgenFeatures
-  attr_accessor :mockGenTestingException, :ignoreAllExceptions
+  attr_accessor :mockGenTestingException, :ignoreAllExceptions, :suppressWarnings
   @@mockGenTestingException = false
   @@ignoreAllExceptions = false
+  @@suppressWarnings = false
 end
 
 module Mockgen
