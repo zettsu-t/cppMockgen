@@ -155,13 +155,25 @@ module Mockgen
     end
 
     def resolveLocal(actualNameWordSet)
-      charSet = "\\(\\)\\*&,\\s"
-
-      actualNameWordSet.map do |phrase|
-        # resolve parameter lists in pointers to functions
-        phrase.split(/([#{charSet}]+)/).map do |word|
-          (!word.match(/[^#{charSet}]/).nil? && @aliasSet.key?(word)) ? @aliasSet[word] : word
-        end.join("")
+      if MockgenFeatures.useLiteralRegexp
+        # Regular expressions with literal strings are faster than ones of variable strings.
+        # Do not forget to escape backslashes in strings and not to in literal regexp.
+        # If it is wrong, the regexp shown below splits input words by "s".
+        actualNameWordSet.map do |phrase|
+          # resolve parameter lists in pointers to functions
+          phrase.split(/([\(\)\*&,\s]+)/).map do |word|
+            (!word.match(/[^\(\)\*&,\s]/).nil? && @aliasSet.key?(word)) ? @aliasSet[word] : word
+          end.join("")
+        end
+      else
+        # Slow but avoiding repeating a char set
+        charSet = "\\(\\)\\*&,\\s"
+        actualNameWordSet.map do |phrase|
+          # resolve parameter lists in pointers to functions
+          phrase.split(/([#{charSet}]+)/).map do |word|
+            (!word.match(/[^#{charSet}]/).nil? && @aliasSet.key?(word)) ? @aliasSet[word] : word
+          end.join("")
+        end
       end
     end
 
@@ -547,8 +559,14 @@ module Mockgen
 
       # remove the typedef keyword
       phraseSet.shift
-      charSet = "\\*&\\s"
-      md = phraseSet[-2][1].match(/([#{charSet}]*)([^#{charSet}]+)([#{charSet}]*)/)
+      if MockgenFeatures.useLiteralRegexp
+        # Regular expressions with literal strings are faster than ones of variable strings.
+        md = phraseSet[-2][1].match(/([\*&\s]*)([^\*&\s]+)([\*&\s]*)/)
+      else
+        charSet = "\\*&\\s"
+        md = phraseSet[-2][1].match(/([#{charSet}]*)([^#{charSet}]+)([#{charSet}]*)/)
+      end
+
       return nil, nil unless md
 
       typeAlias = md[2].strip

@@ -464,6 +464,17 @@ class TestTypeAliasSet < Test::Unit::TestCase
     assert_equal(expected, typeAliasSet.resolveLocal(wordSet))
   end
 
+  data(
+    's' => [["systemTime"], ["unsigned long long"]],
+    's&*' => [["systemTime * &"], ["unsigned long long * &"]],
+    '()' => [["(decltype)(var_system)"], ["(decltype)(var_system)"]])
+  def test_resolveLocalMeta(data)
+    wordSet, expected = data
+    typeAliasSet = TypeAliasSet.new
+    typeAliasSet.add("systemTime", "unsigned long long")
+    assert_equal(expected, typeAliasSet.resolveLocal(wordSet))
+  end
+
   def test_removeRedundantSpaces
     ["(v)", "  (v)", "(  v)", " ( v)", "(v) ", " (v  )", "( v )  "].each do |str|
       assert_equal("(v)", TypeAliasSet.new.removeRedundantSpaces(str))
@@ -934,7 +945,8 @@ class TestTypedefBlock < Test::Unit::TestCase
 
   data(
     'using' => ["void (*)(void)", 3],
-    'typedef' => ["typedef void(*)(void)", 4])
+    'typedef' => ["typedef void(*)(void)", 4],
+    'typedef with s' => ["typedef strings(*)(strings)", 4])
   def test_splitPointerToFunction(data)
     line, minSize = data
     block = TypedefBlock.new(nil)
