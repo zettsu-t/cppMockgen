@@ -230,14 +230,20 @@ module Mockgen
 
   # Generic Block Structure
   class BaseBlock
-    attr_reader :parent, :children, :typeAliasSet
+    attr_reader :parent, :children, :typeAliasSet, :keyForParent
 
     # line : A head line of a block (leading and trailing spaces must be removed)
     def initialize(line)
-      @line = line      # Headline of a block
-      @parent = nil     # nil for the root block
-      @children = []    # Children order by addition
-      @typedefBlock = nil  # type alias for this block
+      @line = line     # headline of a block
+      @parent = nil    # nil for the root block
+      @children = []   # children order by addition
+      @childMap = {}   # mapping names to its index of @children
+      @removedChildMap = {}  # blocks to erase
+      @typedefBlock = nil    # type alias for this block
+
+      # A unique name for a parent of this block
+      # Do not set this if a block has no uniqueness such as namespaces and "extern C"
+      @keyForParent = nil
 
       # type aliases in this block scope
       # clang splits "typedef struct tagName {} Name;" into struct and typedef
@@ -435,18 +441,38 @@ module Mockgen
       result
     end
 
-    protected
     def setParent(block)
       @parent = block
     end
 
-    private
+    # Nil and empty strings are also acceptable
+    def setKeyForParent(str)
+      @keyForParent = (str.nil? || str.empty?) ? nil : str
+    end
+
     def addChild(block)
-      @children << block unless @children.any? { |child| child.equal?(block) }
+      key = block.keyForParent
+
+      if key.nil?
+        # The block has no uniqueness for children of its parent
+        @children << block
+      else
+        if !@childMap.key?(key)
+          @children << block
+          @childMap[key] = true
+        end
+      end
     end
 
     def removeChild(block)
-      @children = @children.reject { |child| child.equal?(block) }
+      # Mark the block to erase later
+      @removedChildMap[block] = true
+    end
+
+    def eraseChildren
+      # Filter children at once to avoid O(n^2) loop
+      @children = @children.reject{ |child| @removedChildMap.key?(child) }.uniq
+      @removedChildMap = {}
     end
   end
 
@@ -533,13 +559,14 @@ module Mockgen
 
       if line
         body = line.tr(";", "")
-        @typeAlias, @actualTypeStr = parsePointerToFunction(body)
-        @typeAlias, @actualTypeStr = parseType(body) unless @actualTypeStr
+        typeAlias, actualTypeStr = parsePointerToFunction(body)
+        typeAlias, actualTypeStr = parseType(body) unless actualTypeStr
+        setup(typeAlias, actualTypeStr)
       end
     end
 
     def parseUsingDirective(aliasName, actualType)
-      @typeAlias = aliasName.strip
+      typeAlias = aliasName.strip
 
       actualTypeStr = nil
       phraseSet = splitPointerToFunction(actualType, 3)
@@ -550,7 +577,13 @@ module Mockgen
         actualTypeStr = formatType([actualType])
       end
 
+      setup(typeAlias, actualTypeStr)
+    end
+
+    def setup(typeAlias, actualTypeStr)
+      @typeAlias = typeAlias
       @actualTypeStr = actualTypeStr
+      setKeyForParent(@typeAlias)
     end
 
     def parsePointerToFunction(line)
@@ -645,6 +678,7 @@ module Mockgen
     def initialize(line)
       super
       @aliasName, @actualName = parse(line)
+      setKeyForParent(@aliasName)
     end
 
     def parse(line)
@@ -959,12 +993,15 @@ module Mockgen
       super
       @varName = ""
       # array[4] -> array
-      @varNameNoCardinality = varName
+      @varNameNoCardinality = @varName
       @className = ""
       @typeStr = ""
       @canTraverse = false
       @arrayStr = ""
+
       parse(line.gsub(/\s*[{;].*$/,"").strip)
+      # Not support to template variables for C++14
+      setKeyForParent(@varName)
     end
 
     def canTraverse?
@@ -1163,11 +1200,15 @@ module Mockgen
     attr_reader :arity, :argSetStr
 
     def initialize(line, className)
+      # Use line as a keyName to overloading
       super(line)
       @className = className
       @callBase = ""
       @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSetStr, @arity = parse(line, className)
       @resolvedArgTypeStr = nil
+
+      # A function name is not enough to support overloading
+      setKeyForParent(line) if @valid
     end
 
     def getResolvedArgTypeStr(classBlock)
@@ -1285,12 +1326,14 @@ module Mockgen
     def initialize(line, className)
       @className = className
       @name = "~#{className}"
+
       # Create a non-virtual default destructor if arg line is nil
       parsedLine = line
       parsedLine ||= "~#{@name} ()"
 
       super(parsedLine)
       @valid = (parsedLine =~ /#{@name}\s*\(/) ? true : false
+      setKeyForParent(@name) if @valid
     end
 
     def canTraverse?
@@ -1373,6 +1416,9 @@ module Mockgen
 
       # Remove trailing spaces
       parse(body.rstrip)
+
+      # A function name is not enough to support overloading
+      setKeyForParent(line) if @valid
     end
 
     def canTraverse?
@@ -1855,7 +1901,8 @@ module Mockgen
       @mockName = ""
       @decoratorName = ""
       @forwarderName = ""
-      @uniqueName = @name  # Unique name for inner class name
+      @uniqueName = @name     # Unique name for inner class name
+      @uniqueFilename = @name # Unique name for inner class name
       @typename = "class"  # class or struct
       @pub = false         # Now parsing public members
       @private = true      # Now parsing private members
@@ -1872,6 +1919,7 @@ module Mockgen
 
       # Determine whether this block can be handled after parsed
       @valid = parseClassName(body)
+      setKeyForParent(@name) if @valid
 
       # One or more constructors
       @destructor = nil
@@ -1916,7 +1964,9 @@ module Mockgen
       fullname = getNonTypedFullname(@name)
       # Remove head ::
       name = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
-      @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_")
+      @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_").gsub(/_+/, "_")
+      # Collapse consective _s in getFilenamePostfix
+      @uniqueFilename = name.gsub("::", "_")
 
       # Update generated class names
       setClassNameSet
@@ -1924,7 +1974,7 @@ module Mockgen
     end
 
     def getFilenamePostfix
-      ("_" + @uniqueName).gsub(Mockgen::Constants::CLASS_SPLITTER_NAME, "_").gsub(/_+/, "_")
+      ("_" + @uniqueFilename).gsub(/_+/, "_")
     end
 
     # Skip parsing child members
@@ -2254,6 +2304,7 @@ module Mockgen
       end
       # uniqueName is an alias of name until changed
       @uniqueName = @name
+      @uniqueFilename = @name
       return false if Mockgen::Constants::CLASS_NAME_EXCLUDED_MAP.key?(@name)
       # Set generated class names
       setClassNameSet
@@ -2650,6 +2701,8 @@ module Mockgen
         # zero may not be a member of this enum type
         @zeroInitializer = "static_cast<#{@name}>(0)"
       end
+
+      setKeyForParent(@name)
     end
 
     def getTypename
@@ -2677,6 +2730,8 @@ module Mockgen
       if md = line.tr("{;", "").match(/^union\s+(\S+)/)
         @name = md[1]
       end
+
+      setKeyForParent(@name)
     end
 
     def getTypename
@@ -3423,6 +3478,9 @@ module Mockgen
           end
         end
       end
+
+      # Erases blocks after marks
+      argBlock.eraseChildren
     end
 
     def parseSourceFileSet(sourceFilenameSet)

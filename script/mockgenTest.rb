@@ -577,6 +577,9 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal(line, block.instance_variable_get(:@line))
     assert_nil(block.parent)
     assert_equal([], block.children)
+    assert_equal({}, block.instance_variable_get(:@childMap))
+    assert_equal({}, block.instance_variable_get(:@removedChildMap))
+    assert_nil(block.keyForParent)
   end
 
   def test_connect
@@ -603,9 +606,9 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_equal(childBlock1, grandChildBlock.parent)
     assert_equal([grandChildBlock], childBlock1.children)
 
-    # Do nothing if childBlock1 is already a parentBlock's child
+    # Add it and remove it later if childBlock1 is already a parentBlock's child
     parentBlock.connect(childBlock1)
-    assert_equal([childBlock1, childBlock2], parentBlock.children)
+    assert_equal([childBlock1, childBlock2, childBlock1], parentBlock.children)
   end
 
   def test_disconnect
@@ -618,15 +621,18 @@ class TestBaseBlock < Test::Unit::TestCase
     childBlock1.connect(grandChildBlock)
 
     parentBlock.disconnect(childBlock1)
+    parentBlock.eraseChildren
     assert_nil(childBlock1.parent)
     assert_equal([childBlock2], parentBlock.children)
 
     parentBlock.disconnect(childBlock2)
+    parentBlock.eraseChildren
     assert_nil(childBlock2.parent)
     assert_equal([], parentBlock.children)
 
     # Do nothing if unrelated blocks
     parentBlock.disconnect(grandChildBlock)
+    parentBlock.eraseChildren
     assert_equal(childBlock1, grandChildBlock.parent)
     assert_equal([], parentBlock.children)
   end
@@ -827,6 +833,83 @@ class TestBaseBlock < Test::Unit::TestCase
 
     assert_equal(expected, block.allOfParents?(:check))
   end
+
+  def test_setParent
+    block = BaseBlock.new("")
+    parent = BaseBlock.new("").setTypedef("Name")
+    block.setParent(parent)
+    assert_equal(parent, block.parent)
+  end
+
+  data(
+    'nil' => [nil, nil],
+    'empty' => ["", nil],
+    'string' => ["name", "name"])
+  def test_setKeyForParent(data)
+    key, expected = data
+    block = BaseBlock.new("")
+    block.setKeyForParent(key)
+    assert_equal(expected, block.keyForParent)
+  end
+
+  def test_addChild
+    keyA = "A"
+    blockA1 = BaseBlock.new("")
+    blockA1.setKeyForParent(keyA)
+    blockA2 = BaseBlock.new("")
+    blockA2.setKeyForParent(keyA)
+
+    parent = BaseBlock.new("")
+    [blockA1, blockA2, blockA1].each do |block|
+      parent.addChild(block)
+      assert_equal([blockA1], parent.children)
+      childMap = parent.instance_variable_get(:@childMap)
+      assert_equal(1, childMap.size)
+      assert_true(childMap.key?(keyA))
+    end
+
+    blockB1 = BaseBlock.new("")
+    blockB2 = BaseBlock.new("")
+    expected = 2
+    [blockB1, blockB2, blockB1].each do |block|
+      parent.addChild(block)
+      assert_equal(expected, parent.children.size)
+      expected += 1
+      assert_equal(1, parent.instance_variable_get(:@childMap).size)
+    end
+
+    assert_equal([blockA1, blockB1, blockB2, blockB1], parent.children)
+  end
+
+  def test_removeAndEraseChildren
+    blockA1 = BaseBlock.new("")
+    blockA1.setKeyForParent("A")
+    blockA2 = BaseBlock.new("")
+    blockA2.setKeyForParent("B")
+    blockA3 = BaseBlock.new("")
+    blockA3.setKeyForParent("C")
+    blockB1 = BaseBlock.new("")
+    blockB2 = BaseBlock.new("")
+
+    parent = BaseBlock.new("")
+    [blockA1, blockA2, blockA3, blockA2, blockB1, blockB2, blockB2].each do |block|
+      parent.addChild(block)
+    end
+    assert_equal(6, parent.children.size)
+    assert_equal(3, parent.instance_variable_get(:@childMap).size)
+    assert_true(parent.instance_variable_get(:@removedChildMap).empty?)
+
+    parent.removeChild(blockA2)
+    parent.removeChild(blockB2)
+    assert_equal(6, parent.children.size)
+    assert_equal(3, parent.instance_variable_get(:@childMap).size)
+    assert_equal(2, parent.instance_variable_get(:@removedChildMap).size)
+
+    parent.eraseChildren
+    assert_equal(3, parent.children.size)
+    assert_equal([blockA1, blockA3, blockB1], parent.children)
+    assert_true(parent.instance_variable_get(:@removedChildMap).empty?)
+  end
 end
 
 class TestRootBlock < Test::Unit::TestCase
@@ -916,13 +999,17 @@ class TestTypedefBlock < Test::Unit::TestCase
       assert_equal(expectedAlias, block.instance_variable_get(:@typeAlias))
       assert_true(block.canTraverse?)
       assert_equal(expectedAlias, block.getTypename)
+      assert_equal(expectedAlias, block.keyForParent)
     end
+
+    assert_equal(expectedAlias, UsingBlock.new(lineUsing + ";").keyForParent)
   end
 
   def test_initializeNotTypedef
     block = TypedefBlock.new("namespace A")
     assert_false(block.canTraverse?)
     assert_nil(block.getTypename)
+    assert_nil(block.keyForParent)
   end
 
   data(
@@ -1444,6 +1531,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
      assert_true(block.canTraverse?)
      assert_true(block.isNonMemberInstanceOfClass?)
      assert_equal(var, block.getFullname)
+     assert_equal(var, block.keyForParent)
   end
 
   data(
@@ -1460,6 +1548,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
     block = ExternVariableStatement.new("extern #{line}")
     assert_false(block.canTraverse?)
     assert_false(block.isNonMemberInstanceOfClass?)
+    assert_nil(block.keyForParent)
   end
 
   data(
@@ -1470,6 +1559,7 @@ class TestExternVariableStatement < Test::Unit::TestCase
     block = ExternVariableStatement.new("#{line}")
     assert_false(block.canTraverse?)
     assert_false(block.isNonMemberInstanceOfClass?)
+    assert_nil(block.keyForParent)
   end
 
   def test_filterByReferenceSet
@@ -1751,6 +1841,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     line = className + "()(void)#{op}default"
     block = ConstructorBlock.new(line, className)
     assert_true(block.canTraverse?)
+    assert_equal(line, block.keyForParent)
   end
 
   data(
@@ -1784,6 +1875,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
     assert_equal(expectedArgsBC, block.getTypedArgsWithoutValue)
     assert_equal("", block.getCallForBaseClassInitializer)
+    assert_equal(line, block.keyForParent)
 
     block.setBaseClassName("::A::NameC")
     className = "Dereived"
@@ -1830,6 +1922,7 @@ class TestConstructorBlock < Test::Unit::TestCase
     assert_equal(expectedTypedArgsForBaseClass, block.getTypedArgsForBaseClass)
     assert_equal(expectedTypedArgsWithoutValue, block.getTypedArgsWithoutValue)
     assert_equal("", block.getCallForBaseClassInitializer)
+    assert_equal(line, block.keyForParent)
 
     block.setBaseClassName("::A::NameC")
     decoratorName = "Dereived"
@@ -1837,6 +1930,12 @@ class TestConstructorBlock < Test::Unit::TestCase
     expected = "    #{decoratorName}(#{expectedTypedArgSet}) : " +
                "#{expectedCallBase}#{initMember} {}\n"
     assert_equal(expected, block.makeDef(decoratorName, "", initMember))
+  end
+
+  def test_invalidConstructor
+    block = ConstructorBlock.new("", "Name")
+    assert_false(block.canTraverse?)
+    assert_nil(block.keyForParent)
   end
 
   data(
@@ -1964,6 +2063,7 @@ class TestDestructorBlock < Test::Unit::TestCase
     className = "NameD"
     block = DestructorBlock.new(line, className)
     assert_true(block.canTraverse?)
+    assert_equal("~NameD", block.keyForParent)
   end
 
   data(
@@ -1978,7 +2078,14 @@ class TestDestructorBlock < Test::Unit::TestCase
       line = prefix + "~" + className + "()(void)#{op}default"
       block = DestructorBlock.new(line, className)
       assert_true(block.canTraverse?)
+      assert_equal("~NameD", block.keyForParent)
     end
+  end
+
+  def test_invalidDestructor
+    block = DestructorBlock.new("", "Name")
+    assert_false(block.canTraverse?)
+    assert_nil(block.keyForParent)
   end
 
   def test_filterByReferenceSet
@@ -2131,7 +2238,8 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     argSet, funcName, switchName, typedArgSet, postFunc, virtual = data
 
     ["", "{", " {", ";", " ;"].each do |suffix|
-      block = MemberFunctionBlock.new(line + suffix)
+      fullLine = line + suffix;
+      block = MemberFunctionBlock.new(fullLine)
       assert_true(block.valid)
       assert_true(block.canTraverse?)
       assert_equal(suffix.include?("{"), block.instance_variable_get(:@definition))
@@ -2142,6 +2250,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_equal(decl, block.instance_variable_get(:@decl))
       assert_equal(argSet, block.instance_variable_get(:@argSet))
       assert_equal(funcName, block.funcName)
+      assert_equal(fullLine, block.keyForParent)
       assert_equal(switchName + Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX, block.instance_variable_get(:@switchName))
       assert_equal(typedArgSet, block.instance_variable_get(:@typedArgSet))
       assert_equal(argSignature, block.argSignature)
@@ -2168,6 +2277,7 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       block = MemberFunctionBlock.new(line + suffix)
       assert_false(block.valid)
       assert_false(block.canTraverse?)
+      assert_nil(block.keyForParent)
     end
   end
 
@@ -2616,17 +2726,23 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
     line = data
     block = FreeFunctionBlock.new(line)
     assert_false(block.valid)
+    assert_nil(block.keyForParent)
   end
 
   def test_setNoMatchingTypes
-    block = FreeFunctionBlock.new("extern int Func(int a);")
+    line = "extern int Func(int a);"
+    block = FreeFunctionBlock.new(line)
+    assert_equal("int Func(int a);", block.keyForParent)
+
     assert_false(block.instance_variable_get(:@noMatchingTypes))
     block.setNoMatchingTypes
     assert_true(block.instance_variable_get(:@noMatchingTypes))
   end
 
   def test_filterByDefinedReferenceSet
-    block = FreeFunctionBlock.new("extern int Func(int a);")
+    line = "extern int Func(int a);"
+    block = FreeFunctionBlock.new(line)
+    assert_equal("int Func(int a);", block.keyForParent)
     assert_false(block.instance_variable_get(:@alreadyDefined))
 
     assert_false(block.makeMockDef("", "").empty?)
@@ -2999,6 +3115,8 @@ class TestClassBlock < Test::Unit::TestCase
       assert_equal(name, block.getNamespace)
       assert_equal(name, block.instance_variable_get(:@name))
       assert_equal(name, block.instance_variable_get(:@uniqueName))
+      assert_equal(name, block.instance_variable_get(:@uniqueFilename))
+      assert_equal(name, block.keyForParent)
 
       assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_MOCK}", block.mockName)
       assert_equal("#{name}#{Mockgen::Constants::CLASS_POSTFIX_DECORATOR}", block.decoratorName)
@@ -3023,10 +3141,16 @@ class TestClassBlock < Test::Unit::TestCase
     innerBlockB = ClassBlock.new("class Name {")
     block.connect(innerBlockA)
     innerBlockA.connect(innerBlockB)
+
+    assert_equal("Outer", block.keyForParent)
+    assert_equal("Inner", innerBlockA.keyForParent)
+    assert_equal("Name", innerBlockB.keyForParent)
+
     name = "Outer_in_Inner"
     assert_equal(name, innerBlockA.instance_variable_get(:@uniqueName))
+    assert_equal("Outer_Inner", innerBlockA.instance_variable_get(:@uniqueFilename))
     assert_equal("Outer_in_Inner_in_Name", innerBlockB.instance_variable_get(:@uniqueName))
-
+    assert_equal("Outer_Inner_Name", innerBlockB.instance_variable_get(:@uniqueFilename))
     assert_true(block.instance_variable_get(:@localTypeTable).key?("Inner"))
     assert_true(innerBlockA.instance_variable_get(:@localTypeTable).key?("Name"))
 
@@ -3040,6 +3164,7 @@ class TestClassBlock < Test::Unit::TestCase
     block = ClassBlock.new("template <> class NameC<T> {")
     assert_false(block.canTraverse?)
     assert_false(block.isClass?)
+    assert_nil(block.keyForParent)
   end
 
   def test_setUniqueNameAndGetFilenamePostfix
@@ -3047,20 +3172,38 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal("Name", block.setUniqueName)
     assert_equal("_Name", block.getFilenamePostfix)
 
-    blockA = ClassBlock.new("class A {")
+    blockA = ClassBlock.new("class Defined {")
     blockA.connect(block)
-    assert_equal("A_in_Name", block.setUniqueName)
-    assert_equal("_A_Name", block.getFilenamePostfix)
+    assert_equal("Defined_in_Name", block.setUniqueName)
+    assert_equal("_Defined_Name", block.getFilenamePostfix)
 
     blockB = ClassBlock.new("class B {")
     blockB.connect(blockA)
-    assert_equal("B_in_A_in_Name", block.setUniqueName)
-    assert_equal("_B_A_Name", block.getFilenamePostfix)
+    assert_equal("B_in_Defined_in_Name", block.setUniqueName)
+    assert_equal("_B_Defined_Name", block.getFilenamePostfix)
 
     nsBlock = NamespaceBlock.new("namespace NameSpace")
     nsBlock.connect(blockB)
-    assert_equal("NameSpace_in_B_in_A_in_Name", block.setUniqueName)
-    assert_equal("_NameSpace_B_A_Name", block.getFilenamePostfix)
+    assert_equal("NameSpace_in_B_in_Defined_in_Name", block.setUniqueName)
+    assert_equal("_NameSpace_B_Defined_Name", block.getFilenamePostfix)
+  end
+
+  def test_setUniqueNameSpecial
+    block = ClassBlock.new("class outer {")
+    innerBlockA = ClassBlock.new("class _inner {")
+    assert_equal("_inner", innerBlockA.instance_variable_get(:@uniqueName))
+    assert_equal("_inner", innerBlockA.instance_variable_get(:@uniqueFilename))
+
+    block.connect(innerBlockA)
+    assert_equal("outer_in_inner", innerBlockA.instance_variable_get(:@uniqueName))
+    assert_equal("outer__inner", innerBlockA.instance_variable_get(:@uniqueFilename))
+    assert_equal("_outer_inner", innerBlockA.getFilenamePostfix)
+
+    innerBlockB = ClassBlock.new("class _in {")
+    innerBlockA.connect(innerBlockB)
+    assert_equal("outer_in_inner_in_in", innerBlockB.instance_variable_get(:@uniqueName))
+    assert_equal("outer__inner__in", innerBlockB.instance_variable_get(:@uniqueFilename))
+    assert_equal("_outer_inner_in", innerBlockB.getFilenamePostfix)
   end
 
   def test_parseChildrenClass
@@ -4775,7 +4918,9 @@ class TestEnumBlock < Test::Unit::TestCase
     'enum class' => "enum class Month{")
   def test_construct(data)
     block = EnumBlock.new(data)
-    assert_equal("Month", block.getTypename)
+    name = "Month"
+    assert_equal(name, block.getTypename)
+    assert_equal(name, block.keyForParent)
     assert_equal("static_cast<Month>(0)", block.getInitializer)
   end
 
@@ -4783,6 +4928,7 @@ class TestEnumBlock < Test::Unit::TestCase
     block = EnumBlock.new("")
     assert_nil(block.getTypename)
     assert_nil(block.getInitializer)
+    assert_nil(block.keyForParent)
   end
 
   def test_parseChildren
@@ -4806,11 +4952,16 @@ class TestUnionBlock < Test::Unit::TestCase
     'union definition1' => "union Any{",
     'union definition2' => "union Any {")
   def test_construct(data)
-    assert_equal("Any", UnionBlock.new(data).getTypename)
+    name = "Any"
+    block = UnionBlock.new(data)
+    assert_equal(name, block.getTypename)
+    assert_equal(name, block.keyForParent)
   end
 
   def test_failToConstruct
-    assert_nil(UnionBlock.new("").getTypename)
+    block = UnionBlock.new("")
+    assert_nil(block.getTypename)
+    assert_nil(block.keyForParent)
   end
 end
 
@@ -4949,6 +5100,7 @@ class TestClassMock < Mockgen::BaseBlock
   attr_reader :name, :getFullname, :children, :visited, :typeAliasSet
 
   def initialize(name, getFullname, children)
+    super("")
     @name = name
     @getFullname = getFullname
     @children = children
@@ -5679,6 +5831,9 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.eliminateUnusedBlock(parentBlock)
     parser.eliminateUnusedBlock(childBlock)
     assert_nil(childBlock.parent)
+
+    assert_equal([childBlock], parentBlock.children)
+    parentBlock.eraseChildren
     assert_equal([], parentBlock.children)
   end
 

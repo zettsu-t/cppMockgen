@@ -19,7 +19,7 @@ ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
 .PHONY: all runthrough runthrough_llvm runthrough_gcc
 .PHONY: runthrough_default_no_mocks runthrough_cxx runthrough_update
-.PHONY: check update target_with_var_stub compile generate generate_var
+.PHONY: check update target_with_var_stub compile generate generate_var generate_time
 .PHONY: test_generate_c_func test_generate_all_in_one_header
 .PHONY: test_generate_each test_generate_bulk
 .PHONY: clean clean_generated rebuild show showall FORCE
@@ -113,6 +113,10 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 
 generate_var: $(ORIGINAL_HEADER)
 	$(RUBY) $(GENERATOR_SCRIPT) var $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
+
+# export RUBY_PROFILE="-r profile" for profiling
+generate_time: $(ORIGINAL_HEADER) clean
+	time $(RUBY) $(RUBY_PROFILE) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) -split 1 -discardnamespaces internal $(GENERATOR_SPECIAL_FLAGS) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 
 # Write stub functions in an link error log file
 test_generate_c_func: clean_generated
