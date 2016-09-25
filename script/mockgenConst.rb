@@ -14,6 +14,7 @@ module Mockgen
     # Discards hyphens between words in command line arguments
     ARGUMENT_FUNCTION_NAME_FILTER = "-filter".freeze
     ARGUMENT_CLASS_NAME_FILTER_OUT = "-filterout".freeze
+    ARGUMENT_EXCLUDE_CLASS_NAME = "-exclude".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
     ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze

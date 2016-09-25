@@ -78,7 +78,8 @@ TARGET_EXE=$(TARGET_DIR)/mockgenSample
 
 GENERATOR_MODE ?= mock
 GENERATOR_FILTERED_OUT_CLASSNAME="NotMock(ed)?"
-GENERATOR_FILTER ?= $(addprefix -filter ,"[A-Z]") $(addprefix -filterout , $(GENERATOR_FILTERED_OUT_CLASSNAME))
+GENERATOR_EXCLUDED_CLASSNAME="NoStub.*Mock"
+GENERATOR_FILTER ?= $(addprefix -filter ,'[A-Z]') $(addprefix -filterout , $(GENERATOR_FILTERED_OUT_CLASSNAME)) $(addprefix -exclude , $(GENERATOR_EXCLUDED_CLASSNAME))
 GENERATOR_SOURCES ?= $(addprefix -source , $(wildcard $(TESTER_SRC_DIR)/*.cpp) $(TESTED_SOURCES_NOT_SWAPPED))
 GENERATOR_INPUT_C_SOURCES=$(addprefix -source , $(wildcard $(TESTED_SRC_DIR)/*.c))
 ORIGINAL_HEADER_FILENAME=$(notdir $(ORIGINAL_HEADER))

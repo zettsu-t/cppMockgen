@@ -77,7 +77,23 @@ TEST_F(TestSample, MockClassMember) {
 }
 
 TEST_F(TestSample, TopLevelNamespace) {
-    EXPECT_EQ(0, TopLevelSampleFunc());
+    {
+        MOCK_OF(TopLevelClass) mock(INSTANCE_OF(aTopLevelObject));
+        EXPECT_CALL(mock, GetValue()).
+            Times(::testing::AtLeast(1)).
+            WillOnce(::testing::Invoke(&mock, &MOCK_OF(TopLevelClass)::GetValue));
+
+        EXPECT_CALL(mock, FuncMissingF(::testing::_, ::testing::_, ::testing::_)).
+            Times(::testing::AtLeast(1)).
+            WillOnce(::testing::Invoke(&mock, &MOCK_OF(TopLevelClass)::FuncMissingF));
+
+        EXPECT_CALL(mock, FuncMissingG(::testing::_, ::testing::_)).
+            Times(::testing::AtLeast(1)).
+            WillOnce(::testing::Invoke(&mock, &MOCK_OF(TopLevelClass)::FuncMissingG));
+
+        EXPECT_EQ(0, TopLevelSampleFunc());
+    }
+
     {
         MOCK_OF(TopLevelClass) mockA(INSTANCE_OF(aTopLevelObject));
         constexpr int expected = 4;

@@ -182,7 +182,7 @@ module Mockgen
     end
   end
 
-  class NameFilter
+  class NamespaceFilter
     def initialize(value)
       @filterSet = []
       return unless value
@@ -205,8 +205,43 @@ module Mockgen
       @filterSet << nameFilter
     end
 
-    def excludeNamespace?(name)
+    def exclude?(name)
       @filterSet.any? { |filter| filter.call(name) }
+    end
+  end
+
+  class ClassNameFilter
+    def initialize(patternSet)
+      @patternSet = patternSet.nil? ? [] : patternSet
+      @simplePatternSet = @patternSet.reject { |pattern| pattern.include?("::") }
+      @invalidPatternSet = []
+    end
+
+    # match not for namespace and class name qualifiers
+    def excludeSimpleName?(name)
+      exclude?(@simplePatternSet, name)
+    end
+
+    # match for namespace and class name qualifiers
+    def excludeFullname?(name)
+      exclude?(@patternSet, name)
+    end
+
+    def exclude?(patternSet, name)
+      patternSet.any? do |pattern|
+        result = false
+        begin
+          result = name.match(/#{pattern}/)
+        rescue RegexpError => e
+          # The filter should convert the pattern to a Regexp and check if it is valid
+          unless @invalidPatternSet.include?(pattern)
+            # Once per pattern
+            warn "Invalid pattern #{pattern}"
+            @invalidPatternSet << pattern
+          end
+        end
+        result
+      end
     end
   end
 
@@ -1888,14 +1923,25 @@ module Mockgen
     end
   end
 
+  # Parameter set to create ClassBlock instances
+  class ClassBlockParameterSet
+    attr_reader :filterToMock, :filterToAll
+    def initialize(filterToMock, filterToAll)
+      @filterToMock = filterToMock
+      @filterToAll = filterToAll
+    end
+  end
+
   # Class and struct
   class ClassBlock < BaseBlock
     attr_reader :mockName, :decoratorName, :forwarderName
     # public for its derived classes
     attr_reader :subConstructorSet
 
-    def initialize(line)
-      super
+    def initialize(line, parameterSet = nil)
+      super(line)
+      @filterToMock = parameterSet ? parameterSet.filterToMock : nil
+      @filterToAll = parameterSet ? parameterSet.filterToAll : nil
       @templateParam = nil # Template <T...>
       @name = ""           # Class name
       @mockName = ""
@@ -1909,6 +1955,7 @@ module Mockgen
       @destructor = nil    # None or one instance
       @alreadyDefined = false
       @filteredOut = false
+      @noParsingDetail = false
       @defaultNoForwardingToMock = false
 
       # Remove trailing ; and {
@@ -1919,7 +1966,11 @@ module Mockgen
 
       # Determine whether this block can be handled after parsed
       @valid = parseClassName(body)
-      setKeyForParent(@name) if @valid
+      if @valid
+        setKeyForParent(@name)
+        @filteredOut = @filterToMock.excludeSimpleName?(@name) if @filterToMock
+        @noParsingDetail = @filterToAll.excludeSimpleName?(@name) if @filterToAll
+      end
 
       # One or more constructors
       @destructor = nil
@@ -1965,7 +2016,7 @@ module Mockgen
       # Remove head ::
       name = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
       @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_").gsub(/_+/, "_")
-      # Collapse consective _s in getFilenamePostfix
+      # Collapse consecutive _s in getFilenamePostfix
       @uniqueFilename = name.gsub("::", "_")
 
       # Update generated class names
@@ -2007,6 +2058,8 @@ module Mockgen
     # Parse a class member described in the arg line and return its block
     def parseChildren(line)
       return nil if parseAccess(line)
+      parsed, block = parseQuick(line)
+      return block if parsed
       block = nil
 
       # Disregard private members (need to change in considering the NVI idiom)
@@ -2023,13 +2076,8 @@ module Mockgen
       elsif isPointerToFunction?(line)
       # Not supported yet
       else
-        newBlock = MemberVariableStatement.new(line)
-        if newBlock.canTraverse?
-          if @pub
-            @memberVariableSet << newBlock
-          end
-          @allMemberVariableSet << newBlock
-        else
+        newBlock = addMemberVariable(line)
+        unless newBlock.canTraverse?
           newBlock = MemberFunctionBlock.new(line)
           if newBlock.canTraverse?
             @allMemberFunctionSet << newBlock
@@ -2040,6 +2088,17 @@ module Mockgen
       end
 
       block = newBlock if !newBlock.nil? && newBlock.canTraverse?
+      block
+    end
+
+    def addMemberVariable(line)
+      block = MemberVariableStatement.new(line)
+      if block.canTraverse?
+        if @pub
+          @memberVariableSet << block
+        end
+        @allMemberVariableSet << block
+      end
       block
     end
 
@@ -2063,6 +2122,19 @@ module Mockgen
       end
 
       false
+    end
+
+    # Quick parse when most of members are discarded
+    def parseQuick(line)
+      return false, nil if !@noParsingDetail
+      return true, nil if line.include?("{")
+
+      # append a space to the line to end with the space if the line
+      # has no trailing whiltespaces.
+      md = line.match(/^\s*static\s+[\dA-Za-z_]+\s+[\dA-Za-z_]+\s*(.*)/)
+      matched = (!md.nil? && (md[1].empty? || md[1][0] != "("))
+      block = matched ? addMemberVariable(line) : nil
+      return true, block
     end
 
     # Accept Constructor<T>(T& arg)
@@ -2104,17 +2176,8 @@ module Mockgen
       @alreadyDefined = true if !filter.definedReferenceSet.nil? &&
                                 filter.definedReferenceSet.classDefined?(
                                   fullname, filter.definedReferenceSet.relativeNamespaceOnly)
-
-      @filteredOut = filter.classNameFilterOutSet.any? do |pattern|
-        result = false
-        begin
-          result = fullname.match(/#{pattern}/)
-        rescue RegexpError => e
-          # The filter should convert the pattern to a Regexp and check if it is valid
-        ensure
-          result
-        end
-      end
+      # avoid matching if already filtered out
+      @filteredOut |= @filterToMock.excludeFullname?(fullname) if @filterToMock && !@filteredOut
       return unless canFilterByReferenceSet(filter)
 
       # Create a default destructor if it does not exist
@@ -2247,20 +2310,24 @@ module Mockgen
 
     # Generate class definition texts
     def makeClassSet
-      @mockClassDef = ""
-      @classDefInHpp = ""
-      @classDefInCpp = ""
-      @decoratorClassDef = ""
-      @decoratorClassDef = ""
-      @staticMockDef = ""
+      if @noParsingDetail
+        makeStubSet
+      else
+        @mockClassDef = ""
+        @classDefInHpp = ""
+        @classDefInCpp = ""
+        @decoratorClassDef = ""
+        @decoratorClassDef = ""
+        @staticMockDef = ""
 
-      unless @alreadyDefined
-        fullname = getNonTypedFullname(@name)
-        @mockClassDef, @classDefInHpp, @classDefInCpp = formatMockClass(@mockName, @decoratorName, @forwarderName, fullname)
-        @decoratorClassDef, classDefInCpp = formatDecoratorClass(@decoratorName, @mockName, fullname)
-        @classDefInCpp += classDefInCpp
-        @decoratorClassDef += formatForwarderClass(@forwarderName, @mockName, fullname)
-        @staticMockDef = getVariableDefinitionExample(@templateParam, @mockName, @decoratorName, @forwarderName, fullname)
+        unless @alreadyDefined
+          fullname = getNonTypedFullname(@name)
+          @mockClassDef, @classDefInHpp, @classDefInCpp = formatMockClass(@mockName, @decoratorName, @forwarderName, fullname)
+          @decoratorClassDef, classDefInCpp = formatDecoratorClass(@decoratorName, @mockName, fullname)
+          @classDefInCpp += classDefInCpp
+          @decoratorClassDef += formatForwarderClass(@forwarderName, @mockName, fullname)
+          @staticMockDef = getVariableDefinitionExample(@templateParam, @mockName, @decoratorName, @forwarderName, fullname)
+        end
       end
     end
 
@@ -2493,6 +2560,7 @@ module Mockgen
           src += member.makeStubDefWithLocalType(name, @localTypeTable) if member.canTraverse?
         end
       rescue => e
+        warn e.message
         raise e unless MockgenFeatures.ignoreAllExceptions
       end
 
@@ -2741,9 +2809,10 @@ module Mockgen
 
   # Factory class for variant type blocks
   class BlockFactory
-    def initialize(noMatchingTypesInCsource, nameFilter)
+    def initialize(noMatchingTypesInCsource, namespaceFilter, classParameter)
       @noMatchingTypesInCsource = noMatchingTypesInCsource
-      @nameFilter = nameFilter.nil? ? NameFilter.new(nil) : nameFilter
+      @namespaceFilter = namespaceFilter.nil? ? NamespaceFilter.new(nil) : namespaceFilter
+      @classParameter = classParameter
     end
 
     # Top-level namespace
@@ -2771,11 +2840,11 @@ module Mockgen
         case words[0]
         when "namespace"
           newBlock = NamespaceBlock.new(line)
-          skip = @nameFilter.excludeNamespace?(newBlock.getNamespace)
+          skip = @namespaceFilter.exclude?(newBlock.getNamespace)
         when "extern"
           newBlock = ExternCBlock.new(line) if words[1] == '"C"'
         when "class"
-          newBlock = ClassBlock.new(line)
+          newBlock = ClassBlock.new(line, @classParameter)
         # class is a syntactic sugar as private struct
         when "struct"
           newBlock = ClassBlock.new(line)
@@ -2790,6 +2859,7 @@ module Mockgen
         end
       end
 
+      # Discard forward declarations
       unless newBlock
         if md = line.match(/^(.*\S)\s*;/)
           words = md[1].split(" ")
@@ -3189,11 +3259,12 @@ module Mockgen
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
     attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
     attr_reader :noOverloading, :varOnly, :updateChangesOnly, :discardNamespaceValue
+    attr_reader :classNameExcludedSet
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
                    defaultNoForwardingToMock, fillVtable, noOverloading, varOnly,
-                   updateChangesOnly, discardNamespaceValue)
+                   updateChangesOnly, discardNamespaceValue, classNameExcludedSet)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -3208,6 +3279,7 @@ module Mockgen
       @varOnly = varOnly
       @updateChangesOnly = updateChangesOnly
       @discardNamespaceValue = discardNamespaceValue
+      @classNameExcludedSet = classNameExcludedSet
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -3239,10 +3311,13 @@ module Mockgen
   # Parse input file lines and format output strings
   class CppFileParser
     def initialize(parameterSet)
-      nameFilter = NameFilter.new(parameterSet.discardNamespaceValue)
+      namespaceFilter = NamespaceFilter.new(parameterSet.discardNamespaceValue)
+      filterToMockClasses = ClassNameFilter.new(parameterSet.classNameFilterOutSet)
+      filterToAllClasses = ClassNameFilter.new(parameterSet.classNameExcludedSet)
+      classParameter = ClassBlockParameterSet.new(filterToMockClasses, filterToAllClasses)
       @cppNameSpace = parameterSet.cppNameSpace
       @inputFilename = parameterSet.inputFilename
-      @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource, nameFilter)
+      @blockFactory = BlockFactory.new(parameterSet.noMatchingTypesInCsource, namespaceFilter, classParameter)
       @stubOnly = parameterSet.stubOnly
       @varOnly = parameterSet.varOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
@@ -3442,6 +3517,7 @@ module Mockgen
           # Discard all template parameter lists
           block, skipInner = @blockFactory.createBlock(line, @block)
         rescue => e
+          warn e.message
           raise e unless MockgenFeatures.ignoreAllExceptions
           block = BaseBlock.new(line)
         end
@@ -3666,6 +3742,7 @@ module Mockgen
         end
         doForAllBlocks(@block.children, lambdaToBlock, :isClass?)
       rescue => e
+        warn e.message
         raise e unless MockgenFeatures.ignoreAllExceptions
       end
 
@@ -3725,6 +3802,7 @@ module Mockgen
           set.filter(filterSet)
         rescue => e
           # If a filter throws RegexpError, ignore the filter
+          warn e.message
           raise e if MockgenFeatures.mockGenTestingException
         end
       end
@@ -3976,7 +4054,8 @@ module Mockgen
       # Split a camel case filename (treat digits as lower cases)
       name = filename.split(/\//)[-1]
       return "" if (name.nil? || name.empty?)
-      name.gsub(/([^[[:upper:]]])([[:upper:]])/, '\1_\2').upcase.split(/\./).join("_")
+      # Collapse consecutive _s
+      name.gsub(/([^[[:upper:]]])([[:upper:]])/, '\1_\2').upcase.split(/\./).join("_").gsub(/_+/, "_")
     end
 
     def getIncludeDirective(filename)
@@ -3998,6 +4077,7 @@ module Mockgen
 
       @functionNameFilterSet = []
       @classNameFilterOutSet = []
+      @classNameExcludedSet = []
       @sourceFilenameSet = []
       @numberOfClassInFile = nil
       @outHeaderFilename = nil
@@ -4017,8 +4097,10 @@ module Mockgen
         end
 
         keyword = argSet[0]
+        # allow redundant -s and convert --opt to -opt
         optionWord = (keyword.empty? || (keyword[0] != "-")) ? keyword : ("-" + keyword[1..-1].tr('-',''))
-        optionValue = argSet[1].tr('"','')
+        # Unquote
+        optionValue = argSet[1].tr('\'"','')
 
         caught = false
         case optionWord
@@ -4061,6 +4143,9 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_CLASS_NAME_FILTER_OUT
           argSet.shift(2)
           @classNameFilterOutSet << optionValue
+        when Mockgen::Constants::ARGUMENT_EXCLUDE_CLASS_NAME
+          argSet.shift(2)
+          @classNameExcludedSet << optionValue
         when Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER
           argSet.shift(2)
           @sourceFilenameSet << optionValue
@@ -4141,7 +4226,7 @@ module Mockgen
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
                                              @fillVtable, @noOverloading, @varOnly,
-                                             @updateChangesOnly, @discardNamespaceValue)
+                                             @updateChangesOnly, @discardNamespaceValue, @classNameExcludedSet)
       parseHeader(parameterSet)
 
       # Value to return as process status code

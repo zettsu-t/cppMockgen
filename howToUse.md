@@ -553,7 +553,10 @@ treats -outheaderfile as -out-header-file.
 * -filter "[A-Z]" : CppMockGen excludes free functions of which name
    has no upper cases; system and standard functions.
 * -filterout "NotMock(ed)?" : CppMockGen excludes classes of which name
-   matches regular expression /NotMock(ed)?/
+   matches regular expression /NotMock(ed)?/ to generate mock
+* -exclude "NoStub.*Mock" : CppMockGen excludes classes of which name
+   matches regular expression /NoStub.*Mock/ except generating class
+   variables of the classes.
 * -source filename : CppMockGen does not swap free functions in
    `filename`. We have to avoid swapping definitions of tested
    functions and need to set this option.
@@ -646,6 +649,7 @@ which file a tested code should include. CppMockGen gives two options.
   * Aggregated mock file (in arguments) : generated/converted_mockgenSample1.hpp
   * Output mock file (numbered) : mock_mockgenSample1_1.hpp
   * Output mock file (named after a tested class) : mock_mockgenSample1_DerivedClass.hpp
+    Inner classes have their filenames in the form of _outerClass_in_innerClass.* .
 
 The -update-changes-only option implies "-split 1" regardless of any
 other -split options.

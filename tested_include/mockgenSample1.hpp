@@ -152,6 +152,12 @@ namespace Sample1 {
         extern ::Sample1::Types::ConstructorWithArg aCtorWithArg;
     }
 
+    class ClassNoStubAndMock {
+    public:
+        virtual void Execute(void);
+        static int member_;
+    };
+
     class ClassNotMocked {
     public:
         virtual void Execute(void);
@@ -404,6 +410,14 @@ namespace NamespaceLevel1 {
             MultiConstructorDerived(long*,int*,int);
             int GetValue(void) { return 0; }
         };
+    }
+}
+
+// Discarded forward declarations after their definitions
+namespace Sample1 {
+    namespace Types {
+        class IObject;
+        class BaseClass;
     }
 }
 
