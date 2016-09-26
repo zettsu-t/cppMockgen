@@ -68,9 +68,23 @@ module Mockgen
   class BaseArgumentSplitter
     attr_reader :argSet
     def initialize(line, parser, delimiter)
-      @argSet = Mockgen::Common::StringOfParenthesis.new(line).send(parser).map do |element|
-        element[1].nil? ? element[0].gsub(/,/,",,") : element[0]
-      end.join(delimiter).split(/,,/).reject(&:empty?)
+      argSet = nil
+
+      if line.include?("(")
+        argSet = Mockgen::Common::StringOfParenthesis.new(line).send(parser).map do |element|
+          element[1].nil? ? element[0].gsub(/,/,",,") : element[0]
+        end.join(delimiter).split(/,,/).reject(&:empty?)
+      else
+        # Parse fast and keep spaces in words between commas
+        prefix = ""
+        argSet = line.split(",").map do |word|
+          newWord = prefix + word.strip
+          prefix = delimiter
+          newWord
+        end
+      end
+
+      @argSet = argSet
     end
   end
 
@@ -345,7 +359,7 @@ module Mockgen
       aliasType = resolveAlias(typeStr)
       found = (aliasType != typeStr)
       canInitializeByZero = false
-      primitive = aliasType.split(" ").any? { |word| Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_MAP.key?(word) }
+      primitive = aliasType.split(nil).any? { |word| Mockgen::Constants::MEMFUNC_WORD_RESERVED_TYPE_MAP.key?(word) }
 
       if primitive
         found = true
@@ -606,7 +620,7 @@ module Mockgen
       actualTypeStr = nil
       phraseSet = splitPointerToFunction(actualType, 3)
       if phraseSet
-        phraseSet[-2][0].gsub!(/[^\(\)\*&]/, "")
+        phraseSet[-2][0].tr!("^()*&", "")
         actualTypeStr = formatPointerToFunction(phraseSet)
       else
         actualTypeStr = formatType([actualType])
@@ -645,6 +659,10 @@ module Mockgen
     end
 
     def splitPointerToFunction(line, minSize)
+      # return fast
+      return nil unless line.include?("(")
+
+      # decltype and default arguments also contain ()
       phraseSet = Mockgen::Common::StringOfParenthesis.new(line).parse
       ((phraseSet.size < minSize) || phraseSet[-1][1].nil? || phraseSet[-2][1].nil?) ? nil : phraseSet
     end
@@ -721,7 +739,7 @@ module Mockgen
       actualName = nil
 
       # Handle only simple type aliases
-      unless line.split(/\s+/).any? { |word| ["namespace", "template"].any? { |key| word == key } }
+      unless line.split(nil).any? { |word| ["namespace", "template"].any? { |key| word == key } }
         if topMd = line.strip.match(/^\s*using\s+([^=]+)(=.+)/)
           if md = topMd[2].tr(";{","").strip.match(/^=\s*(.+)/)
             aliasName = topMd[1].strip
@@ -757,13 +775,13 @@ module Mockgen
 
       # Assume T(f)(args) as a pointer to a function
       # T(f[])(args) is not supported
-      phraseSet = Mockgen::Common::StringOfParenthesis.new(str).parse
+      phraseSet = str.include?("(") ? Mockgen::Common::StringOfParenthesis.new(str).parse : nil
 
       if phraseSet && (phraseSet.map { |p| p[1] }.compact.size >= 2)
         return parseFuncPtrArg(phraseSet, defaultValueBlock, serial)
       end
 
-      wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(" ")
+      wordSet = str.gsub(/([\*&])/, ' \1 ').strip.split(nil)
       if ((wordSet.size <= 1) || Mockgen::Constants::MEMFUNC_WORD_END_OF_TYPE_MAP.key?(wordSet[-1]))
         argType = wordSet.join(" ")
         argName = "dummy#{serial}"
@@ -1085,7 +1103,7 @@ module Mockgen
       return if line.empty? || line[-1] == ")" || line.include?("__")
 
       # Exclude member functions and type aliases
-      wordSet = line.split(" ")
+      wordSet = line.split(nil)
       return if wordSet.nil? || wordSet.empty?
       return if Mockgen::Constants::MEMVAR_FIRST_WORD_REJECTED_MAP.key?(wordSet[0])
       return if Mockgen::Constants::MEMVAR_LAST_WORD_REJECTED_MAP.key?(wordSet[-1])
@@ -1152,7 +1170,7 @@ module Mockgen
       str = argTypeStr.gsub(/([\*&,]+)\s*/, '\1')
       # Do not sort beyond * and &
       # Do not mix different types
-      str.split(/([\*&,])/).map { |phrase| phrase.split(" ").sort }.join(" ").gsub(/\s+/," ")
+      str.split(/([\*&,])/).map { |phrase| phrase.split(nil).sort }.join(" ").gsub(/\s+/," ")
     end
   end
 
@@ -1210,7 +1228,7 @@ module Mockgen
     end
 
     def postFunctionPhrase(phrase)
-      phrase.split(" ").map do |poststr|
+      phrase.split(nil).map do |poststr|
         Mockgen::Constants::MEMFUNC_WORD_COMPARED_MAP.key?(poststr) ? poststr : ""
       end.join("")
     end
@@ -1254,17 +1272,22 @@ module Mockgen
 
     def parse(line, className)
       # Accept Constructor<T>(T& arg)
-      elementSet = []
+      elementStr = line
       typeStr = ""
-      Mockgen::Common::StringOfAngleBrackets.new(line).parse.each do |element, inBlacket|
-        if inBlacket.nil?
-          elementSet << element
-        else
-          typeStr = element if typeStr.empty?
+
+      if line.include?("<")
+        elementSet = []
+        Mockgen::Common::StringOfAngleBrackets.new(line).parse.each do |element, inBlacket|
+          if inBlacket.nil?
+            elementSet << element
+          else
+            typeStr = element if typeStr.empty?
+          end
         end
+        elementStr = elementSet.join(" ")
       end
 
-      phrase = removeInitializerList(elementSet.join(" "))
+      phrase = removeInitializerList(elementStr)
       valid = false
       typedArgSet = ""
       typedArgSetWithoutDefault = ""
@@ -1408,13 +1431,18 @@ module Mockgen
     def removeAttribute(phrase)
       newphrase = phrase.dup
 
-      Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.each do |keyword|
-        # Recursive regular expression
-        newphrase.gsub!(/\b#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
+      # It is redundant but fast to exclude the phrase early
+      if Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.any? { |word| phrase.include?(word) }
+        Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.each do |keyword|
+          # Recursive regular expression
+          newphrase.gsub!(/\b#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
+        end
       end
 
-      Mockgen::Constants::KEYWORD_ATTRIBUTE_WITHOUT_ARGS.each do |keyword|
-        newphrase.gsub!(/\b#{keyword}\b/, "")
+      if Mockgen::Constants::KEYWORD_ATTRIBUTE_WITHOUT_ARGS.any? { |word| phrase.include?(word) }
+        Mockgen::Constants::KEYWORD_ATTRIBUTE_WITHOUT_ARGS.each do |keyword|
+          newphrase.gsub!(/\b#{keyword}\b/, "")
+        end
       end
 
       newphrase.strip
@@ -1554,7 +1582,7 @@ module Mockgen
 
     def isConstMemberFunction?(phrase)
       return false if phrase.empty?
-      phrase.split(/\s+/).any? { |word| word == "const" }
+      phrase.split(nil).any? { |word| word == "const" }
     end
 
     # Remove non-type-related keywords
@@ -1582,7 +1610,7 @@ module Mockgen
     end
 
     def splitByReferenceMarks(phrase)
-      phrase.gsub(/([\*&])/, ' \1 ').split(/\s+/).reject { |w| w =~ /^\s*$/ }
+      phrase.gsub(/([\*&])/, ' \1 ').split(nil).reject { |w| w =~ /^\s*$/ }
     end
 
     def setDefaultNoForwardingToMock(defaultNoForwardingToMock)
@@ -1709,9 +1737,8 @@ module Mockgen
 
       super(body)
 
-      # Exclude standard header
-      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_STD_PATTERN}/)
-      @valid = false if @funcName.match(/#{Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_SYSTEM_PATTERN}/)
+      # Exclude standard and system internal headers
+      @valid = false if @funcName.match(/^[\da-z_]+$/) || @funcName.match(/^_[A-Z]/)
       @valid = false if Mockgen::Constants::FREE_FUNCTION_FILTER_OUT_WORD_SET.any? { |word| line.include?(word) }
       @alreadyDefined = false
     end
@@ -1919,7 +1946,7 @@ module Mockgen
     end
 
     def surpressUnderscores(str)
-      str.gsub(/_+/, "_")
+      str.squeeze("_")
     end
   end
 
@@ -2015,7 +2042,7 @@ module Mockgen
       fullname = getNonTypedFullname(@name)
       # Remove head ::
       name = (fullname[0..1] == "::") ? fullname[2..-1] : fullname
-      @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_").gsub(/_+/, "_")
+      @uniqueName = name.gsub("::", "_#{Mockgen::Constants::CLASS_SPLITTER_NAME}_").squeeze("_")
       # Collapse consecutive _s in getFilenamePostfix
       @uniqueFilename = name.gsub("::", "_")
 
@@ -2025,7 +2052,7 @@ module Mockgen
     end
 
     def getFilenamePostfix
-      ("_" + @uniqueFilename).gsub(/_+/, "_")
+      ("_" + @uniqueFilename).squeeze("_")
     end
 
     # Skip parsing child members
@@ -2139,10 +2166,14 @@ module Mockgen
 
     # Accept Constructor<T>(T& arg)
     def isConstructor?(line)
-      str = Mockgen::Common::StringOfAngleBrackets.new(line).parse.select do |element|
-        element[1].nil?
-      end.join(" ")
-      # Already checked if @name contains meta characters
+      str = line
+      if line.include?("<")
+        str = Mockgen::Common::StringOfAngleBrackets.new(line).parse.select do |element|
+          element[1].nil?
+        end.join(" ")
+        # Already checked if @name contains meta characters
+      end
+
       str.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
     end
 
@@ -2152,7 +2183,7 @@ module Mockgen
       pattern = Regexp.new('((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)')
       body = Mockgen::Common::ChompAfterDelimiter.new(line, ";", "").str
       newline = Mockgen::Common::ChompAfterDelimiter.new(body, "{", "").str
-      phraseSet = newline.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+      phraseSet = newline.gsub("(", " (").gsub(")", ") ").gsub(/\s+/, ' ').scan(pattern)
 
       return false unless phraseSet
       elementSet = phraseSet.map { |p| p[1] }.compact
@@ -2351,7 +2382,7 @@ module Mockgen
 
     def parseClassHeader(line, typenameStr)
       # Discard words between class/struct keyword and a class name
-      wordSet = Mockgen::Common::ChompAfterDelimiter.new(line, ":", "::").str.strip.split(" ")
+      wordSet = Mockgen::Common::ChompAfterDelimiter.new(line, ":", "::").str.strip.split(nil)
       name = wordSet.empty? ? "" : wordSet[-1]
 
       classLine = line
@@ -2393,7 +2424,7 @@ module Mockgen
       return nameSet unless line.include?(":") && (md = line.match(/:\s*(.*)$/))
 
       md[1].split(/,\s*/).each do |sentence|
-        wordSet = sentence.split(/\s+/)
+        wordSet = sentence.split(nil)
         next if wordSet.empty?
         className = parseInheritancePhrase(wordSet)
         nameSet << addTopNamespace(className) if className
@@ -2830,7 +2861,7 @@ module Mockgen
       # Switch by the first keyword of the line
       # Should merge this and parse in classBlock to handle inner classes
       if md = line.match(/^(.*\S)\s*{/) && (parentBlock.nil? || !parentBlock.skippingParse)
-        words = line.split(/\s+/)
+        words = line.split(nil)
         if words[0] == "typedef"
           typedefBlock = TypedefBlock.new(line)
           line.gsub!(/^typedef\s+/, "")
@@ -2862,7 +2893,7 @@ module Mockgen
       # Discard forward declarations
       unless newBlock
         if md = line.match(/^(.*\S)\s*;/)
-          words = md[1].split(" ")
+          words = md[1].split(nil)
           case words[0]
           when "typedef"
             newBlock = TypedefBlock.new(line)
@@ -2951,7 +2982,7 @@ module Mockgen
       relativeClassName = nil
       isFreeFunction = false
 
-      wordSet = line.split(" ")
+      wordSet = line.split(nil)
       if (wordSet.size >= 2)
         name = wordSet[0]
         typename = wordSet[1]
@@ -3480,6 +3511,7 @@ module Mockgen
       keyDepth = nil     # discard {} blocks at this or deeper nesting level
 
       while rawLine = file.gets
+        # Do not expand tabs because it is slow
         line = Mockgen::Common::LineWithoutCRLF.new(rawLine.encode("UTF-8")).line.strip
         next if line.empty?
         currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
@@ -3493,7 +3525,7 @@ module Mockgen
       skipInner = parseBlock(line, !keyDepth.nil?, (!keyDepth.nil? && (newDepth < keyDepth))) && (newDepth > currentDepth)
       skipping = !keyDepth.nil? && (newDepth >= keyDepth)
       newKeyDepth = (keyDepth.nil? && skipInner) ? (currentDepth + 1) : (skipping ? keyDepth : nil)
-      return [newDepth, newKeyDepth]
+      return newDepth, newKeyDepth
     end
 
     def parseBlock(line, skipping, closing)
@@ -3505,7 +3537,7 @@ module Mockgen
       elsif (line[0] == "}")
         if (!skipping || closing)
           # End of a block
-          wordSet = line.tr(";", "").split(" ")
+          wordSet = line.tr(";", "").split(nil)
           @block.setTypedef(wordSet[1]) if wordSet.size > 1
 
           childBlock = @block
@@ -4052,14 +4084,14 @@ module Mockgen
 
     def getIncludeGuardName(filename)
       # Split a camel case filename (treat digits as lower cases)
-      name = filename.split(/\//)[-1]
+      name = filename.split("/")[-1]
       return "" if (name.nil? || name.empty?)
       # Collapse consecutive _s
-      name.gsub(/([^[[:upper:]]])([[:upper:]])/, '\1_\2').upcase.split(/\./).join("_").gsub(/_+/, "_")
+      name.gsub(/([^[[:upper:]]])([[:upper:]])/, '\1_\2').upcase.split(".").join("_").squeeze("_")
     end
 
     def getIncludeDirective(filename)
-      nameSet = filename.split(/\//)
+      nameSet = filename.split("/")
       name = (nameSet.nil? || nameSet.empty? || nameSet[-1].empty?) ? nil : nameSet[-1]
       name.nil? ? "" : ('#include "' + name + '"' + "\n")
     end
@@ -4238,7 +4270,7 @@ module Mockgen
       clangArgStr = selectClangNonCc1Options(argStr)
       # replace -cc1 options
       [["-cc1",""], ["-triple","-target"], ["-ast-print",""]].each do |fromWord, toWord|
-        clangArgStr.gsub!(/#{fromWord}/, toWord)
+        clangArgStr.gsub!(fromWord, toWord)
       end
 
       # clang++ -### causes errors for non-existing source files
@@ -4261,7 +4293,7 @@ module Mockgen
       clangArgStr = argStr.dup
       # replace -cc1 options
       [["-cc1",""], ["-triple","-target"], ["-ast-print",""]].each do |fromWord, toWord|
-        clangArgStr.gsub!(/#{fromWord}/, toWord)
+        clangArgStr.gsub!(fromWord, toWord)
       end
 
       clangArgStr
@@ -4279,7 +4311,8 @@ module Mockgen
         else
           if popNext
             # quote "C:Program Files"
-            path = '"' + word.gsub(/\\\\/,"\\") + '"'
+            # squeeze redundant backslashes
+            path = '"' + word.squeeze("\\") + '"'
             argSet << path
             pathSet << path
             popNext = false
@@ -4297,7 +4330,7 @@ module Mockgen
 
       headerSet = []
       @sourceFilenameSet.each do |inputFilename|
-        clangArgStr = selectClangNonCc1Options(argStr).gsub(/-cxx-isystem/, "-isystem")
+        clangArgStr = selectClangNonCc1Options(argStr).gsub("-cxx-isystem", "-isystem")
         command = "#{Mockgen::Constants::CLANG_COMMAND} -H #{clangArgStr} #{inputFilename}"
         stdoutstr, stderrstr, status = Open3.capture3(command)
 
@@ -4315,7 +4348,7 @@ module Mockgen
 
     def selectNonInternalIsystemHeaders(logStr, argIsystemPaths)
       # clang++ -H writes paths with delimiter /
-      isystemPaths = argIsystemPaths.map {|path| path.gsub(/\\+/,"/") }
+      isystemPaths = argIsystemPaths.map { |path| path.gsub(/\\+/,"/") }
 
       logStr.split("\n").map do |line|
         headerFilename = nil

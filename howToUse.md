@@ -84,6 +84,8 @@ CppMockGen generates codes that tested and tester codes include or link
 
 CppMockGen does not generate codes for system headers, standard C/C++
 libraries, Boost C++ libraries, and compiler internal classes and
+functions. It assumes that C++ user-defined symbols are in camel case
+and treats free functions which contain no upper cases as the system
 functions.
 
 CppMockGen also creates mocks and stubs for pure virtual functions

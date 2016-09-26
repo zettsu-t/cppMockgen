@@ -57,9 +57,6 @@ module Mockgen
     # Keyword undefined reference
     KEYWORD_UNDEFINED_REFERENCE = "undefined reference to".freeze
 
-    # Pattern to exclude free function mocks and stubs
-    FREE_FUNCTION_FILTER_OUT_STD_PATTERN = "^[\da-z_]+$".freeze
-    FREE_FUNCTION_FILTER_OUT_SYSTEM_PATTERN = "^_[A-Z]".freeze
     # Tentative workaround for MinGW pthread
     FREE_FUNCTION_FILTER_OUT_WORD_SET = ["_pthread_key_dest"].map(&:freeze).freeze
 

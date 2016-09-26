@@ -55,10 +55,11 @@ module Mockgen
         @line = line
       end
 
+      # should use literal regular expressions to parse fast
       def parse(splitRegex, spaceRegex)
         # Recursive regular expresstion to split () (()) () ...
         pattern = Regexp.new(splitRegex)
-        phraseSet = @line.gsub(/\(/, ' (').gsub(/\)/, ') ').gsub(/\s+/, ' ').scan(pattern)
+        phraseSet = @line.gsub("(", " (").gsub(")", ") ").gsub(/\s+/, ' ').scan(pattern)
 
         # Remove spaces between parenthesis
         spacePattern = Regexp.new(spaceRegex)
@@ -74,15 +75,34 @@ module Mockgen
     class StringOfParenthesis
       def initialize(line)
         @line = line
-        @pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
       end
 
       def parse
-        StringOfBrackets.new(@line).parse(@pattern, '\s*(\(|\))\s*')
+        # same as StringOfBrackets.new(@line).parse
+        # Recursive regular expresstion to split () (()) () ...
+        phraseSet = @line.gsub("(", " (").gsub(")", ") ").gsub(/\s+/, ' ').
+                    scan(/((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)/)
+
+        # Remove spaces between parenthesis
+        phraseSet.map do |phrase, captured|
+          left = phrase ? phrase.gsub(/\s*(\(|\))\s*/, '\1') : nil
+          right = captured ? captured.gsub(/\s*(\(|\))\s*/, '\1')[1..-2] : nil
+          [left, right]
+        end
       end
 
       def parseAndKeepSpaces
-        StringOfBrackets.new(@line).parse(@pattern, '(\s*\(|\)\s*)').map do |elements|
+        # same as StringOfBrackets.new(@line).parse
+        # Recursive regular expresstion to split () (()) () ...
+        phraseSet = @line.gsub("(", " (").gsub(")", ") ").gsub(/\s+/, " ").
+                    scan(/((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)/)
+
+        # Remove spaces between parenthesis
+        phraseSet.map do |phrase, captured|
+          left = phrase ? phrase.gsub(/(\s*\(|\)\s*)/, '\1') : nil
+          right = captured ? captured.gsub(/(\s*\(|\)\s*)/, '\1')[1..-2] : nil
+          [left, right]
+        end.map do |elements|
           elements.map { |element| element.nil? ? nil : element.strip }
         end
       end
@@ -99,8 +119,17 @@ module Mockgen
       end
 
       def parse
-        pattern = '((?>[^\s<]+|(<(?>[^<>]+|\g<-1>)*>))+)'
-        StringOfBrackets.new(@line).parse(pattern, '\s*(<|>)\s*')
+        # same as StringOfBrackets.new(@line).parse
+        # Recursive regular expresstion to split () (()) () ...
+        phraseSet = @line.gsub("(", " (").gsub(")", ") ").gsub(/\s+/, " ").
+                    scan(/((?>[^\s<]+|(<(?>[^<>]+|\g<-1>)*>))+)/)
+
+        # Remove spaces between parenthesis
+        phraseSet.map do |phrase, captured|
+          left = phrase ? phrase.gsub(/\s*(<|>)\s*/, '\1') : nil
+          right = captured ? captured.gsub(/\s*(<|>)\s*/, '\1')[1..-2] : nil
+          [left, right]
+        end
       end
     end
   end

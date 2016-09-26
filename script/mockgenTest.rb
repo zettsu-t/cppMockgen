@@ -70,6 +70,22 @@ class TestChompAfterDelimiter < Test::Unit::TestCase
   end
 end
 
+class TestStringOfBrackets < Test::Unit::TestCase
+  def test_parenthesis
+    line = "((a))( ( ( b ) ) )"
+    expected = [["((a))", "(a)"], ["(((b)))", "((b))"]]
+    pattern = '((?>[^\s(]+|(\((?>[^()]+|\g<-1>)*\)))+)'
+    assert_equal(expected, Mockgen::Common::StringOfBrackets.new(line).parse(pattern, '\s*(\(|\))\s*'))
+  end
+
+  def test_angleBrackets
+    line = "template <class T, class S = tmp<T>>"
+    expected = [["template", nil], ["<class T, class S = tmp<T>>", "class T, class S = tmp<T>"]]
+    pattern = '((?>[^\s<]+|(<(?>[^<>]+|\g<-1>)*>))+)'
+    assert_equal(expected, Mockgen::Common::StringOfBrackets.new(line).parse(pattern, '\s*(<|>)\s*'))
+  end
+end
+
 class TestStringOfParenthesis < Test::Unit::TestCase
   data(
     'empty' => ["", [], []],
@@ -260,6 +276,7 @@ class TestArgumentSplitter < Test::Unit::TestCase
     'empty' => ["", [], []],
     'primitive' => ["int", ["int"], ["int"]],
     'primitives' => ["int, long", ["int", "long"], ["int", " long"]],
+    'pointers' => ["int *, long*", ["int *", "long*"], ["int *", " long*"]],
     'pointer to a function' => ["int, void(*f)(int,long), long*", ["int", "void(*f)(int,long)", "long*"],
                                 ["int", " void (*f) (int,long) ",  " long*"]])
   def test_all(data)
@@ -1091,6 +1108,13 @@ class TestTypedefBlock < Test::Unit::TestCase
     block.parseUsingDirective(aliasName, actualType)
     assert_equal(aliasName.strip, block.instance_variable_get(:@typeAlias))
     assert_equal(expectedType, block.instance_variable_get(:@actualTypeStr))
+  end
+
+  def test_extract
+    str = "^()*&abc^"
+    expected = "()*&"
+    assert_equal(expected, str.gsub(/[^\(\)\*&]/, ""))
+    assert_equal(expected, str.tr("^()*&", ""))
   end
 
   data(
@@ -6749,7 +6773,7 @@ class TestMockGenLauncher < Test::Unit::TestCase
     str += '"C:\\Program Files\\mingw-w64\\x86_64-4.9.2-posix-seh-rt_v3-rev1'
     str += '\\mingw64\\x86_64-w64-mingw32\\include\\c++" '
     str += '"-internal-isystem" '
-    str += '"C:\\Program Files\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include" '
+    str += '"C:\\Program Files\\\\LLVM\\bin\\..\\lib\\clang\\3.8.0\\include" '
     str += '"-lstdc++" "-lmingw32"'
 
     args = ["mock", "", "", "", "", "", "", "", ""]
