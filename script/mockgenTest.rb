@@ -551,7 +551,7 @@ class SilentClassNameFilter < ClassNameFilter
   attr_reader :message
 
   def initialize(patternSet)
-    super
+    super(patternSet, [], [], [])
     @message = ""
   end
 
@@ -592,11 +592,49 @@ class TestClassNameFilter < Test::Unit::TestCase
     patternSet, expected = data
     classname = "NameB"
     fullname = "A::NameB"
-    filter = ClassNameFilter.new(patternSet)
+    filter = ClassNameFilter.new(patternSet, [], [], [])
 
-    assert_true(filter.instance_variable_get(:@simplePatternSet).empty?)
+    assert_true(filter.instance_variable_get(:@simpleFilterOutSet).empty?)
     assert_equal(false, filter.excludeSimpleName?(classname))
     assert_equal(expected, filter.excludeFullname?(fullname))
+  end
+
+  def test_initializeSet
+    filter = ClassNameFilter.new([], ["NotExist"], [], [])
+    assert_true(filter.instance_variable_get(:@classNameSet).empty?)
+    assert_true(filter.instance_variable_get(:@varNameSet).empty?)
+  end
+
+  def test_addVariable
+    filter = ClassNameFilter.new([], [], [], [])
+    className = "NameC"
+    varName = "VarName"
+    filter.addVariable(className, varName)
+
+    filter.instance_variable_set(:@classNameSet, {})
+    filter.addVariable(className, varName)
+    assert_true(filter.instance_variable_get(:@classNameSet).empty?)
+
+    filter.instance_variable_set(:@varNameSet, {})
+    filter.addVariable(className, varName)
+    assert_true(filter.instance_variable_get(:@classNameSet).empty?)
+
+    filter.instance_variable_set(:@varNameSet, {varName => true})
+    filter.addVariable(className, varName)
+    assert_true(filter.instance_variable_get(:@classNameSet).key?(className))
+    assert_true(filter.instance_variable_get(:@classNameSet)[className])
+  end
+
+  data(
+    'not matched' => ["Name", false, true],
+    'list' => ["NameC", false, false],
+    'explicit' => ["EX", false, false])
+  def test_excludeSimpleName(data)
+    name, expectedSimple, expectedFull = data
+    filter = ClassNameFilter.new([], [], [], ["E"])
+    filter.instance_variable_set(:@classNameSet, {"NameC" => true})
+    assert_equal(expectedSimple, filter.excludeSimpleName?(name))
+    assert_equal(expectedFull, filter.excludeFullname?(name))
   end
 
   def test_warn
@@ -607,6 +645,61 @@ class TestClassNameFilter < Test::Unit::TestCase
     end
 
     assert_equal("Invalid pattern *(*Invalid pattern *)*Invalid pattern A::B(", filter.message)
+  end
+
+  data(
+    'lf' => "A0.",
+    'var' => "A0.member",
+    'function' => "A0.call(1)",
+    'space 1' => " A0.call(1)",
+    'space 2' => " A0 . call(1)")
+  def test_parseLineVar(data)
+    varNameSet = {}
+    filter = ClassNameFilter.new([], [], [], [])
+    filterSet = ["x", "[A-Z]\\d"]
+
+    2.times do
+      filter.parseLine(data, filterSet, varNameSet)
+      assert_equal(1, varNameSet.size)
+      assert_true(varNameSet.key?("A0"))
+    end
+  end
+
+  def test_parseLineMultiple
+    line = "+A0.member+A1.member+A2. member"
+    varNameSet = {}
+    filter = ClassNameFilter.new([], [], [], [])
+    filterSet = ["x", "[A-Z]\\d"]
+
+    filter.parseLine(line, filterSet, varNameSet)
+    assert_equal(3, varNameSet.size)
+    ["A0", "A1", "A2"].each do |var|
+      assert_true(varNameSet.key?(var))
+    end
+  end
+
+  def test_parseLineEmpty
+    line = ".member"
+    varNameSet = {}
+    filter = ClassNameFilter.new([], [], [], [])
+    filterSet = [""]
+
+    filter.parseLine(line, filterSet, varNameSet)
+    assert_true(varNameSet.empty?)
+  end
+
+  data(
+    'prefix' => "AA0.member",
+    'postfix' => "A00.member",
+    'not matched' => "A.call(1)",
+    'no member' => "A0")
+  def test_parseLineNotMatched(data)
+    varNameSet = {}
+    filter = ClassNameFilter.new([], [], [], [])
+    filterSet = ["x", "[A-Z]\\d"]
+
+    filter.parseLine(data, filterSet, varNameSet)
+    assert_true(varNameSet.empty?)
   end
 end
 
@@ -3469,7 +3562,7 @@ class TestClassBlock < Test::Unit::TestCase
     'array' => [" ", "[4]"])
   def test_parseChildrenQuick(data)
     prefix, postfix = data
-    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"]))
+    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"], [], [], []))
     classBlock = ClassBlock.new("class NameC", parameterSet)
     assert_true(classBlock.instance_variable_get(:@noParsingDetail))
 
@@ -3491,7 +3584,7 @@ class TestClassBlock < Test::Unit::TestCase
     'class function 2' => ["static void Func() {"])
   def test_parseAndDiscardChildrenQuick(data)
     prefix, postfix = data
-    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"]))
+    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"], [], [], []))
     classBlock = ClassBlock.new("class NameC", parameterSet)
     assert_true(classBlock.instance_variable_get(:@noParsingDetail))
 
@@ -3958,7 +4051,7 @@ class TestClassBlock < Test::Unit::TestCase
   end
 
   def test_makeClassSetForExcludedClass
-    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"]))
+    parameterSet = ClassBlockParameterSet.new(nil, ClassNameFilter.new([".*"], [], [], []))
     block = ClassBlock.new("class NameC", parameterSet)
     called = false
     block.define_singleton_method(:makeStubSet) { called = true }
@@ -5278,8 +5371,8 @@ class TestBlockFactory < Test::Unit::TestCase
   end
 
   def test_filterBlock
-    filterToMock = ClassNameFilter.new(["A"])
-    filterToAll = ClassNameFilter.new(["B"])
+    filterToMock = ClassNameFilter.new(["A"], [], [], [])
+    filterToAll = ClassNameFilter.new(["B"], [], [], [])
     factory = BlockFactory.new(false, nil, ClassBlockParameterSet.new(filterToMock, filterToAll))
 
     line = "class InnerClass {"
@@ -5294,6 +5387,21 @@ class TestBlockFactory < Test::Unit::TestCase
     line = "extern void Func();"
     block, skip = factory.createBlock(line, rootBlock)
     assert_true(block.instance_variable_get(:@noMatchingTypes))
+  end
+
+  def test_addVariable
+    varname = "g_obj"
+    classname = "NameC"
+    nameFilter = ClassNameFilter.new([], ["NotExist"], [], [])
+    noDetailFilter = SilentClassNameFilter.new([])
+    classParameter = ClassBlockParameterSet.new(nameFilter, noDetailFilter)
+    nameFilter.instance_variable_set(:@varNameSet, {varname => true})
+
+    factory = BlockFactory.new(true, nil, classParameter)
+    line = "extern #{classname} #{varname};"
+    rootBlock = factory.createRootBlock
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(nameFilter.instance_variable_get(:@classNameSet).key?(classname))
   end
 end
 
@@ -5783,12 +5891,16 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     updateChangesOnly = "m"
     discardNamespaceValue = "n"
     classNameExcludedSet = ["o"]
+    testedFilenameGlobSet = ["p"]
+    findStatementFilterSet = ["q"]
+    explicitClassNameSet = ["r"]
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
                                            sourceFilenameSet, defaultNoForwardingToMock,
                                            fillVtable, noOverloading, varOnly,
-                                           updateChangesOnly, discardNamespaceValue, classNameExcludedSet)
+                                           updateChangesOnly, discardNamespaceValue, classNameExcludedSet,
+                                           testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -5805,6 +5917,9 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(discardNamespaceValue, parameterSet.discardNamespaceValue)
     assert_false(parameterSet.noMatchingTypesInCsource)
     assert_equal(classNameExcludedSet, parameterSet.classNameExcludedSet)
+    assert_equal(testedFilenameGlobSet, parameterSet.testedFilenameGlobSet)
+    assert_equal(findStatementFilterSet, parameterSet.findStatementFilterSet)
+    assert_equal(explicitClassNameSet, parameterSet.explicitClassNameSet)
   end
 
   data(
@@ -5818,7 +5933,7 @@ class TestCppFileParameterSet < Test::Unit::TestCase
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
     parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg,
-                                           nil, false, false, false, false, nil, [])
+                                           nil, false, false, false, false, nil, [], [], [], [])
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -5846,7 +5961,7 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false, nil, [])
+    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false, nil, [], [], [], [])
   end
 end
 
@@ -6920,6 +7035,38 @@ class TestMockGenLauncher < Test::Unit::TestCase
       args.concat(getOptionSet())
       target = MockGenLauncher.new(args)
       assert_equal(expected, target.instance_variable_get(:@sourceFilenameSet))
+    end
+  end
+
+  def test_parseTestedFilenameGlobSet
+    globSet = ['"src/*.c"', 'detail/*.cpp']
+    0.upto(globSet.size) do |i|
+      expected = ((i > 0) ? globSet[0..(i-1)] : []).map { |word| word.tr('"','') }
+      globArgs = expected.map { |filter| [Mockgen::Constants::ARGUMENT_TESTED_FILENAME_GLOB, filter] }.flatten
+
+      args = [Mockgen::Constants::ARGUMENT_MODE_MOCK]
+      args.concat(globArgs)
+      args.concat(getOptionSet())
+      target = MockGenLauncher.new(args)
+      assert_equal(expected, target.instance_variable_get(:@testedFilenameGlobSet))
+    end
+  end
+
+  data(
+    '-find' => [Mockgen::Constants::ARGUMENT_FIND_STATEMENT_FILTER, :@findStatementFilterSet],
+    '-classname' => [Mockgen::Constants::ARGUMENT_EXPLICIT_CLASS_NAME, :@explicitClassNameSet])
+  def test_parseFindStatementFilterSet(data)
+    opt, var = data
+    filterSet = ["A-Z", '"My.*"', "Common::Utility::.*"]
+    0.upto(filterSet.size) do |i|
+      expected = ((i > 0) ? filterSet[0..(i-1)] : []).map { |word| word.tr('"','') }
+      filterArgs = expected.map { |filter| [opt, filter] }.flatten
+
+      args = [Mockgen::Constants::ARGUMENT_MODE_MOCK]
+      args.concat(filterArgs)
+      args.concat(getOptionSet())
+      target = MockGenLauncher.new(args)
+      assert_equal(expected, target.instance_variable_get(var))
     end
   end
 

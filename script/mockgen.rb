@@ -5,7 +5,9 @@
 #
 # Usage:
 # $ mockgen.rb [stub|mock|var] [-nomock]
-#     [-filter pattern]* [-filterout pattern]* [-exclude pattern]*
+#     [-filter pattern]*
+#     [[-filterout pattern]* [-exclude pattern]*]
+#     [[-tested glob] [-find pattern]* [-classname name]*]
 #     [-source filename] [-split num] [-outheaderfile filename]
 #     [-systempath filename] [-checkinternalsystempath] [-vtable] [-updatechangesonly]
 #     8-filenames clang-options
@@ -27,6 +29,15 @@
 # - None or more sets of -exclude pattern
 #   Regular expression to filter out classes to stub and mock
 #   except stubs for variables.
+#
+# - None or more sets of -tested glob
+#   Glob pattern to find files for -find options
+# - None or more sets of -find pattern
+#   Regular expression to find classes from expressions or statements
+#   "pattern".member or "pattern"::member
+# - None or more sets of -classname name
+#   Generate mocks and stubs for class "name"
+#
 # - None or more sets of -source filename
 #   Source filename (*.cpp) to select free functions that are defined
 #   in the file to exclude mocks and stubs of them.

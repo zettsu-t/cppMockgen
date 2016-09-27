@@ -74,7 +74,9 @@ int TopLevelSampleFunc(void) {
         + NamespaceLevel1::Level2::g_multiConstructorDerived2.GetValue()
         + NamespaceLevel1::Level2::g_multiConstructorDerived3.GetValue()
         + NamespaceLevel1::Level2::g_multiConstructorDerived4.GetValue()
-        + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2;
+        + static_cast<int>(TopLevelClass::enumVar_) + static_cast<int>(TopLevelClass::enumClassVar_) - 2
+        + g_explicitlyNeeded.GetValue()
+        + g_topLevelRequired.GetValue();
 }
 
 int FreeFunctionCalleeSample(void) {

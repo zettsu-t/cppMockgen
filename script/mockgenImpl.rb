@@ -224,24 +224,55 @@ module Mockgen
     end
   end
 
+  # Not support classes in namespaces and inner classes
   class ClassNameFilter
-    def initialize(patternSet)
-      @patternSet = patternSet.nil? ? [] : patternSet
-      @simplePatternSet = @patternSet.reject { |pattern| pattern.include?("::") }
+    def initialize(classNameFilterOutSet, testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet)
+      @filterOutSet = nil
+      @simpleFilterOutSet = nil
+      @classNameSet = nil
+      @varNameSet = nil
+      @explicitClassNameSet = explicitClassNameSet
       @invalidPatternSet = []
+
+      if (testedFilenameGlobSet.empty?)
+        @filterOutSet = classNameFilterOutSet.nil? ? [] : classNameFilterOutSet
+        @simpleFilterOutSet = @filterOutSet.reject { |pattern| pattern.include?("::") }
+      else
+        @classNameSet = {}
+        @varNameSet = collectClassName(testedFilenameGlobSet, findStatementFilterSet)
+      end
+    end
+
+    def addVariable(className, varName)
+      @classNameSet[className] = true if @classNameSet && @varNameSet && @varNameSet.key?(varName)
     end
 
     # match not for namespace and class name qualifiers
     def excludeSimpleName?(name)
-      exclude?(@simplePatternSet, name)
+      result = false
+
+      # Cannot exclude classes by the while list here
+      # because the classes may not have their forward declarations.
+      # 1. class ExplicitlyNeeded;
+      # 2. extern ExplicitlyNeeded g_explicitlyNeeded;  // discard the next definition line
+      # 3. class ExplicitlyNeeded {};  // discarded by g_explicitlyNeeded
+      # 4. extern ExplicitlyNeeded g_explicitlyNeeded;  // cannot discard the definition already parsed
+      result = match(@simpleFilterOutSet, name) ? true : false unless @classNameSet
+      result
     end
 
     # match for namespace and class name qualifiers
     def excludeFullname?(name)
-      exclude?(@patternSet, name)
+      result = false
+      if @classNameSet
+        result = !(@classNameSet.key?(name) || match(@explicitClassNameSet, name))
+      else
+        result = @filterOutSet ? match(@filterOutSet, name) : false
+      end
+      result
     end
 
-    def exclude?(patternSet, name)
+    def match(patternSet, name)
       patternSet.any? do |pattern|
         result = false
         begin
@@ -255,6 +286,36 @@ module Mockgen
           end
         end
         result
+      end
+    end
+
+    def collectClassName(testedFilenameGlobSet, findStatementFilterSet)
+      varNameSet = {}
+
+      testedFilenameGlobSet.each do |pattern|
+        Dir.glob(pattern).each do |filename|
+          findClassName(filename, findStatementFilterSet, varNameSet)
+        end
+      end
+
+      return varNameSet
+    end
+
+    def findClassName(filename, findStatementFilterSet, varNameSet)
+      File.open(filename, "r") { |file|
+        while line = file.gets
+          parseLine(line, findStatementFilterSet, varNameSet)
+        end
+      }
+    end
+
+    def parseLine(line, findStatementFilterSet, varNameSet)
+      # Not preprocessed and collect classes more needed
+      findStatementFilterSet.each do |pattern|
+        line.scan(/\b(#{pattern})\s*\./).each do |array|
+          varName = array[0]
+          varNameSet[varName] = true unless varName.empty?
+        end
       end
     end
   end
@@ -2914,6 +2975,11 @@ module Mockgen
       # Delegate to the current class block
       newBlock = parentBlock.parseChildren(line) unless newBlock
 
+      filter = @classParameter ? @classParameter.filterToMock : nil
+      if filter && newBlock && newBlock.isNonMemberInstanceOfClass?
+        @classParameter.filterToMock.addVariable(newBlock.className, newBlock.varName)
+      end
+
       if newBlock
         block = newBlock
         block.attachTypedefBlock(typedefBlock)
@@ -3290,12 +3356,13 @@ module Mockgen
     attr_reader :stubOnly, :functionNameFilterSet, :classNameFilterOutSet, :sourceFilenameSet
     attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
     attr_reader :noOverloading, :varOnly, :updateChangesOnly, :discardNamespaceValue
-    attr_reader :classNameExcludedSet
+    attr_reader :classNameExcludedSet, :testedFilenameGlobSet, :findStatementFilterSet, :explicitClassNameSet
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
                    defaultNoForwardingToMock, fillVtable, noOverloading, varOnly,
-                   updateChangesOnly, discardNamespaceValue, classNameExcludedSet)
+                   updateChangesOnly, discardNamespaceValue, classNameExcludedSet,
+                   testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -3311,6 +3378,9 @@ module Mockgen
       @updateChangesOnly = updateChangesOnly
       @discardNamespaceValue = discardNamespaceValue
       @classNameExcludedSet = classNameExcludedSet
+      @testedFilenameGlobSet = testedFilenameGlobSet
+      @findStatementFilterSet = findStatementFilterSet
+      @explicitClassNameSet = explicitClassNameSet
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -3343,8 +3413,11 @@ module Mockgen
   class CppFileParser
     def initialize(parameterSet)
       namespaceFilter = NamespaceFilter.new(parameterSet.discardNamespaceValue)
-      filterToMockClasses = ClassNameFilter.new(parameterSet.classNameFilterOutSet)
-      filterToAllClasses = ClassNameFilter.new(parameterSet.classNameExcludedSet)
+      filterToMockClasses = ClassNameFilter.new(parameterSet.classNameFilterOutSet,
+                                                parameterSet.testedFilenameGlobSet,
+                                                parameterSet.findStatementFilterSet,
+                                                parameterSet.explicitClassNameSet)
+      filterToAllClasses = ClassNameFilter.new(parameterSet.classNameExcludedSet, [], [], [])
       classParameter = ClassBlockParameterSet.new(filterToMockClasses, filterToAllClasses)
       @cppNameSpace = parameterSet.cppNameSpace
       @inputFilename = parameterSet.inputFilename
@@ -4110,6 +4183,11 @@ module Mockgen
       @functionNameFilterSet = []
       @classNameFilterOutSet = []
       @classNameExcludedSet = []
+
+      @testedFilenameGlobSet = []
+      @findStatementFilterSet = []
+      @explicitClassNameSet = []
+
       @sourceFilenameSet = []
       @numberOfClassInFile = nil
       @outHeaderFilename = nil
@@ -4181,6 +4259,15 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_SOURCE_FILENAME_FILTER
           argSet.shift(2)
           @sourceFilenameSet << optionValue
+        when Mockgen::Constants::ARGUMENT_TESTED_FILENAME_GLOB
+          argSet.shift(2)
+          @testedFilenameGlobSet << optionValue
+        when Mockgen::Constants::ARGUMENT_FIND_STATEMENT_FILTER
+          argSet.shift(2)
+          @findStatementFilterSet << optionValue
+        when Mockgen::Constants::ARGUMENT_EXPLICIT_CLASS_NAME
+          argSet.shift(2)
+          @explicitClassNameSet << optionValue
         when Mockgen::Constants::ARGUMENT_SPLIT_FILES_FILTER
           argSet.shift(2)
           value = optionValue.to_i
@@ -4258,7 +4345,8 @@ module Mockgen
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
                                              @fillVtable, @noOverloading, @varOnly,
-                                             @updateChangesOnly, @discardNamespaceValue, @classNameExcludedSet)
+                                             @updateChangesOnly, @discardNamespaceValue, @classNameExcludedSet,
+                                             @testedFilenameGlobSet, @findStatementFilterSet, @explicitClassNameSet)
       parseHeader(parameterSet)
 
       # Value to return as process status code

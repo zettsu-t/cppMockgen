@@ -421,6 +421,22 @@ namespace Sample1 {
     }
 }
 
+// class ExplicitlyNeeded;
+// extern ExplicitlyNeeded g_explicitlyNeeded;
+
+class ExplicitlyNeeded {
+public:
+    int GetValue();
+};
+
+class TopLevelRequired {
+public:
+    int GetValue();
+};
+
+extern ExplicitlyNeeded g_explicitlyNeeded;
+extern TopLevelRequired g_topLevelRequired;
+
 #endif // MOCKGEN_SAMPLE1_HPP
 
 /*

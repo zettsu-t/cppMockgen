@@ -16,6 +16,11 @@ module Mockgen
     ARGUMENT_CLASS_NAME_FILTER_OUT = "-filterout".freeze
     ARGUMENT_EXCLUDE_CLASS_NAME = "-exclude".freeze
     ARGUMENT_SOURCE_FILENAME_FILTER = "-source".freeze
+
+    ARGUMENT_TESTED_FILENAME_GLOB = "-tested".freeze
+    ARGUMENT_FIND_STATEMENT_FILTER = "-find".freeze
+    ARGUMENT_EXPLICIT_CLASS_NAME = "-classname".freeze
+
     ARGUMENT_SPLIT_FILES_FILTER = "-split".freeze
     ARGUMENT_NO_FORWARDING_TO_MOCK = "-nomock".freeze
     ARGUMENT_OUT_HEADER_FILENAME = "-outheaderfile".freeze
