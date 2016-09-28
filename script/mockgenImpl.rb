@@ -310,8 +310,10 @@ module Mockgen
     end
 
     def parseLine(line, findStatementFilterSet, varNameSet)
-      # Not preprocessed and collect classes more needed
-      findStatementFilterSet.each do |pattern|
+      findStatementFilterSet.map do |pattern|
+        pattern.encode("UTF-8", :invalid => :replace, :replace => " ")
+      end.each do |pattern|
+        # Not preprocessed and collect classes more needed
         line.scan(/\b(#{pattern})\s*\./).each do |array|
           varName = array[0]
           varNameSet[varName] = true unless varName.empty?
@@ -3516,19 +3518,19 @@ module Mockgen
 
       unless @varOnly
         writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
-                              blockSet, :getStringToClassFile, nil, true, true)
+                              blockSet, :getStringToClassFile, nil, true, true, false)
         writeFreeFunctionFile(declFilename, classFilename, beginNamespace, endNamespace, nil,
-                              blockSet, :getStringToDeclFile, nil, false, true)
+                              blockSet, :getStringToDeclFile, nil, false, true, false)
         writeFreeFunctionFile(varSwapperFilename, declFilename, nil, nil, usingNamespace,
-                              blockSet, :getStringToSwapperFile, nil, false, true)
+                              blockSet, :getStringToSwapperFile, nil, false, true, false)
         writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
-                              blockSet, :getStringOfStub, nil, false, false)
+                              blockSet, :getStringOfStub, nil, false, false, true)
       end
-      appendToFile(defFilename, @variableMockStr)
+      appendToFile(defFilename, @variableMockStr, true)
 
       unless @stubOnly
         writeFreeFunctionFile(defFilename, nil, beginNamespace, endNamespace, nil,
-                              blockSet, :getStringOfVariableDefinition, "a", false, false)
+                              blockSet, :getStringOfVariableDefinition, "a", false, false, true)
       end
 
       return classFilename, declFilename
@@ -3980,15 +3982,15 @@ module Mockgen
 
     # always update stub files
     def writeFreeFunctionFile(filename, includeFilename, beginNamespace, endNamespace, usingNamespace,
-                              blockSet, labelGetStr, mode, writeMacro, needGuard)
+                              blockSet, labelGetStr, mode, writeMacro, needGuard, markFile)
       filemode = mode
       filemode ||= "w"
       File.open(filename, filemode) do |file|
-        str = ""
+        str = markFile ? Mockgen::Constants::MARK_FOR_GENERATED_LINES : ""
         if needGuard
-          str = getClassFileHeader(includeFilename, filename, writeMacro)
+          str += getClassFileHeader(includeFilename, filename, writeMacro)
         else
-          str = getIncludeDirective(includeFilename) if includeFilename
+          str += getIncludeDirective(includeFilename) if includeFilename
         end
 
         file.puts str unless str.empty?
@@ -4004,8 +4006,9 @@ module Mockgen
       end
     end
 
-    def appendToFile(filename, str)
+    def appendToFile(filename, str, markFile)
       File.open(filename, "a") do |file|
+        file.puts Mockgen::Constants::MARK_FOR_GENERATED_LINES if markFile
         file.puts str
       end
     end
@@ -4047,7 +4050,8 @@ module Mockgen
     end
 
     def writeDefFile(filename, classFilename, declFilename, beginNamespace, endNamespace, usingNamespace, blockSet)
-      preStr = getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
+      preStr = Mockgen::Constants::MARK_FOR_GENERATED_LINES
+      preStr += getDefHeader(@inputFilename, classFilename, declFilename) + "\n" + beginNamespace
       postStr = endNamespace + "\n" + usingNamespace
 
       outFilename = getOutFilename(filename)
@@ -4057,8 +4061,10 @@ module Mockgen
     end
 
     def writeStubFile(filename, inputFilename, blockSet)
+
       outFilename = getOutFilename(filename)
       File.open(outFilename, "w") do |file|
+        file.puts Mockgen::Constants::MARK_FOR_GENERATED_LINES
         file.puts getIncludeDirective(inputFilename)
       end
       writeSourceFile(filename, outFilename, blockSet)

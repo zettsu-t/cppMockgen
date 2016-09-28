@@ -114,6 +114,9 @@ module Mockgen
 
     # Mock for the top level
     CLASS_FREE_FUNCTION_SET = "All".freeze
+    # SYMBOL MARK FOR GENERATED .cpp
+    MARK_FOR_GENERATED_CPP = "GENERATED_MOCK_CPP_FILE"
+    MARK_FOR_GENERATED_LINES = "#ifndef #{MARK_FOR_GENERATED_CPP}\n#define #{MARK_FOR_GENERATED_CPP}\n#endif //#{MARK_FOR_GENERATED_CPP}\n"
 
     # To prohibit c++11 keywords, set false
     CPP11_MODE = true
