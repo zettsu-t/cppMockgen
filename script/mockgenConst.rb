@@ -134,6 +134,9 @@ module Mockgen
     # keywords in TAGS
     CTAGS_TYPENAME_FUNCTION_DEFINITION = "function".freeze
 
+    # Parameter set to ignore Byte Order Mark of UTF-8
+    CHARACTER_ENCODING_PARAMETER_SET = [:invalid => :replace, :replace => " "]
+
     # Meta characters for Ruby regular expressions
     # - is context dependent but always invalid for C++ symbols
     REGEXP_META_CHARACTER_SET = ["-", "(", ")", "[", "]", "{", "}", ".", "?", "+", "*", "|", "\\"].map(&:freeze).freeze

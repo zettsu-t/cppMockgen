@@ -50,6 +50,17 @@ def checkIfExceptionCaught(expr)
   end
 end
 
+class TestUtf8Encoding < Test::Unit::TestCase
+  def test_removeByteOrderMark
+    str = "   DEFG"
+    str.setbyte(0, 0xef)
+    str.setbyte(1, 0xbb)
+    str.setbyte(2, 0xbf)
+    newStr = str.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET).tr(" ","")
+    assert_true(newStr.include?("DEFG"))
+  end
+end
+
 class TestChompAfterDelimiter < Test::Unit::TestCase
   data(
     'empty 1' => ["", ":", "", "", nil],

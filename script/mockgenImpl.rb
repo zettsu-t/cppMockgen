@@ -311,10 +311,11 @@ module Mockgen
 
     def parseLine(line, findStatementFilterSet, varNameSet)
       findStatementFilterSet.map do |pattern|
-        pattern.encode("UTF-8", :invalid => :replace, :replace => " ")
+        pattern.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
       end.each do |pattern|
         # Not preprocessed and collect classes more needed
-        line.scan(/\b(#{pattern})\s*\./).each do |array|
+        inputLine = line.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
+        inputLine.scan(/\b(#{pattern})\s*\./).each do |array|
           varName = array[0]
           varNameSet[varName] = true unless varName.empty?
         end
@@ -3152,7 +3153,8 @@ module Mockgen
 
     def parseAllLines(lineSet, refFunctionSet, refClassNameSet)
       lineSet.each do |rawLine|
-        line = Mockgen::Common::LineWithoutCRLF.new(rawLine.encode("UTF-8")).line.strip
+        inputLine = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
+        line = Mockgen::Common::LineWithoutCRLF.new(inputLine).line.strip
         ref = DefinedReference.new(line)
         add(ref, refFunctionSet, refClassNameSet)
       end
@@ -3309,8 +3311,9 @@ module Mockgen
       refSet = []
       refFullnameSet = {}
 
-      while line = file.gets
-        ref = UndefinedReference.new(line.encode("UTF-8").chomp)
+      while rawLine = file.gets
+        line = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET).chomp
+        ref = UndefinedReference.new(line)
         if ref.isVtable
           vtableSet[ref.classFullname] = ref
         else
@@ -3587,7 +3590,8 @@ module Mockgen
 
       while rawLine = file.gets
         # Do not expand tabs because it is slow
-        line = Mockgen::Common::LineWithoutCRLF.new(rawLine.encode("UTF-8")).line.strip
+        inputLine = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
+        line = Mockgen::Common::LineWithoutCRLF.new(inputLine).line.strip
         next if line.empty?
         currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
       end
