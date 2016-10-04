@@ -1797,6 +1797,12 @@ module Mockgen
       body = line
       if md = line.match(/^extern\s+(.*)/)
         body = md[1]
+      elsif line.include?("inline")
+        body = ""
+        if md = line.match(/^(static\s+)?inline\s+(static\s+)?([^\{]+){/)
+          # Exclude system functions
+          body = md[3].strip unless md[3].include?("__")
+        end
       end
 
       super(body)
@@ -2951,6 +2957,12 @@ module Mockgen
           newBlock = EnumBlock.new(line)
         when "union"
           newBlock = UnionBlock.new(line)
+        when "inline"
+          # No stab need for inline functions
+          newBlock = FreeFunctionBlock.new(line) if ["(", ")"].all? { |keyword| line.include?(keyword) }
+        when "static"
+          # No stab need for inline functions
+          newBlock = FreeFunctionBlock.new(line) if ["(", ")", "inline"].all? { |keyword| line.include?(keyword) }
         end
       end
 

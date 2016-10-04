@@ -213,6 +213,24 @@ TEST_F(TestSample, ForwardSelective) {
     }
 }
 
+TEST_F(TestSample, InlineFunctions) {
+    EXPECT_EQ(5, FunctionInHeader());
+
+    {
+        MOCK_OF(All) mock(INSTANCE_OF(all));
+        {
+            EXPECT_CALL(mock, ToBeFowarded1()).Times(1).WillOnce(::testing::Return(0));
+            EXPECT_CALL(mock, ToBeFowarded2(1)).Times(1).WillOnce(::testing::Return(0));
+            EXPECT_EQ(0, FunctionInHeader());
+        }
+        {
+            INSTANCE_OF(all).ToBeFowarded1_nomock_ = true;
+            INSTANCE_OF(all).ToBeFowarded2_nomock_ = true;
+            EXPECT_EQ(5, FunctionInHeader());
+        }
+    }
+}
+
 class TestMemFnPointerSample : public ::testing::Test{};
 
 TEST_F(TestMemFnPointerSample, All) {

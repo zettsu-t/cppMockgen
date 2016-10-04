@@ -656,6 +656,84 @@ which file a tested code should include. CppMockGen gives two options.
 The -update-changes-only option implies "-split 1" regardless of any
 other -split options.
 
+### Include generated files
+
+When a file includes generated files, the generated files must exist
+or compilers cause errors for them. To avoid the errors, disable
+include directives for the files while generating mocks.
+
+```cpp
+#if !defined(GENERATING_MOCK)
+#include "generatedHeader.hpp"
+#endif // GENERATING_MOCK
+```
+
+(Conditional inclusion with __has_include will be available in C++1z.)
+
+_GENERATING_MOCK_ is a macro that is defined in _Makefile_vars_. You
+can change this to other keywords.
+
+CppMockGen inserts `#define GENERATED_MOCK_CPP_FILE` in generated cpp
+files. It helps stubs and mocks avoid swapping their types and names.
+The macro name is hard-corded in _mockgenConst.rb_.
+
+This is useful to mock invocations in header files calling inline
+functions. See an example in _mockgenSample2.hpp_.
+
+```cpp
+ 1  #if !defined(GENERATING_MOCK) && !defined(GENERATED_MOCK_CPP_FILE)
+ 2  #include "varDecl_mockgenSample1_Stub.hpp"
+ 3  using namespace MyUnittest;
+ 4  #define ToBeFowarded1_Inline all_Forwarder.ToBeFowarded1
+ 5  #define ToBeFowarded2_Inline all_Forwarder.ToBeFowarded2
+ 6  #else
+ 7  #define ToBeFowarded1_Inline ToBeFowarded1
+ 8  #define ToBeFowarded2_Inline ToBeFowarded2
+ 9  #endif // GENERATING_MOCK && GENERATED_MOCK_CPP_FILE
+
+10  inline int FunctionInHeader(void) {
+11      return ToBeFowarded1_Inline() + ToBeFowarded2_Inline(1);
+12  }
+```
+
+To define statements to call inline functions at line 11, add _Inline
+postfix to the function names. These are swapped to call their
+forwarder by macros in lines 4 and 5. Lines 7 and 8 are required to
+avoid compilation errors for CppMockGen and generated cpp files. These
+macros are not automatically generated and you have to write them now.
+
+### Specify classes to mock
+
+So far CppMockGen finds target classes for which it makes mocks
+automatically. It may take long to compile large projects that
+contain many mock classes.
+
+You can specify explicit targets by these options.
+
+* -tested glob : A filename glob pattern which CppMockGen searches to
+  global variables. CppMockGen finds global variables in the
+  top-level namespace and collects their types (classes).
+* -find pattern : A regular expression that matches target global
+  variables with accesses to their member variables or functions.
+  Pattern g_explicit[^\\.]*_ collects variables that begin with
+  _g_explicit_.
+* -classname pattern : A regular expression that matches unqualified
+  class names aside from -find options.
+
+The -find and -classname options must be used with -tested option even
+if no source files are searched. The -tested option must not be used
+with -filter, -filterout and -exclude options.
+
+This feature is not matured and has limitations shown below.
+
+* CppMockGen parses plain files designated by the -tested options
+  + Preprocessors and macro expansion are not applied.
+  + Type aliases are not resolved.
+* Patterns in -find options require the tail [^\\.] to extract
+  variable names from _object.function_ statements.
+* -classname does not match inner classes at once. Listing -classname
+  -A -classname B needs to match Class A::B.
+
 ## And more
 
 More details are described in [notes.md](notes.md) and as comments in script/mockgen.rb.

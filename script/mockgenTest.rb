@@ -2924,6 +2924,27 @@ end
 
 class TestFreeFunctionBlock < Test::Unit::TestCase
   data(
+    'inline' => "inline",
+    'static inline' => "static inline",
+    'inline static' => "inline static")
+  def test_inlineFunction(data)
+    line = data + " int Func(long) {"
+    block = FreeFunctionBlock.new(line)
+    assert_true(block.valid)
+    assert_equal("Func", block.funcName)
+    assert_equal("Func(long)", block.argSignature)
+  end
+
+  data(
+    'declaration' => "inline int Func(long);",
+    'system' => "inline int __System(void) {")
+  def test_notInlineFunction(data)
+    line = data
+    block = FreeFunctionBlock.new(line)
+    assert_false(block.valid)
+  end
+
+  data(
     'empty' => "",
     'libc' => "time",
     'thread' => "pthread_create",
@@ -5366,6 +5387,30 @@ class TestBlockFactory < Test::Unit::TestCase
     typeStr, className = data
     line = "#{typeStr} Month {"
     assert_equal("Month", Object.const_get(className).new(line).getTypename)
+  end
+
+  data(
+    'inline' => "inline",
+    'static inline' => "static inline",
+    'inline static' => "inline static")
+  def test_createInlineFunction(data)
+    line = data + " int Func(long) {"
+
+    factory = BlockFactory.new(false, nil, nil)
+    rootBlock = factory.createRootBlock
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_true(block.valid)
+  end
+
+  data(
+    'declaration' => "inline int Func(long);",
+    'variable' => "static int var;")
+  def test_createNotInlineFunction(data)
+    line = data
+    factory = BlockFactory.new(false, nil, nil)
+    rootBlock = factory.createRootBlock
+    block, skip = factory.createBlock(line, rootBlock)
+    assert_false(block.canTraverse?)
   end
 
   def test_skipBlock

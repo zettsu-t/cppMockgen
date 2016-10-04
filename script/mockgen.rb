@@ -20,6 +20,7 @@
 #   If the option is set, this script does not call a mock unless
 #   specified to call the mock. Default behavior is calling a mock
 #   unless specified not to call the mock.
+#
 # - None or more sets of -filter pattern
 #   Regular expression to filter free functions to mock.
 #   No filters mean to handle all free functions including system headers.
@@ -34,9 +35,11 @@
 #   Glob pattern to find files for -find options
 # - None or more sets of -find pattern
 #   Regular expression to find classes from expressions or statements
-#   "pattern".member or "pattern"::member
+#   "pattern".member or "pattern"::member.
+#   This must be used with the -tested option.
 # - None or more sets of -classname name
 #   Generate mocks and stubs for class "name"
+#   This must be used with the -tested option.
 #
 # - None or more sets of -source filename
 #   Source filename (*.cpp) to select free functions that are defined

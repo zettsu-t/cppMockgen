@@ -437,6 +437,19 @@ public:
 extern ExplicitlyNeeded g_explicitlyNeeded;
 extern TopLevelRequired g_topLevelRequired;
 
+// Mocked inline functions
+static inline int ToBeFowarded1(void) {
+    // The mock will return 0
+    return 2;
+}
+
+namespace {
+    // Use an unnamed namespace instead of the static keyword in C++
+    inline int ToBeFowarded2(long arg) {
+        return 3;
+    }
+}
+
 #endif // MOCKGEN_SAMPLE1_HPP
 
 /*
