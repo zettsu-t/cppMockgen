@@ -940,6 +940,10 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_nil(BaseBlock.new("").getStringToDeclFile)
   end
 
+  def test_getStringSetToDeclInlineFile
+    assert_nil(BaseBlock.new(["", ""]).getStringSetToDeclInlineFile)
+  end
+
   def test_getStringToSwapperFile
     assert_nil(BaseBlock.new("").getStringToSwapperFile)
   end
@@ -3080,6 +3084,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.makeStubSet
     assert_equal("", funcSet.getStringToClassFile)
     assert_equal("", funcSet.getStringToDeclFile)
+    assert_equal(["", ""], funcSet.getStringSetToDeclInlineFile)
     assert_equal("", funcSet.getStringToSwapperFile)
     assert_equal("", funcSet.getStringOfStub)
     assert_equal("", funcSet.getStringOfVariableDefinition)
@@ -3087,6 +3092,7 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     funcSet.makeClassSet
     assert_equal("", funcSet.getStringToClassFile)
     assert_equal("", funcSet.getStringToDeclFile)
+    assert_equal(["", ""], funcSet.getStringSetToDeclInlineFile)
     assert_equal("", funcSet.getStringToSwapperFile)
     assert_equal("", funcSet.getStringOfStub)
     assert_equal("", funcSet.getStringOfVariableDefinition)
@@ -3130,6 +3136,31 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     # filter numbers of 0,2,3,4 + 6N
     assert_equal(8, funcSetBlock.instance_variable_get(:@funcSet).size)
     assert_equal(16, funcSetBlock.instance_variable_get(:@undefinedFunctionSet).size)
+  end
+
+  data(
+    'none' => [[], ["", ""]],
+    'one' => [["extern void FuncA();"],
+              ["#define FuncA_Inline varName.FuncA\n", "#define FuncA_Inline FuncA\n"]],
+    'two' => [["extern void FuncA();", "extern int funcB(int a);"],
+              ["#define FuncA_Inline varName.FuncA\n#define funcB_Inline varName.funcB\n",
+               "#define FuncA_Inline FuncA\n#define funcB_Inline funcB\n"]])
+  def test_getStringSetToDeclInlineFile(data)
+    lineSet, expected = data
+    block = RootBlock.new("")
+    funcSet = FreeFunctionSet.new(block)
+
+    lineSet.each do |line|
+      func = FreeFunctionBlock.new(line)
+      block.connect(func)
+      funcSet.add(func)
+    end
+
+    funcSet.instance_variable_set(:@forwarderVarName, "varName")
+    actual = funcSet.getStringSetToDeclInlineFile
+    assert_equal(expected, actual)
+    assert_equal(lineSet.size, actual[0].scan("#define").size)
+    assert_equal(lineSet.size, actual[1].scan("#define").size)
   end
 
   def test_noStubs
@@ -3183,7 +3214,10 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     expectedSwapper =  "#define FuncA all_Forwarder.FuncA\n"
     expectedSwapper += "#define FuncB all_Forwarder.FuncB\n"
     assert_equal(expectedSwapper, funcSet.getStringToSwapperFile)
-    assert_equal("All_Forwarder all_Forwarder;\n", funcSet.getStringOfVariableDefinition)
+
+    expectedVarName = "all_Forwarder"
+    assert_equal(expectedVarName, funcSet.instance_variable_get(:@forwarderVarName))
+    assert_equal("All_Forwarder #{expectedVarName};\n", funcSet.getStringOfVariableDefinition)
   end
 
   def test_inNamespace
@@ -3321,6 +3355,33 @@ class TestFreeFunctionSet < Test::Unit::TestCase
     block = NamespaceBlock.new("namespace B")
     funcSet = FreeFunctionSet.new(block)
     assert_equal(expected, funcSet.surpressUnderscores(str))
+  end
+end
+
+class TestFreeFunctionSwapper < Test::Unit::TestCase
+  def test_empty
+    swapper = FreeFunctionSwapper.new(nil, [])
+    assert_equal("#if !defined(" + Mockgen::Constants::MARK_FOR_GENERATED_CPP + ")\n", swapper.beginPhrase)
+    assert_equal("", swapper.body)
+    assert_equal("#endif\n", swapper.endPhrase)
+  end
+
+  def test_guardOnly
+    swapper = FreeFunctionSwapper.new("IN_CPP", [])
+    assert_equal("#if !defined(IN_CPP) && !defined(" + Mockgen::Constants::MARK_FOR_GENERATED_CPP + ")\n", swapper.beginPhrase)
+    assert_equal("", swapper.body)
+    assert_equal("#endif\n", swapper.endPhrase)
+  end
+
+  def test_all
+    mockClass = Struct.new(:getStringSetToDeclInlineFile)
+    funcSetA = mockClass.new(["A1", "a2"])
+    funcSetB = mockClass.new(["B1", "b2"])
+    funcSetC = mockClass.new(["C1", "c2"])
+    swapper = FreeFunctionSwapper.new("IN_CPP", [funcSetA, funcSetB, funcSetC])
+    assert_equal("#if !defined(IN_CPP) && !defined(" + Mockgen::Constants::MARK_FOR_GENERATED_CPP + ")\n", swapper.beginPhrase)
+    assert_equal("A1B1C1#else\na2b2c2", swapper.body)
+    assert_equal("#endif\n", swapper.endPhrase)
   end
 end
 
@@ -5950,13 +6011,16 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     testedFilenameGlobSet = ["p"]
     findStatementFilterSet = ["q"]
     explicitClassNameSet = ["r"]
+    mockGuardName = "s"
+    noSwapInlineFunction = "t"
 
     parameterSet = CppFileParameterSet.new(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                                            stubOnly, functionNameFilterSet, classNameFilterOutSet,
                                            sourceFilenameSet, defaultNoForwardingToMock,
                                            fillVtable, noOverloading, varOnly,
                                            updateChangesOnly, discardNamespaceValue, classNameExcludedSet,
-                                           testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet)
+                                           testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet,
+                                           mockGuardName, noSwapInlineFunction)
     assert_equal(cppNameSpace, parameterSet.cppNameSpace)
     assert_equal(inputFilename, parameterSet.inputFilename)
     assert_equal(linkLogFilename, parameterSet.linkLogFilename)
@@ -5976,6 +6040,8 @@ class TestCppFileParameterSet < Test::Unit::TestCase
     assert_equal(testedFilenameGlobSet, parameterSet.testedFilenameGlobSet)
     assert_equal(findStatementFilterSet, parameterSet.findStatementFilterSet)
     assert_equal(explicitClassNameSet, parameterSet.explicitClassNameSet)
+    assert_equal(mockGuardName, parameterSet.mockGuardName)
+    assert_equal(noSwapInlineFunction, parameterSet.noSwapInlineFunction)
   end
 
   data(
@@ -5989,7 +6055,8 @@ class TestCppFileParameterSet < Test::Unit::TestCase
   def test_hasCsourceFilesOnly(data)
     arg, expected = data
     parameterSet = CppFileParameterSet.new(nil, nil, nil, nil, nil, nil, nil, arg,
-                                           nil, false, false, false, false, nil, [], [], [], [])
+                                           nil, false, false, false, false, nil,
+                                           [], [], [], [], nil, false)
     assert_equal(expected, parameterSet.noMatchingTypesInCsource)
     assert_equal(expected, parameterSet.hasCsourceFilesOnly?(arg))
   end
@@ -6017,7 +6084,9 @@ end
 
 class CppFileParserNilArgSet < CppFileParameterSet
   def initialize(cppNameSpace)
-    super(cppNameSpace, nil, nil, nil, false, [], [], [], false, false, false, false, false, nil, [], [], [], [])
+    super(cppNameSpace, nil, nil, nil, false, [], [], [],
+          false, false, false, false, false, nil,
+          [], [], [], [], nil, false)
   end
 end
 
@@ -6903,6 +6972,8 @@ class TestMockGenLauncher < Test::Unit::TestCase
     assert_false(target.instance_variable_get(:@noOverloading))
     assert_false(target.instance_variable_get(:@updateChangesOnly))
     assert_nil(target.instance_variable_get(:@discardNamespaceValue))
+    assert_nil(target.instance_variable_get(:@mockGuardName))
+    assert_false(target.instance_variable_get(:@noSwapInlineFunction))
   end
 
   def test_collectInternalIsystemFail
@@ -7238,6 +7309,24 @@ class TestMockGenLauncher < Test::Unit::TestCase
     args.concat(getOptionSet())
     target = MockGenLauncher.new(args)
     assert_equal(value, target.instance_variable_get(:@discardNamespaceValue))
+  end
+
+  def test_mockGuard
+    value = "GENERATING_MOCK"
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, Mockgen::Constants::ARGUMENT_MOCK_GUARD_NAME, value]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_equal(value, target.instance_variable_get(:@mockGuardName))
+  end
+
+  data(
+    'simple' => Mockgen::Constants::ARGUMENT_NO_SWAP_INLINE_FUNCTION,
+    'multi' => Mockgen::Constants::ARGUMENT_NO_SWAP_INLINE_FUNCTIONS)
+  def test_noSwapInlineFunction(data)
+    args = [Mockgen::Constants::ARGUMENT_MODE_STUB, data]
+    args.concat(getOptionSet())
+    target = MockGenLauncher.new(args)
+    assert_true(target.instance_variable_get(:@noSwapInlineFunction))
   end
 
   data(

@@ -3,17 +3,9 @@
 
 #include "mockgenSample1.hpp"
 
-#if !defined(GENERATING_MOCK) && !defined(GENERATED_MOCK_CPP_FILE)
-#include "varDecl_mockgenSample1_Stub.hpp"
-using namespace MyUnittest;
-// Forward to mocks in testing
-#define ToBeFowarded1_Inline all_Forwarder.ToBeFowarded1
-#define ToBeFowarded2_Inline all_Forwarder.ToBeFowarded2
-#else
-// The header is not generated or do not forward in mocks
-#define ToBeFowarded1_Inline ToBeFowarded1
-#define ToBeFowarded2_Inline ToBeFowarded2
-#endif // GENERATING_MOCK && GENERATED_MOCK_CPP_FILE
+#if !defined(GENERATING_MOCK)
+#include "varDecl_mockgenSample1_Stub_Inline.hpp"
+#endif // GENERATING_MOCK
 
 using namespace Sample1::Types;
 

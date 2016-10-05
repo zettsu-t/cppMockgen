@@ -497,6 +497,10 @@ module Mockgen
       nil
     end
 
+    def getStringSetToDeclInlineFile
+      nil
+    end
+
     def getStringToSwapperFile
       nil
     end
@@ -1879,6 +1883,23 @@ module Mockgen
       @funcDecl
     end
 
+    def getStringSetToDeclInlineFile
+      return ["", ""] if @forwarderVarName.nil? || @funcSet.empty?
+
+      prefix = @forwarderVarName + "."
+      forwarder = @funcSet.map do |func|
+        funcName = func.funcName
+        "#define #{funcName}#{Mockgen::Constants::CLASS_POSTFIX_INLINE} #{prefix}#{funcName}\n"
+      end.join("")
+
+      renamer = @funcSet.map do |func|
+        funcName = func.funcName
+        "#define #{funcName}#{Mockgen::Constants::CLASS_POSTFIX_INLINE} #{funcName}\n"
+      end.join("")
+
+      [forwarder, renamer]
+    end
+
     def getStringToSwapperFile
       @funcSwapDef
     end
@@ -1916,7 +1937,7 @@ module Mockgen
       forwarderName = surpressUnderscores(className + Mockgen::Constants::CLASS_POSTFIX_FORWARDER)
 
       @mockClassDef, @mockClassFunc = formatMockClass(mockName, forwarderName)
-      @forwarderClassDef, @funcDecl, @funcSwapDef, @forwarderVarDef = formatForwarderClass(forwarderName, mockName)
+      @forwarderClassDef, @funcDecl, @funcSwapDef, @forwarderVarName, @forwarderVarDef = formatForwarderClass(forwarderName, mockName)
     end
 
     def makeStubSet
@@ -1989,7 +2010,7 @@ module Mockgen
     end
 
     def formatForwarderClass(forwarderName, mockClassName)
-      return "", "", "", "" if @funcSet.empty?
+      return "", "", "", "", "" if @funcSet.empty?
 
       str =  "class #{mockClassName};\n"
       str += "class #{forwarderName} {\n"
@@ -2012,11 +2033,27 @@ module Mockgen
       varSwap = @funcSet.map { |func| func.getSwapperDef(varName) }.join("")
 
       src = varline
-      return str, varDecl, varSwap, src
+      return str, varDecl, varSwap, varName, src
     end
 
     def surpressUnderscores(str)
       str.squeeze("_")
+    end
+  end
+
+  class FreeFunctionSwapper
+    attr_reader :beginPhrase, :endPhrase, :body
+
+    def initialize(guardName, functionSetArray)
+      nameSet = [guardName, Mockgen::Constants::MARK_FOR_GENERATED_CPP].compact
+      @beginPhrase = "#if " + nameSet.map { |name| "!defined(#{name})" }.join(" && ") + "\n"
+      @endPhrase = "#endif\n"
+
+      strSet = functionSetArray.map do |functionSet|
+        functionSet.getStringSetToDeclInlineFile
+      end.transpose
+
+      @body = (strSet.size < 2) ? ""  : (strSet[0].join("") + "#else\n" + strSet[1].join(""))
     end
   end
 
@@ -3374,12 +3411,14 @@ module Mockgen
     attr_reader :defaultNoForwardingToMock, :noMatchingTypesInCsource, :fillVtable
     attr_reader :noOverloading, :varOnly, :updateChangesOnly, :discardNamespaceValue
     attr_reader :classNameExcludedSet, :testedFilenameGlobSet, :findStatementFilterSet, :explicitClassNameSet
+    attr_reader :mockGuardName, :noSwapInlineFunction
 
     def initialize(cppNameSpace, inputFilename, linkLogFilename, convertedFilename,
                    stubOnly, functionNameFilterSet, classNameFilterOutSet, sourceFilenameSet,
                    defaultNoForwardingToMock, fillVtable, noOverloading, varOnly,
                    updateChangesOnly, discardNamespaceValue, classNameExcludedSet,
-                   testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet)
+                   testedFilenameGlobSet, findStatementFilterSet, explicitClassNameSet,
+                   mockGuardName, noSwapInlineFunction)
       @cppNameSpace = cppNameSpace
       @inputFilename = inputFilename
       @linkLogFilename = linkLogFilename
@@ -3398,6 +3437,8 @@ module Mockgen
       @testedFilenameGlobSet = testedFilenameGlobSet
       @findStatementFilterSet = findStatementFilterSet
       @explicitClassNameSet = explicitClassNameSet
+      @mockGuardName = mockGuardName
+      @noSwapInlineFunction = noSwapInlineFunction
 
       # Assume *.c in C, not in C++
       @noMatchingTypesInCsource = hasCsourceFilesOnly?(sourceFilenameSet) &&
@@ -3443,6 +3484,7 @@ module Mockgen
       @varOnly = parameterSet.varOnly
       @defaultNoForwardingToMock = parameterSet.defaultNoForwardingToMock
       @updateChangesOnly = parameterSet.updateChangesOnly
+      @mockGuardName = parameterSet.mockGuardName
 
       # Current parsing block
       @block = @blockFactory.createRootBlock
@@ -3530,6 +3572,7 @@ module Mockgen
       varSwapperFilename = addPostfixToBasename(filenameSet.varSwapperFilename, postfix)
       declFilename = addPostfixToBasename(filenameSet.declFilename, postfix)
       defFilename = addPostfixToBasename(filenameSet.defFilename, postfix)
+      declInlineFilename = addPostfixToBasename(filenameSet.declFilename, postfix + Mockgen::Constants::CLASS_POSTFIX_INLINE)
 
       unless @varOnly
         writeFreeFunctionFile(classFilename, @inputFilename, beginNamespace, endNamespace, nil,
@@ -3540,6 +3583,7 @@ module Mockgen
                               blockSet, :getStringToSwapperFile, nil, false, true, false)
         writeFreeFunctionFile(defFilename, declFilename, nil, nil, usingNamespace,
                               blockSet, :getStringOfStub, nil, false, false, true)
+        writeFreeInlineFunctionFile(declInlineFilename, declFilename, usingNamespace, @mockGuardName, blockSet)
       end
       appendToFile(defFilename, @variableMockStr, true)
 
@@ -4022,6 +4066,21 @@ module Mockgen
       end
     end
 
+    def writeFreeInlineFunctionFile(filename, includeFilename, usingNamespace, mockGuardName, functionSetArray)
+      swapper = FreeFunctionSwapper.new(mockGuardName, functionSetArray)
+
+      File.open(filename, "w") do |file|
+        str = getIncludeGuardHeader(filename)
+        str += swapper.beginPhrase
+        str += getIncludeDirective(includeFilename)
+        str += usingNamespace
+        str += swapper.body
+        str += swapper.endPhrase
+        str += getIncludeGuardFooter
+        file.puts str
+      end
+    end
+
     def appendToFile(filename, str, markFile)
       File.open(filename, "a") do |file|
         file.puts Mockgen::Constants::MARK_FOR_GENERATED_LINES if markFile
@@ -4220,6 +4279,8 @@ module Mockgen
       @noOverloading = false
       @updateChangesOnly = false
       @discardNamespaceValue = nil
+      @mockGuardName = nil
+      @noSwapInlineFunction = false
 
       while(!argSet.empty?)
         if (argSet[0] == Mockgen::Constants::ARGUMENT_NO_FORWARDING_TO_MOCK)
@@ -4257,6 +4318,10 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERROR, Mockgen::Constants::ARGUMENT_IGNORE_INTERNAL_ERRORS then
           argSet.shift
           MockgenFeatures.ignoreAllExceptions = true
+          caught = true
+        when Mockgen::Constants::ARGUMENT_NO_SWAP_INLINE_FUNCTION, Mockgen::Constants::ARGUMENT_NO_SWAP_INLINE_FUNCTIONS then
+          argSet.shift
+          @noSwapInlineFunction = true
           caught = true
         end
 
@@ -4303,6 +4368,9 @@ module Mockgen
         when Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACE, Mockgen::Constants::ARGUMENT_DISCARD_NAMESPACES then
           argSet.shift(2)
           @discardNamespaceValue = optionValue
+        when Mockgen::Constants::ARGUMENT_MOCK_GUARD_NAME
+          argSet.shift(2)
+          @mockGuardName = optionValue
         else
           if (!optionWord.empty? && optionWord[0] == "-")
             raise MockgenInvalidArgumentError, "Invalid option #{optionWord}"
@@ -4368,7 +4436,8 @@ module Mockgen
                                              @sourceFilenameSet, @defaultNoForwardingToMock,
                                              @fillVtable, @noOverloading, @varOnly,
                                              @updateChangesOnly, @discardNamespaceValue, @classNameExcludedSet,
-                                             @testedFilenameGlobSet, @findStatementFilterSet, @explicitClassNameSet)
+                                             @testedFilenameGlobSet, @findStatementFilterSet, @explicitClassNameSet,
+                                             @mockGuardName, @noSwapInlineFunction)
       parseHeader(parameterSet)
 
       # Value to return as process status code

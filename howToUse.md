@@ -572,6 +572,10 @@ treats -outheaderfile as -out-header-file.
   they exist and CppMockGen makes no changes on them. This reduces
   dependency in the Makefile and has its build time shorter.
 * -discardnamespaces forces CppMockGen to discard namespace blocks.
+* -mockguard symbol prevents cpp files from including generated header
+   files while being generated with include guard blocks `#if
+   !defined(symbol) ... #endif`. See the _Include generated files_
+   section.
 * First filename (mockgenSample1.hpp) : A tested header
   file. CppMockGen parses and makes mocks for classes and free
   functions which are defined in `filename` and in files that
@@ -699,8 +703,19 @@ functions. See an example in _mockgenSample2.hpp_.
 To define statements to call inline functions at line 11, add _Inline
 postfix to the function names. These are swapped to call their
 forwarder by macros in lines 4 and 5. Lines 7 and 8 are required to
-avoid compilation errors for CppMockGen and generated cpp files. These
-macros are not automatically generated and you have to write them now.
+avoid compilation errors for CppMockGen and generated cpp files.
+
+Not to write these macros manually, CppMockGen writes such macros
+for free functions to _*_Inline.hpp_ and you can include it.
+
+```cpp
+#if !defined(GENERATING_MOCK)
+#include "varDecl_mockgenSample1_Stub_Inline.hpp"
+#endif // GENERATING_MOCK
+```
+
+The option _-mockguard GENERATING_MOCK_ specifies the name for the
+include guard.
 
 ### Specify classes to mock
 
@@ -732,7 +747,7 @@ This feature is not matured and has limitations shown below.
 * Patterns in -find options require the tail [^\\.] to extract
   variable names from _object.function_ statements.
 * -classname does not match inner classes at once. Listing -classname
-  -A -classname B needs to match Class A::B.
+  A -classname B needs to match Class A::B.
 
 ## And more
 

@@ -33,6 +33,9 @@ module Mockgen
     ARGUMENT_IGNORE_INTERNAL_ERRORS = "-ignoreinternalerrors".freeze
     ARGUMENT_DISCARD_NAMESPACE = "-discardnamespace".freeze
     ARGUMENT_DISCARD_NAMESPACES = "-discardnamespaces".freeze
+    ARGUMENT_MOCK_GUARD_NAME = "-mockguard".freeze
+    ARGUMENT_NO_SWAP_INLINE_FUNCTION = "-noswapinlinefunction".freeze
+    ARGUMENT_NO_SWAP_INLINE_FUNCTIONS = "-noswapinlinefunctions".freeze
 
     # Hard-coded mode
     MODE_CHECK_CLASSNAME_IN_RELATIVE_NAMESPACES_ONLY = true.freeze
@@ -111,6 +114,7 @@ module Mockgen
     CLASS_POSTFIX_FORWARDER = "_Forwarder".freeze
     CLASS_POSTFIX_STUB = "_Stub".freeze
     CLASS_POSTFIX_MOCK = "_Mock".freeze
+    CLASS_POSTFIX_INLINE = "_Inline".freeze
 
     # Mock for the top level
     CLASS_FREE_FUNCTION_SET = "All".freeze

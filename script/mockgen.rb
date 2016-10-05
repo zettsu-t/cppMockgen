@@ -82,6 +82,15 @@
 #   + internal : namespaces that begins with "__" adding to the above
 #   + std      : std, boost and mpl_ adding to the above
 #
+# - optional -mockguard symbol
+#   This option specifies a guard symbol to create the following block.
+#     #if !defined(symbol)
+#     #include "generated.hpp"
+#     #endif
+#   This prevents cpp files from including generated.hpp while being generated.
+#
+# -noswapinlinefunctions : reserved
+#
 # The trailing arguments are in/out filenames.
 # - [input file]  input .hpp file
 # - [input file]  LD output (link error log) file
