@@ -5,7 +5,7 @@ This file describes details of CppMockGen.
 ## Files
 
 CppMockGen itself is a set of Ruby scripts. Others are C++ helpers,
-C++ sample codes and unit test for the scripts.
+C++ sample code and unit test for the scripts.
 
 ### Source files
 
@@ -15,7 +15,7 @@ C++ sample codes and unit test for the scripts.
 * script/mockgenConst.rb : constants of CppMockGen
 * script/mockgenTest.rb : unit tests for classes in CppMockGen
 * script/mockgenReplaceTest.rb : unit test to check generated macros
-* utility/mockgenTesterUtility.hpp : C++ helper codes to mock free functions
+* utility/mockgenTesterUtility.hpp : C++ helper code to mock free functions
 
 ### Makefiles
 
@@ -57,9 +57,9 @@ ruby script/mockgenTest.rb
 
 and it reports results of the tests.
 
-### Testing generated codes
+### Testing generated code
 
-To test generated codes, run
+To test generated code, run
 
 ```bash
 make runthrough
@@ -109,8 +109,8 @@ useful to confirm your changes quickly.
 |runthrough_update| check all with the -update-changes-only option |
 |all (or no arguments)| generate, compile, and link all source files |
 |check| test all without generating the executable |
-|compile| compile all source files without changing generated codes |
-|generate| generate codes only |
+|compile| compile all source files without changing generated code |
+|generate| generate code only |
 |show| show Makefile variables to debug the Makefile |
 
 ## Arguments
@@ -122,23 +122,23 @@ details in comments of mockgen.rb. The arguments specify
 * How to filter mocked free functions. [-filter].
 * How to filter out classes to work around what CppMockGen cannot handle
   properly [-filterout].
-* Which files tester codes directly call [-source].
+* Which files tester code directly calls [-source].
 * How to split output files [-split].
 
 It is a reason why CppMockGen requires _-filter_ option that
 CppMockGen cannot determine each symbol is in which file (see the
 _Limitations_ section).
 
-I expect tested codes are written in camelCase and not in snakeCase.
+I expect tested code is written in camelCase and not in snakeCase.
 I suppose it is reasonable to assume symbols in snakeCase are in
 system and standard libraries.
 
-If CppMockGen swaps definitions in files which tester codes directly
-call, compilation errors occur because `void forwarder.function() {}`
+If CppMockGen swaps definitions in files which tester code directly
+calls, compilation errors occur because `void forwarder.function() {}`
 is an invalid definition as a function. _-source_ option prohibits
 this.
 
-Output files may be too big in case that tested codes contain a class
+Output files may be too big in case that tested code contains a class
 that has many methods. To prevent compilers from crashing due to out
 of memory, it is better to split generated files. A special argument
 _-split 1_ generates files per class and it helps to find which file a
@@ -217,7 +217,7 @@ platform but cannon do it on other platforms.
 In the later case, when you drop the `std::` qualifier, the clang
 front end cannot find a type alias for size_t and treats size_t as int
 without any warnings. It causes compilation errors for generated
-codes. Its error message may be hard to understand especially for
+code. Its error message may be hard to understand especially for
 templates.
 
 It needs to write `std::size_t` or `using std::size_t` in code which
@@ -259,13 +259,13 @@ structure blocks and symbol tables.
 ### Launcher
 
 These classes parse command line options, launch the clang front end,
-and generate codes.
+and generate code.
 
 * MockGenLauncher : parses command line options, launches the clang
   front end, and sends its output to a code generator _CppFileParser_.
 * CppIoFilenameSet, CppFileParameterSet : hold the command line options.
-* CppFileParser : parses the output of clang, generate codes and write
-  them to files.
+* CppFileParser : parses the output of clang, generate code and write
+  it to files.
 
 The clang front end outputs a pretty AST (abstract syntax tree) in the
 form of C++ source code. _MockGenLauncher_ feeds clang stdout into a
@@ -274,7 +274,7 @@ file.
 _CppFileParser_ receives the file and constructs C++ blocks from the
 AST. It also constructs defined and undefined references from files
 specified in the command line options. Then it collects generated
-codes in the C++ blocks and writes to files.
+code in the C++ blocks and writes to files.
 
 ### C++ data structure blocks
 
@@ -457,8 +457,8 @@ applies the filters.
 CppMockGen abandons blocks which are unused in later steps because
 standard C++ and Boost C++ headers are large.
 
-### Format and write codes
+### Format and write code
 
-Each block formats codes. CppFileParser collects them and writes to
+Each block formats code. CppFileParser collects them and writes to
 files. A block class acts a parser, a data holder, and a code
 generator in CppMockGen and, are not split into multiple classes now.

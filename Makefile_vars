@@ -5,12 +5,16 @@ COMMA:=,
 EMPTY:=
 SPACE:=$(EMPTY) $(EMPTY)
 
+# Detect GCC version
+GCC_VERSION:=$(shell export LC_ALL=C ; gcc -v 2>&1 | tail -1 | cut -d " " -f 3)
+
 # Setup for your environment
 # Install dir for Cygwin64 and MinGW-64
-CYGWIN_GCC_INCLUDE_DIR=/usr/lib/gcc/x86_64-pc-cygwin/4.9.3/include
-MINGW_DIR=C:\Program Files\mingw-w64\x86_64-4.9.2-posix-seh-rt_v3-rev1\mingw64
-MINGW_GCC_INCLUDE_DIR=$(MINGW_DIR)\lib\gcc\x86_64-w64-mingw32\4.9.2\include
-BASH_ON_UBUNTU_ON_WINDOWS_GCC_INCLUDE_DIR=/usr/lib/gcc/x86_64-linux-gnu/4.8/include
+CYGWIN_GCC_INCLUDE_DIR=/usr/lib/gcc/x86_64-pc-cygwin/$(GCC_VERSION)/include
+# MinGW may be installed in C:\Program Files\mingw-w64\x86_64-4.9.2-posix-seh-rt_v3-rev1\mingw64
+MINGW_DIR=C:\MinGW
+MINGW_GCC_INCLUDE_DIR=$(MINGW_DIR)\lib\gcc\x86_64-w64-mingw32\$(GCC_VERSION)\include
+BASH_ON_UBUNTU_ON_WINDOWS_GCC_INCLUDE_DIR=/usr/lib/gcc/x86_64-linux-gnu/$(GCC_VERSION)/include
 
 # clang needs g++ header files
 ifeq ($(OS),Windows_NT)
@@ -21,10 +25,13 @@ CLANG_CC1_ISYSTEM=$(addprefix -cxx-isystem,/usr/include /usr/include/w32api $(CY
 # MinGW
   else
 BUILD_ON_MINGW=yes
-ISYSTEM_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_DIR))\x86_64-w64-mingw32\include
-GCC_INCLUDE_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_GCC_INCLUDE_DIR))
+ISYSTEM_MINGW_INCLUDE_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_DIR))\include
+ISYSTEM_MINGW_INCLUDE_CPP_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_DIR))\include\c++\$(GCC_VERSION)
+ISYSTEM_X64_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_DIR))\x86_64-w64-mingw32\include
+ISYSTEM_GCC_INCLUDE_DIR = $(subst $(SPACE),$(COMMA),$(MINGW_GCC_INCLUDE_DIR))
+MINGW_INCLUDE = -isystem$(MINGW_DIR)\include
 # quote C:\Program Files\... paths to pass to cmd
-CLANG_CC1_ISYSTEM = $(subst $(COMMA),$(SPACE),$(addprefix -cxx-isystem ",$(addsuffix ",$(ISYSTEM_DIR) $(ISYSTEM_DIR)\c++ $(ISYSTEM_DIR)\c++\x86_64-w64-mingw32 $(GCC_INCLUDE_DIR))))
+CLANG_CC1_ISYSTEM = $(subst $(COMMA),$(SPACE),$(addprefix -cxx-isystem ",$(addsuffix ",$(ISYSTEM_MINGW_INCLUDE_DIR) $(ISYSTEM_MINGW_INCLUDE_CPP_DIR) $(ISYSTEM_X64_DIR) $(ISYSTEM_GCC_INCLUDE_DIR))))
   endif
 else
   ifeq ($(OS),)
@@ -163,6 +170,8 @@ endif
 # with their default target set to x86_64-pc-windows-msvc
 ifeq ($(BUILD_ON_MINGW),yes)
 CLANG_TARGET=x86_64-pc-windows-gnu
+# Avoid errors for missing __float128
+CPP_COMMON_FLAGS+=-D__STRICT_ANSI__
 endif
 
 ifeq ($(BUILD_ON_MINGW),yes)
@@ -182,7 +191,7 @@ endif
 endif
 
 # Flags for g++/clang++
-INCLUDES= $(addprefix -I, $(TESTED_HEADER_DIR) $(GENERATED_FILE_DIR)) $(GTEST_GMOCK_INCLUDE)
+INCLUDES= $(addprefix -I, $(TESTED_HEADER_DIR) $(GENERATED_FILE_DIR)) $(MINGW_INCLUDE) $(GTEST_GMOCK_INCLUDE)
 CXXFLAGS=$(CLANG_TARGET_CXX) -g -Wall -O0 $(CPP_COMMON_FLAGS) $(CLANG_OPT) $(INCLUDES)
 CXXFLAGS_TESTED=
 CXXFLAGS_TESTER=$(addprefix -I, $(UTILITY_HEADER_DIR) $(TESTER_HEADER_DIR)) $(CXX_MOCK_FLAGS)
@@ -196,7 +205,12 @@ GENERATOR_INCLUDES=-I$(TESTED_HEADER_DIR) $(GTEST_GMOCK_INCLUDE)
 GENERATOR_FLAGS=$(GENERATOR_INCLUDES) -D$(GENERATOR_MOCK_GUARD_NAME)
 
 LIBPATH=
-LDFLAGS=
+ifeq ($(BUILD_ON_MINGW),yes)
+ifneq (,$(findstring clang,$(CXX)))
+# Ignore multiple definition errors between std C++ libraries and *.o s
+LDFLAGS=-Wl,--allow-multiple-definition
+endif
+endif
 LIBS=-lstdc++
 
 ifeq ($(BUILD_ON_BASH_ON_UBUNTU_ON_WINDOWS),yes)
@@ -204,9 +218,10 @@ LIBS+=-lpthread
 endif
 
 ALL_UPDATED_VARIABLES= \
-	CYGWIN_GCC_INCLUDE_DIR MINGW_DIR MINGW_GCC_INCLUDE_DIR BASH_ON_UBUNTU_ON_WINDOWS_GCC_INCLUDE_DIR \
+	GCC_VERSION CYGWIN_GCC_INCLUDE_DIR MINGW_DIR MINGW_GCC_INCLUDE_DIR BASH_ON_UBUNTU_ON_WINDOWS_GCC_INCLUDE_DIR \
 	BUILD_ON_CYGWIN BUILD_ON_MINGW BUILD_ON_BASH_ON_UBUNTU_ON_WINDOWS \
-	ISYSTEM_DIR GCC_INCLUDE_DIR CLANG_CC1_ISYSTEM \
+	MINGW_INCLUDE ISYSTEM_MINGW_INCLUDE_DIR ISYSTEM_MINGW_INCLUDE_CPP_DIR \
+	ISYSTEM_X64_DIR ISYSTEM_GCC_INCLUDE_DIR MINGW_INCLUDE CLANG_CC1_ISYSTEM \
 	GTEST_GMOCK_TOP_DIR GTEST_TOP_DIR GMOCK_TOP_DIR \
 	GTEST_GMOCK_INCLUDE GTEST_SOURCE GMOCK_SOURCE GTEST_OBJ GMOCK_OBJ \
 	TESTED_HEADER_DIR UTILITY_HEADER_DIR TESTER_HEADER_DIR TESTED_SRC_DIR TESTER_SRC_DIR GENERATED_FILE_DIR \

@@ -2,7 +2,7 @@
 
 ## Summary
 
-CppMockGen generates codes to test C++ codes. It makes
+CppMockGen generates code to test C++ code. It makes
 * Mock classes to describe expectations with Google Mock
 * Stub functions to link subset of tested source files
 
@@ -15,7 +15,7 @@ CppMockGen is a set of ruby scripts and launches the clang front-end
 internally. This is my environment to develop it.
 
 * Windows 10 Anniversary Update 64bit Edition (Version 1607, OS build 14393.10)
-* Cygwin 64bit version (2.5.2), MinGW-w64 or Bash on Ubuntu on Windows
+* Cygwin 64bit version (2.6.0), MinGW-w64 (Distro 14.0) or Bash on Ubuntu on Windows
 * Google Test / Mock (1.7.0)
 * LLVM, gcc and ruby
 
@@ -23,8 +23,8 @@ I tested CppMockGen with the following versions of tools.
 
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
-|LLVM + clang|3.8.1|3.8.1|3.4|
-|gcc|5.4.0|4.9.2|4.8.4|
+|LLVM + clang|3.8.1|3.9.0|3.4|
+|gcc|5.4.0|6.1.0|4.8.4|
 |Ruby|2.2.5p319|2.3.1p112(ActiveScriptRuby)|1.9.3p484|
 
 CppMockGen is executable on Linux but it needs changes on its Makefile
@@ -37,7 +37,7 @@ add Cygwin /usr/bin directory to _PATH_ environment variable.
 
 Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
 
-### Sample codes
+### Sample code
 
 To test CppMockGen, run
 
@@ -46,10 +46,10 @@ make runthrough
 ```
 
 from a console. It
-* Generates codes from tested source codes
-* Links generated, tested and tester codes. It fails intentionally due
+* Generates code from tested source code
+* Links generated, tested and tester code. It fails intentionally due
   to missing functions.
-* Generates stub codes and links them to bin/mockgenSample.exe
+* Generates stub code and links it to bin/mockgenSample.exe
   successfully
 * Executes mockgenSample.exe and reports its results described with
   Google Test / Google Mock
@@ -63,13 +63,13 @@ and you can find the generated code in generated/ subdirectory.
 
 Other subdirectories contain
 * script/ CppMockGen implementation
-* utility/ C++ helper codes to write tests with the generated code
+* utility/ C++ helper code to write tests with the generated code
 * tested_include/ and tested_src/ C++ tested code sample
 * tester_include/ and tester_src/ C++ tester code (test descriptions) sample
 
-## Generate codes
+## Generate code
 
-CppMockGen generates codes that tested and tester codes include or link
+CppMockGen generates code that tested and tester code includes or link
 * Mock class : Google Mock style class definition. It can attach to a
   forwarder or a decorator instance.
 * Forwarder class : class definition to switch invocations to a mock
@@ -82,7 +82,7 @@ CppMockGen generates codes that tested and tester codes include or link
 * Stub function and variable : definition that is defined in a source
   file but not linked
 
-CppMockGen does not generate codes for system headers, standard C/C++
+CppMockGen does not generate code for system headers, standard C/C++
 libraries, Boost C++ libraries, and compiler internal classes and
 functions. It assumes that C++ user-defined symbols are in camel case
 and treats free functions which contain no upper cases as the system
@@ -92,7 +92,7 @@ CppMockGen also creates mocks and stubs for pure virtual functions
 because pure virtual functions (which are declared with =0) must be
 overridden but are not prohibited having their implementation.
 
-All codes quoted below are in the subdirectories of CppMockGen.
+All code quoted below is in the subdirectories of CppMockGen.
 
 ### Mock
 
@@ -142,8 +142,8 @@ class All_Sample1_Mock { ... } // for namespce ::Sample1
 ### Forwarder
 
 CppMockGen generates forwarder classes to determine whether tested
-codes call tested (original) methods or mock (generated) methods. I
-assume a situation in which the tested codes call a method in a global
+code calls tested (original) methods or mock (generated) methods. I
+assume a situation in which the tested code calls a method in a global
 variable or a free function.
 
 ```cpp
@@ -168,9 +168,9 @@ extern ::Sample1::Types::DerivedClass anObject;
 
 To mock the instance, we need to replace its type with the
 forwarder. "varSwapper.hpp" defines a macro to do this and tested
-codes can include "varSwapper.hpp" in testing (surround it with
+code can include "varSwapper.hpp" in testing (surround it with
 `#ifdef TESTING ... #endif`). `MyUnittest` is a namespace for
-generated codes here.
+generated code here.
 
 ```cpp
 using ::Sample1::Vars::anObject;
@@ -288,7 +288,7 @@ classes.
 The generated mock, forwarder and decorator class inherit a tested
 code class. If the tested class is not constructive without arguments,
 the generated classes pass arguments of their constructors to the
-tested (base) class. Tester and tested codes set arguments of
+tested (base) class. Tester and tested code set arguments of
 constructors of the mocks and the decorators as the tested class.
 
 It causes a problem to define a forwarder instance which mocks a
@@ -305,7 +305,7 @@ idiom).
 
 ## Write test cases with the generated code
 
-See tester_src/mockgenSampleTestBody.cpp for full source codes.
+See tester_src/mockgenSampleTestBody.cpp for full source code.
 
 ### Use the forwarder
 
@@ -451,7 +451,7 @@ for an instance method and a class member variable for and class
 method.
 
 For the decorators, a switch variable is always a class member
-variable because tester codes may not get instances the decorators.
+variable because tester code may not get instances the decorators.
 
 ### Mock functions called via pointers to free functions
 
@@ -520,12 +520,12 @@ variable. `GetFreeFunctionSwitchByName` generates new symbols with the
 name internally.
 
 
-## Include generated code from tested codes
+## Include generated code from tested code
 
 ### Genereted files
 
-To swap types and variables in tested codes, source files that contain
-tested codes need to include the generated code. You may surround
+To swap types and variables in tested code, source files that contain
+tested code need to include the generated code. You may surround
 their include directives with `#ifdef TESTING ... #endif` to disable
 them in your product code.
 
@@ -587,7 +587,7 @@ treats -outheaderfile as -out-header-file.
 * Other filenames : CppMockGen writes the files.
 * -cc1 and more arguments : CppMockGen passes the arguments to clang
   -cc1. Compile options such as `-I`s, `-D`s, and `-m32` should be
-  -same as tested codes.
+  -same as tested code.
 
 The first file (tested header file) should include all header files
 that tested and testing source files need. You can collect header
@@ -640,7 +640,7 @@ destructors of a class if it meets all these conditions.
 
 ### Name generated files
 
-*_Stub files contain codes that relate free functions and stubs.
+*_Stub files contain code that relates free functions and stubs.
 
 The generated files have names that contain filenames in arguments of
 `mockgen.rb` and a serial number by default. It is troublesome to find
