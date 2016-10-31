@@ -2395,7 +2395,9 @@ class TestLineWithoutAttribute < Test::Unit::TestCase
     'var' =>
     ["int var __attribute__(( align ( 32 ) ) );", "int var ;"],
     'packed' =>
-    ["__packed struct S {", "struct S {"])
+    ["__packed struct S {", "struct S {"],
+    'triple )' =>
+    ["int f(void(ClassName::*f)(int)__attribute__((thiscall)))", "int f(void(ClassName::*f)(int))"])
   def test_removeAttributeFromLine(data)
     phrase, expected = data
     assert_equal(expected, LineWithoutAttribute.new(phrase).str)

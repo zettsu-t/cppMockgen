@@ -223,6 +223,19 @@ templates.
 It needs to write `std::size_t` or `using std::size_t` in code which
 CppMockGen parses.
 
+### Attributes
+
+CppMockGen discards all attribute((...)) in input files to make mocks
+and stubs. This may disturb to make stubs with no-default ABIs.
+
+MinGW-32bit and clang++ uses _thiscall_ attribute for code as shown
+below. CppMockGen generates its mock and stub but drops the attribute.
+Using a type alias for the argument _f_ is a workaround for this case.
+
+```cpp
+virtual int FuncMissingH(int (Sample1::Types::BaseClass::*f)(int, const void **) __attribute__((thiscall)));
+```
+
 ### Others
 
 CppMockGen does not support some C++ features such as

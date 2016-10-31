@@ -170,8 +170,14 @@ endif
 # with their default target set to x86_64-pc-windows-msvc
 ifeq ($(BUILD_ON_MINGW),yes)
 CLANG_TARGET=x86_64-pc-windows-gnu
-# Avoid errors for missing __float128
-CPP_COMMON_FLAGS+=-D__STRICT_ANSI__
+
+# To avoid errors for missing a __float128 definition, select
+# one of these.
+# 1. Compile with -D__STRICT_ANSI__. It may lead compilation
+#   errors for Google Test / Mock.
+# 2. Disable a _GLIBCXX_USE_FLOAT128 in c++config.h if __clang__
+#   is defined.
+CPP_COMMON_FLAGS+=
 endif
 
 ifeq ($(BUILD_ON_MINGW),yes)

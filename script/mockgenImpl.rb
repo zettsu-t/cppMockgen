@@ -1502,8 +1502,10 @@ module Mockgen
       # It is redundant but fast to exclude the phrase early
       if Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.any? { |word| phrase.include?(word) }
         Mockgen::Constants::KEYWORD_ATTRIBUTE_WITH_ARGS.each do |keyword|
-          # Recursive regular expression
-          newphrase.gsub!(/\b#{keyword}\s*(?<p>\(\s*[^(]*(\g<p>|([^()]*)\s*)\s*\)|)\s*/,"")
+
+          # A recursive regular expression that matches balanced parenthesis and
+          # substitutes __attribute__((thiscall))) to ).
+          newphrase.gsub!(/\b#{keyword}\s*(?<p>\((?:(?>[^()]+)|\g<p>)*\)\s*)\s*/,"")
         end
       end
 
