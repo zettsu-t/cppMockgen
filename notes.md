@@ -226,7 +226,7 @@ CppMockGen parses.
 ### Attributes
 
 CppMockGen discards all attribute((...)) in input files to make mocks
-and stubs. This may disturb to make stubs with no-default ABIs.
+and stubs. This may disturb to make stubs with non-default ABIs.
 
 MinGW-32bit and clang++ uses _thiscall_ attribute for code as shown
 below. CppMockGen generates its mock and stub but drops the attribute.

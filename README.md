@@ -1,6 +1,6 @@
 # CppMockGen : C++ mock generator for Google Mock
 
-Generating codes to test C++ codes. It makes
+Generating code to test C++ code. It makes
 * Mock classes to describe expectations with Google Mock
 * Stub functions to link subset of tested source files
 
@@ -24,10 +24,10 @@ Run this command from a console on a directory that contains _Makefile_.
 make runthrough
 ```
 
-* Generates codes from _tested/_ source codes
-* Links generated, tested and tester codes. It fails intentionally due
+* Generates code from _tested/_ source code
+* Links generated, tested and tester code. It fails intentionally due
   to missing functions.
-* Generates stub codes and links them to _bin/mockgenSample.exe_
+* Generates stub code and links them to _bin/mockgenSample.exe_
   successfully
 * Executes _mockgenSample.exe_ and reports its results described with
   Google Test / Google Mock
