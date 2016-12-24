@@ -35,6 +35,14 @@ make runthrough
 
 Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
 
+## License
+
+Copyright (c) 2016 Zettsu Tatsuya
+
+This software is released under the BSD 3-Clause License (the new BSD
+license), see [LICENSE.txt](LICENSE.txt). This follows the license of
+Google Test and Google Mock.
+
 ## And more
 
 Please read [howToUse.md](howToUse.md) and [notes.md](notes.md) to know more details.
