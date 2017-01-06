@@ -10,11 +10,11 @@ _CppMockGen_ is built on and runs on Cygwin with tools shown
 below. MinGW-w64, Bash on Ubuntu on Windows and Linux are also available.
 
 * Windows 10 Anniversary Update 64bit Edition
-* Cygwin 64bit version (2.6.0), MinGW-w64 (Distro 14.0) or Bash on Ubuntu on Windows
+* Cygwin 64bit version (2.6.1), MinGW-w64 (Distro 14.1) or Bash on Ubuntu on Windows
 * Google Test / Mock (1.7.0)
-* LLVM and clang (3.9.0)
-* gcc (6.1.0)
-* Ruby (2.3.1)
+* LLVM and clang (3.9.1)
+* gcc (6.3.0)
+* Ruby (2.4.0)
 
 ## Quick start
 
@@ -37,7 +37,7 @@ Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest
 
 ## License
 
-Copyright (c) 2016 Zettsu Tatsuya
+Copyright (c) 2016, 2017 Zettsu Tatsuya
 
 This software is released under the BSD 3-Clause License (the new BSD
 license), see [LICENSE.txt](LICENSE.txt). This follows the license of
