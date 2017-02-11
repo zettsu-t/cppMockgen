@@ -1168,7 +1168,9 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def parse(line)
-      return if line.empty? || line[-1] == ")" || line.include?("__")
+      # definitions may be in the form var = (value) so treat the line
+      # as a functions if possible before parse it as a variable
+      return if line.empty? || line.include?("__")
 
       # Exclude member functions and type aliases
       wordSet = line.split(nil)
@@ -1612,6 +1614,8 @@ module Mockgen
 
     ## Implementation detail (public for testing)
     def parse(line)
+      return if isVariable?(line)
+
       # Split by , and collect variable names ahead ,
       # Note : assuming variable names are not omitted
       argVariableSet = ArgVariableSet.new(line)
@@ -1626,6 +1630,7 @@ module Mockgen
       @argTypeStr = argVariableSet.argTypeStr
       @argSet  = argVariableSet.argNameStr
 
+      return false if Mockgen::Constants::KEYWORD_FUNCTION_LIKE_EXPRESSION.any? { |name| name == funcName }
       return false if funcName.empty?
       # Avoid __ in variable names
       switchName = funcName + ((funcName[-1] == "_") ? "" : "_") + Mockgen::Constants::MEMFUNC_FORWARD_SWITCH_POSTFIX
@@ -1648,6 +1653,21 @@ module Mockgen
 
       # va_arg is not supported
       @valid = true unless @argSignature.include?("...")
+    end
+
+    def isVariable?(line)
+      result = false
+      found = false
+      previousWord = ""
+
+      # treat var = (value); as a definition of a variable
+      Mockgen::Common::StringOfParenthesis.new(line).parse.each do |outer, inner|
+        found = true if outer == "=" && previousWord != "operator"
+        result = true if found && !inner.nil?
+        previousWord = outer.strip
+      end
+
+      result
     end
 
     def isConstMemberFunction?(phrase)
@@ -2212,14 +2232,13 @@ module Mockgen
       elsif isPointerToFunction?(line)
       # Not supported yet
       else
-        newBlock = addMemberVariable(line)
-        unless newBlock.canTraverse?
-          newBlock = MemberFunctionBlock.new(line)
-          if newBlock.canTraverse?
-            @allMemberFunctionSet << newBlock
-            @publicMemberFunctionSet << newBlock if @pub
-            @protectedMemberFunctionSet << newBlock if !@pub && !@private
-          end
+        newBlock = MemberFunctionBlock.new(line)
+        if newBlock.canTraverse?
+          @allMemberFunctionSet << newBlock
+          @publicMemberFunctionSet << newBlock if @pub
+          @protectedMemberFunctionSet << newBlock if !@pub && !@private
+        elsif
+          newBlock = addMemberVariable(line)
         end
       end
 

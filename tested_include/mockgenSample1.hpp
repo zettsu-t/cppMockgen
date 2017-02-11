@@ -55,6 +55,7 @@ namespace Sample1 {
             inline void FuncInline(void) {}
             __attribute__((unused)) static int StaticFunc(void);  // Attributes are discarded in mocks
             virtual void PureVirtualWithDefinition(void) override { IObject::PureVirtualWithDefinition(); }
+            static_assert(true, "Error");  // Not a member function
         };
 
         // Search no private base classes
@@ -170,6 +171,9 @@ namespace Sample1 {
     extern int MissingFuncInNamespace(void);
 }
 
+// Not a free function
+static_assert(true, "Error");
+
 // Default argument as a pointer to a function
 extern void defaultCallback(int a);
 
@@ -231,7 +235,12 @@ public:
     static LocalStruct* const pLocalStruct_;
     static EnumType    enumVar_;
     static EnumClassType enumClassVar_;
+    static const long initialized1_ = (1 << 3);
+    static const long initialized2_ = 1 + (1 << 3);
 };
+
+static const long FreeInitializedVarible1 = (1 << 5);
+static const long FreeInitializedVarible2 = 1 + (1 << 5);
 
 // Testing to ignore operators
 class ClassNotInstanciated {

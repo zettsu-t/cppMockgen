@@ -62,6 +62,8 @@ module Mockgen
     # Keyword nullptr that the cland front end replaced
     KEYWORD_NULL_EXPR_CLANG_SET = ["__null", "<null expr>"].map(&:freeze).freeze
     KEYWORD_NULL_EXPR_CPP = "NULL".freeze
+    # Keyword static assertion and the like
+    KEYWORD_FUNCTION_LIKE_EXPRESSION = ["static_assert"].map(&:freeze).freeze
     # Keyword undefined reference
     KEYWORD_UNDEFINED_REFERENCE = "undefined reference to".freeze
 

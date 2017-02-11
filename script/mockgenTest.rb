@@ -1716,7 +1716,10 @@ class TestExternVariableStatement < Test::Unit::TestCase
     'pointer2'  => ['struct Type * pA;', "Type", "pA"],
     'reference1' => ['static Type &a;',  "Type", "a"],
     'reference2' => ['const Type & a;', "Type", "a"],
-    'decltype' => ['decltype(A) a;', "decltype(A)", "a"])
+    'decltype' => ['decltype(A) a;', "decltype(A)", "a"],
+    'initializer 1' => ['Type a = 1;', "Type", "a"],
+    'initializer 2' => ['Type a = (1 << 3);', "Type", "a"],
+    'initializer 3' => ['Type a = 1 + (1 << 3);', "Type", "a"])
   def test_canTraverse?(data)
      line, type, var = data
      block = ExternVariableStatement.new("extern #{line}")
@@ -1729,15 +1732,11 @@ class TestExternVariableStatement < Test::Unit::TestCase
      assert_equal(var, block.keyForParent)
   end
 
+  # definitions may be in the form var = (value) so treat lines
+  # as functions if possible before parse them as variables
   data(
     'class name' => 'class BigInt',
-    'system variable' => 'struct sys __sys',
-    'function1' => 'void Func(void);',
-    'function2' => 'void Func(void) const;',
-    'function3' => 'void Func(void) override;',
-    'function4' => 'void Func(void) final;',
-    'function5' => 'void Func(void) &;',
-    'function6' => 'void Func(void) &&;')
+    'system variable' => 'struct sys __sys')
   def test_cannotTraverseNonVariable(data)
     line = data
     block = ExternVariableStatement.new("extern #{line}")
@@ -1851,7 +1850,10 @@ end
 
 class TestMemberVariableStatement < Test::Unit::TestCase
   data(
-    'primitive' => ['static Type a;', "Type", "a"])
+    'primitive' => ['static Type a;', "Type", "a"],
+    'initializer 1' => ['static Type a = 1;', "Type", "a"],
+    'initializer 2' => ['static Type a = (1 << 3);', "Type", "a"],
+    'initializer 3' => ['static Type a = 1 + (1 << 3);', "Type", "a"])
   def test_canTraverse?(data)
      line, type, var = data
      block = MemberVariableStatement.new("#{line}")
@@ -2483,7 +2485,11 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'virtual desctructor' => "virtual ~Dtor(void)",
     'copy constructor' => "T& operator=(const T& rhs)",
     'operator' => "bool operator<(void)",
-    'va_arg' => "int printf(const char *format, ...)")
+    'va_arg' => "int printf(const char *format, ...)",
+    'variable 1' => "int var = (1 << 3)",
+    'variable 2' => "decltype(T) var = (1 << 3)",
+    'variable 3' => "decltype(T) var = 1 + (1 << 3)",
+    'static_assert' => 'static_assert(false, "Error")')
   def test_cannotInitializeAndParse(data)
     line = data
     ["", "{", " {", ";", " ;"].each do |suffix|
@@ -2492,6 +2498,21 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
       assert_false(block.canTraverse?)
       assert_nil(block.keyForParent)
     end
+  end
+
+  data(
+    'empty' => ["", false],
+    'default constructor' => ["Ctor(void) = default", false],
+    'default argument' => ["void f(T* p=(nullptr))", false],
+    'decltype and function' => ["decltype(T) void f(void)", false],
+    'copy constructor' => ["T& operator = (const T& rhs)", false],
+    'variable' => ["int var = (1 << 3)", true],
+    'decltype and variable 1' => ["decltype(T) var = (1 << 3)", true],
+    'decltype and variable 2' => ["decltype(T) var = 1 + (1 << 3)", true])
+  def test_isVariable(data)
+    line, expected = data
+    block = MemberFunctionBlock.new(line)
+    assert_equal(expected, block.isVariable?(line))
   end
 
   def test_filterByReferenceSet
@@ -2943,7 +2964,8 @@ class TestFreeFunctionBlock < Test::Unit::TestCase
 
   data(
     'declaration' => "inline int Func(long);",
-    'system' => "inline int __System(void) {")
+    'system' => "inline int __System(void) {",
+    'static_assert' => 'static_assert(true, "Error")')
   def test_notInlineFunction(data)
     line = data
     block = FreeFunctionBlock.new(line)
