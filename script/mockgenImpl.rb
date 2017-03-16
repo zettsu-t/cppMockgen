@@ -3670,7 +3670,24 @@ module Mockgen
         inputLine = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
         line = Mockgen::Common::LineWithoutCRLF.new(inputLine).line.strip
         next if line.empty?
+
+        # Workaround for LLVM 4.0.0
+        # separate "}"s without "{" in a line
+        extraCloseCount = line.count("}") - line.count("{")
+        if (extraCloseCount > 0 && line.strip[0] != "}")
+          reversedLine = line.reverse
+          extraCloseCount.times do |i|
+            reversedLine.sub!("}","")
+          end
+          line = reversedLine.reverse
+        else
+          extraCloseCount = 0
+        end
+
         currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
+        extraCloseCount.times do |i|
+          currentDepth, keyDepth = parseLine("}", currentDepth, keyDepth)
+        end
       end
     end
 
