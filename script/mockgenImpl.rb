@@ -3672,23 +3672,36 @@ module Mockgen
         next if line.empty?
 
         # Workaround for LLVM 4.0.0
-        # separate "}"s without "{" in a line
-        extraCloseCount = line.count("}") - line.count("{")
-        if (extraCloseCount > 0 && line.strip[0] != "}")
-          reversedLine = line.reverse
-          extraCloseCount.times do |i|
-            reversedLine.sub!("}","")
-          end
-          line = reversedLine.reverse
-        else
-          extraCloseCount = 0
-        end
-
-        currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
-        extraCloseCount.times do |i|
-          currentDepth, keyDepth = parseLine("}", currentDepth, keyDepth)
+        # separate "... };\n"s without "{" in a line
+        newline, count, semicolon = adjustClosingBlock(line)
+        currentDepth, keyDepth = parseLine(newline.strip, currentDepth, keyDepth)
+        1.upto(count) do |i|
+          str = "}" + ((count == i) ? semicolon : "")
+          currentDepth, keyDepth = parseLine(str, currentDepth, keyDepth)
         end
       end
+    end
+
+    def adjustClosingBlock(line)
+      md = line.match(/(.*[^\s\}][\s\}]+)(;?)\s*$/)
+      return line, 0, "" unless md
+      newline = md[1]
+      semicolon = md[2]
+
+      # unquote the line except quotes between quotes
+      unquoted = newline.gsub(/('|")[^'"]\1/,"")
+      count = unquoted.count("}") - unquoted.count("{")
+      return line, 0, "" if count <= 0
+
+      rest = count
+      (newline.size - 1).downto(0) do |i|
+        next if newline[i] != "}"
+        newline[i] = " "
+        rest -= 1
+        break if rest <= 0
+      end
+
+      return newline, count, semicolon
     end
 
     # line : leading and trailing spaces and CRLF must be removed

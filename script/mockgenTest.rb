@@ -6151,6 +6151,86 @@ class TestCppFileParser < Test::Unit::TestCase
     parser.updateFile(filename + ".old", filename)
   end
 
+  def test_readAllLines
+    lines = ["class A {",
+             "};",
+             "class B {",
+             "    void func(void) { return; } };",
+             "class C {",
+             "};",
+             "void freeFunc(void) {",
+             "    return;} ",
+             "class D {",
+             "};",
+             ""]
+    expectedSet = [
+      ["class A {", 0, nil],
+      ["};", 1, nil],
+      ["class B {", 0, nil],
+      ["void func(void) { return; }", 1, nil],
+      ["};", 1, nil],
+      ["class C {", 0, nil],
+      ["};", 1, nil],
+      ["void freeFunc(void) {", 0, nil],
+      ["return;", 1, nil],
+      ["}", 1, nil],
+      ["class D {", 0, nil],
+      ["};", 1, nil],
+    ]
+
+    results = []
+    linenumber = 0
+
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    parser.define_singleton_method(:parseLine) do |line, currentDepth, keyDepth|
+      results << [line, currentDepth, keyDepth]
+      super(line, currentDepth, keyDepth)
+    end
+
+    file = Object.new
+    file.define_singleton_method(:gets) do
+      line = (linenumber >= lines.size) ? nil : lines[linenumber]
+      linenumber += 1
+      line
+    end
+
+    parser.readAllLines(file)
+    assert_equal(expectedSet.size, results.size)
+    expectedSet.each_with_index do |expected, i|
+      assert_true(i < results.size)
+      assert_equal(expected, results[i])
+    end
+  end
+
+  data(
+    'empty' => ['', nil, 0, ""],
+    'var'   => ['a = 1;', nil, 0, ""],
+    'close block 1' => ["};", nil, 0, ""],
+    'close block 2' => [" }", nil, 0, ""],
+    'close block 3' => [" }}", nil, 0, ""],
+    'non block 1' => ["os << '}';", nil, 0, ""],
+    'non block 2' => ['os << "}";', nil, 0, ""],
+    'class'  => ['class C { };', nil, 0, ""],
+    'block'  => ['void f() { return; }', nil, 0, ""],
+    'nested' => ['void f() { { return; } }', nil, 0, ""],
+    'quoted 1' => ["void f() { os << '}';}", nil, 0, ""],
+    'quoted 2' => ['void f() { os << "}";}', nil, 0, ""],
+    'open 1' => ['void f() { return; }}', 'void f() { return; } ', 1, ""],
+    'open 2' => ['void f() { return; }} } ', 'void f() { return; }    ', 2, ""],
+    'open 3' => ['void f() { return; }}}};', 'void f() { return; }   ', 3, ";"],
+    'quoted 3' => ['void f() { os << "}"; }}}', 'void f() { os << "}"; }  ', 2, ""],
+  )
+  def test_adjustClosingBlock(data)
+    line, expectedLine, expectedCount, expectedEnd = data
+    expectedLine = line.dup unless expectedLine
+
+    parser = CppFileParser.new(CppFileParserNilArgSet.new("NameSpace"))
+    actual, count, semicolon = parser.adjustClosingBlock(line)
+    assert_equal(expectedLine, actual)
+    assert_equal(expectedCount, count)
+    assert_equal(expectedEnd, semicolon)
+  end
+
   data(
     'empty' => ["", 0, nil, false, 0, nil, false, false],
     'enter a block' => ["{", 0, nil, false, 1, nil, false, false],
