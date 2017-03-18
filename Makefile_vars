@@ -141,6 +141,7 @@ ECHO?=echo
 LS?=ls
 GREP?=grep
 WC?=wc
+MKDIR?=mkdir -p
 
 # Console output color
 ECHO_START_FG="\e[94m

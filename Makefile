@@ -19,7 +19,7 @@ ALL_UPDATED_VARIABLES+= THIS_DIR MAKEFILE_SUB_COMPILE MAKEFILE_PARALLEL
 
 .PHONY: all runthrough runthrough_llvm runthrough_gcc
 .PHONY: runthrough_default_no_mocks runthrough_cxx runthrough_update
-.PHONY: check update target_with_var_stub compile generate generate_var
+.PHONY: create_dirs check update target_with_var_stub compile generate generate_var
 .PHONY: generate_time generate_explicit
 .PHONY: test_generate_c_func test_generate_all_in_one_header
 .PHONY: test_generate_each test_generate_bulk
@@ -62,8 +62,11 @@ runthrough_update:
 	$(MAKE) target_with_var_stub
 	$(TARGET_EXE)
 
+create_dirs:
+	$(MKDIR) ./$(GENERATED_FILE_DIR) ./$(OBJ_DIR) ./$(TARGET_DIR)
+
 # Bash on Ubuntu on Windows uses still Ruby 1.9.3p484 which causes errors in data driven testing.
-check:
+check: create_dirs
 	$(TARGET_EXE)
 ifneq ($(BUILD_ON_BASH_ON_UBUNTU_ON_WINDOWS),yes)
 	$(RUBY) $(GENERATOR_SCRIPT_TEST)
@@ -80,7 +83,7 @@ $(TARGET_EXE): $(GENERATED_FILES) $(ALL_OBJS) $(PROCESSED_CPPS) FORCE
 	$(eval GENERATED_OBJS := $(addprefix $(OBJ_DIR)/, $(patsubst %.cpp, %.o, $(GENERATED_SOURCES))))
 	$(LD) $(LIBPATH) -o $@ $(ALL_OBJS) $(GENERATED_OBJS) $(LDFLAGS) $(LIBS) 2>&1 | tee $(LINK_ERROR_LOG)
 
-update: FORCE
+update: FORCE create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) -updatechangesonly $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $(GENERATOR_MOCK_GUARD) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(MAKE) $(MAKEFILE_PARALLEL) -f $(MAKEFILE_SUB_COMPILE)
 	$(eval GENERATED_SOURCES := $(notdir $(wildcard $(GENERATED_FILE_DIR)/*.cpp)))
@@ -104,7 +107,7 @@ $(PROCESSED_CPPS) : ;
 $(GENERATED_FILES): generate
 
 GENERATOR_SPECIAL_FLAGS =-ignoreinternalerrors -discardnamespaces internal
-generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
+generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES) create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_SPECIAL_FLAGS) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $(GENERATOR_MOCK_GUARD) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_1.hpp
@@ -114,27 +117,27 @@ generate: $(ORIGINAL_HEADER) $(GENERATOR_SCRIPT) $(GENERATOR_SCRIPT_FILES)
 	$(GREP) mockgenSample $(OUTPUT_HEADER_FILENAME) | $(WC) | $(GREP) "  2  "
 	$(GREP) $(GENERATOR_FILTERED_OUT_CLASSNAME) $(GENERATED_FILE_DIR)/mock_$(ORIGINAL_HEADER_BASENAME)_1.hpp | $(WC) | $(GREP) "  0  "
 
-generate_var: $(ORIGINAL_HEADER)
+generate_var: $(ORIGINAL_HEADER) create_dirs
 	$(GREP) $(GENERATOR_EXCLUDED_CLASSNAME) $(GENERATED_FILE_DIR)/*.cpp | $(WC) | $(GREP) "  1  "
 	$(RUBY) $(GENERATOR_SCRIPT) var $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $(GENERATOR_MOCK_GUARD) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 
 # export RUBY_PROFILE="-r profile" for profiling
-generate_time: $(ORIGINAL_HEADER) clean
+generate_time: $(ORIGINAL_HEADER) clean create_dirs
 	time $(RUBY) $(RUBY_PROFILE) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) -split 1 -discardnamespaces internal $(GENERATOR_SPECIAL_FLAGS) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $(GENERATOR_MOCK_GUARD) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 
 # Not for make full
 # Regular expressions with .* cause greedy matching beyond expressions in a line
-generate_explicit: $(ORIGINAL_HEADER) clean
+generate_explicit: $(ORIGINAL_HEADER) clean create_dirs
 	time $(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_SPECIAL_FLAGS) -tested "tested_src/*User.cpp" -find "g_explicit[^\\.]*" -classname "Top.*Required" $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_FILL_VTABLE) $(GENERATOR_MOCK_GUARD) $< $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	 grep '_Mock' generated/*.hpp | grep -v "<"
 
 # Write stub functions in an link error log file without -mockguard
-test_generate_c_func: clean_generated
+test_generate_c_func: clean_generated create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) stub $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_INPUT_C_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_SPLIT_EACH_CLASS) $(ORIGINAL_HEADER) $(TESTED_LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(GREP) $(TESTED_MISSING_FUNCTION_NAME_PREFIX) $(GENERATED_FILE_DIR)/*Stub.cpp | $(WC) -l | $(GREP) "2"
 
 # Create an all-in-one header and generate mocks from it
-test_generate_all_in_one_header: clean_generated
+test_generate_all_in_one_header: clean_generated create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_SPLIT_EACH_CLASS) $(GENERATOR_CHECK_INTERNAL_SYSTEM_PATH) $(OUTPUT_HEADER_FILENAME) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_IObject.cpp
@@ -142,14 +145,14 @@ test_generate_all_in_one_header: clean_generated
 	$(GREP) mockgenSample $(OUTPUT_HEADER_FILENAME) | $(WC) | $(GREP) "  2  "
 
 # Write a mock class in an output class named by the class name
-test_generate_each: clean_generated
+test_generate_each: clean_generated create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_SPLIT_EACH_CLASS) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_IObject.cpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_TopLevelClass.cpp
 
 # Write a number of mock classes in an output class
-test_generate_bulk: clean_generated
+test_generate_bulk: clean_generated create_dirs
 	$(RUBY) $(GENERATOR_SCRIPT) $(GENERATOR_MODE) $(GENERATOR_NO_FORWARDING_TO_MOCK) $(GENERATOR_FILTER) $(GENERATOR_SOURCES) $(GENERATOR_OUTPUT_HEADER) $(GENERATOR_SPLIT_BULK_CLASSES) $(ORIGINAL_HEADER) $(LINK_ERROR_LOG) $(GENERATED_FILES) $(CLANG_FLAGS) $(GENERATOR_FLAGS)
 	$(LS) ./$(GENERATED_FILE_DIR)/*_Stub.hpp
 	$(LS) ./$(GENERATED_FILE_DIR)/*_2.hpp

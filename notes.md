@@ -212,7 +212,7 @@ Testers have to instantiate a template and its mock manually.
 ### The std namespace
 
 You can write `size_t` instead of `std::size_t` in C++ code on some
-platform but cannon do it on other platforms.
+platform but cannot do it on other platforms.
 
 In the later case, when you drop the `std::` qualifier, the clang
 front end cannot find a type alias for size_t and treats size_t as int
