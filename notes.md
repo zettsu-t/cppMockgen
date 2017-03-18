@@ -306,6 +306,16 @@ single line `...;`. _BlockFactory_ parses each line in the AST and
 creates block instances. Note that indentation of lines in the AST is
 not relevant to their block structure.
 
+clang++ 4.0.0 occasionally fails in separating the end of class
+definition blocks `}` like this output.
+
+```cpp
+virtual ~NamespaceLevel1::MultiConstructorBase() noexcept = default    };
+```
+
+_CppFileParser_ detects such cases and matches start and end of blocks
+as much as possible.
+
 #### Merge namespace blocks
 
 C++ code can have multiple blocks for one namespace. The top-level

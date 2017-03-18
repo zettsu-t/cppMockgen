@@ -37,6 +37,13 @@ add Cygwin /usr/bin directory to _PATH_ environment variable.
 
 Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
 
+### Known issues on some platforms
+
+* clang++ 3.9.1 on Cygwin 64bit fails due to segmentations fault when we run ```make generate```. We need to use clang++ 3.8.1 on Cygwin 64bit now.
+* Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails. It completes on MinGW 64bit and clang++ 4.0.0.
+
+The later is because _ld_ does not indicate a definition of BaseClassNotDefined is missing and CppMockGen fails to make its stubs.
+
 ### Sample code
 
 To test CppMockGen, run
