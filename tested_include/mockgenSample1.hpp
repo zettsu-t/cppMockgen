@@ -360,12 +360,20 @@ extern int switchedFunc10(void);
 extern int switchedFunc11(void);
 extern int switchedFunc12(void);
 
+#if defined(__clang_major__) && (__clang_major__ >= 4)
+// LLVM 4.0.0 may not indicate that the vtable for BaseClassNotDefined
+// is not defined to instantiate DerivedClassNotDefined.
+#define BASE_CLASS_PURE_VIRTUAL =0
+#else
+#define BASE_CLASS_PURE_VIRTUAL
+#endif
+
 class BaseClassNotDefined {
 protected:
     BaseClassNotDefined(void) = default;
     virtual ~BaseClassNotDefined(void) = default;
     virtual void FuncBase(void) {}
-    virtual int FuncMissingA(void);
+    virtual int FuncMissingA(void) BASE_CLASS_PURE_VIRTUAL;
     virtual int FuncMissingB(int arg) = 0;
 };
 
