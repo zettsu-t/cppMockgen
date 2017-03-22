@@ -40,9 +40,9 @@ Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest
 ### Known issues on some platforms
 
 * clang++ 3.9.1 on Cygwin 64bit fails due to segmentations fault when we run ```make generate```. We need to use clang++ 3.8.1 on Cygwin 64bit now.
-* Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails. It completes on MinGW 64bit and clang++ 4.0.0.
+* Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails.
 
-The later is because _ld_ does not indicate a definition of BaseClassNotDefined is missing and CppMockGen fails to make its stubs.
+The later issue is because clang++ 4.0.0 does not create a definition of an abstract class BaseClassNotDefined. Attached _Makefile_vars_ makes clang++ 4.0.0 compile with the _-femit-all-decls_ option and links with _-lsupc++_ to avoid this issue.
 
 ### Sample code
 
