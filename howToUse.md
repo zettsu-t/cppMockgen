@@ -23,7 +23,7 @@ I tested CppMockGen with the following versions of tools.
 
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
-|LLVM + clang|3.8.1|3.9.1|3.4|
+|LLVM + clang|3.8.1|4.0.0|3.4|
 |gcc|5.4.0|6.3.0|4.8.4|
 |Ruby|2.2.5p319|2.4.0p0(ActiveScriptRuby)|1.9.3p484|
 
@@ -36,6 +36,13 @@ _wc_, _ctags_ in Cygwin or Linux. To run and test CppMockGen on MinGW,
 add Cygwin /usr/bin directory to _PATH_ environment variable.
 
 Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
+
+### Known issues on some platforms
+
+* clang++ 3.9.1 on Cygwin 64bit fails due to segmentations fault when we run ```make generate```. We need to use clang++ 3.8.1 on Cygwin 64bit now.
+* Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails.
+
+The later issue is because clang++ 4.0.0 does not create a definition of an abstract class BaseClassNotDefined. Attached _Makefile_vars_ makes clang++ 4.0.0 compile with the _-femit-all-decls_ option and links with _-lsupc++_ to avoid this issue.
 
 ### Sample code
 

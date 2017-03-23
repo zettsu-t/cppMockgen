@@ -212,7 +212,7 @@ Testers have to instantiate a template and its mock manually.
 ### The std namespace
 
 You can write `size_t` instead of `std::size_t` in C++ code on some
-platform but cannon do it on other platforms.
+platform but cannot do it on other platforms.
 
 In the later case, when you drop the `std::` qualifier, the clang
 front end cannot find a type alias for size_t and treats size_t as int
@@ -305,6 +305,16 @@ The AST defines a block as in a form of multi-lines `{...}` or a
 single line `...;`. _BlockFactory_ parses each line in the AST and
 creates block instances. Note that indentation of lines in the AST is
 not relevant to their block structure.
+
+clang++ 4.0.0 occasionally fails in separating the end of class
+definition blocks `}` like this output.
+
+```cpp
+virtual ~NamespaceLevel1::MultiConstructorBase() noexcept = default    };
+```
+
+_CppFileParser_ detects such cases and matches start and end of blocks
+as much as possible.
 
 #### Merge namespace blocks
 

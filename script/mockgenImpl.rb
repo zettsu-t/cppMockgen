@@ -3670,8 +3670,38 @@ module Mockgen
         inputLine = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
         line = Mockgen::Common::LineWithoutCRLF.new(inputLine).line.strip
         next if line.empty?
-        currentDepth, keyDepth = parseLine(line.strip, currentDepth, keyDepth)
+
+        # Workaround for LLVM 4.0.0
+        # separate "... };\n"s without "{" in a line
+        newline, count, semicolon = adjustClosingBlock(line)
+        currentDepth, keyDepth = parseLine(newline.strip, currentDepth, keyDepth)
+        1.upto(count) do |i|
+          str = "}" + ((count == i) ? semicolon : "")
+          currentDepth, keyDepth = parseLine(str, currentDepth, keyDepth)
+        end
       end
+    end
+
+    def adjustClosingBlock(line)
+      md = line.match(/(.*[^\s\}][\s\}]+)(;?)\s*$/)
+      return line, 0, "" unless md
+      newline = md[1]
+      semicolon = md[2]
+
+      # unquote the line except quotes between quotes
+      unquoted = newline.gsub(/('|")[^'"]\1/,"")
+      count = unquoted.count("}") - unquoted.count("{")
+      return line, 0, "" if count <= 0
+
+      rest = count
+      (newline.size - 1).downto(0) do |i|
+        next if newline[i] != "}"
+        newline[i] = " "
+        rest -= 1
+        break if rest <= 0
+      end
+
+      return newline, count, semicolon
     end
 
     # line : leading and trailing spaces and CRLF must be removed
