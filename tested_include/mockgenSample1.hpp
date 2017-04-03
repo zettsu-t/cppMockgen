@@ -61,7 +61,8 @@ namespace Sample1 {
         // Search no private base classes
         class DerivedClass : public BaseClass, private NONCOPYABLE_MIXIN {
         public:
-            DerivedClass(void);
+            // This explicit keyword does nothing
+            explicit DerivedClass(void);
             /* virtual ~DerivedClass(void); automatically generated */
             virtual const void* FuncMissing(long a, const char* p) const;
             virtual void Func(void) override;
@@ -78,8 +79,8 @@ namespace Sample1 {
 
         class ConstructorWithArg : public BaseClass, private NONCOPYABLE_MIXIN {
         public:
-            // No default constructor
-            ConstructorWithArg(int value);
+            // Non-default and explicit constructor
+            explicit ConstructorWithArg(int value);
             virtual ~ConstructorWithArg(void);
             int Get(void) const;
         private:
@@ -119,7 +120,7 @@ namespace Sample1 {
         template <typename T=unsigned long long>
         class TypedClass : public NonTypedBaseClass {
         public:
-            TypedClass(const T& arg) : data_(arg) {}
+            explicit TypedClass(const T& arg) : data_(arg) {}
             virtual ~TypedClass(void) = default;
             virtual T Get(void) const { return data_; }
         private:

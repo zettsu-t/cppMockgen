@@ -2058,39 +2058,41 @@ class TestConstructorBlock < Test::Unit::TestCase
     expectedTypeStr, expectedArgSetStr, expectedCallBase = data
     name = "NameC"
 
-    block = ConstructorBlock.new(line, name)
-    valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr = block.parse(line, name)
-    assert_true(valid)
-    assert_true(block.canTraverse?)
-    assert_equal(expectArity, block.arity)
-    assert_equal(expectedTASet, typedArgSet)
-    assert_equal(expectedTASet, typedArgSetWithoutDefault)
-    assert_equal(expectedATStr, argTypeStr)
-    assert_equal(expectedTypeStr, typeStr)
-    assert_equal(expectedArgSetStr, argSetStr)
-    assert_equal(expectedArgSetStr, block.argSetStr)
-    assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
-    assert_equal(expectedArgsBC, block.getTypedArgsWithoutValue)
-    assert_equal("", block.getCallForBaseClassInitializer)
-    assert_equal(line, block.keyForParent)
+    ["", "explicit ", " inline ", " explicit  inline ", "inline explicit "].each do |prefix|
+      block = ConstructorBlock.new(prefix + line, name)
+      valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr = block.parse(line, name)
+      assert_true(valid)
+      assert_true(block.canTraverse?)
+      assert_equal(expectArity, block.arity)
+      assert_equal(expectedTASet, typedArgSet)
+      assert_equal(expectedTASet, typedArgSetWithoutDefault)
+      assert_equal(expectedATStr, argTypeStr)
+      assert_equal(expectedTypeStr, typeStr)
+      assert_equal(expectedArgSetStr, argSetStr)
+      assert_equal(expectedArgSetStr, block.argSetStr)
+      assert_equal(expectedArgsBC, block.getTypedArgsForBaseClass)
+      assert_equal(expectedArgsBC, block.getTypedArgsWithoutValue)
+      assert_equal("", block.getCallForBaseClassInitializer)
+      assert_equal(line, block.keyForParent)
 
-    block.setBaseClassName("::A::NameC")
-    className = "Dereived"
-    initMember = "extra(0)"
-    argStr = expectedTASet.empty? ? "void" : expectedTASet
-    expected = "    #{className}(#{argStr}) : #{expectedCallBase}#{initMember} {}\n"
-    assert_equal(expected, block.makeDef(className, "", initMember))
+      block.setBaseClassName("::A::NameC")
+      className = "Dereived"
+      initMember = "extra(0)"
+      argStr = expectedTASet.empty? ? "void" : expectedTASet
+      expected = "    #{className}(#{argStr}) : #{expectedCallBase}#{initMember} {}\n"
+      assert_equal(expected, block.makeDef(className, "", initMember))
 
-    expected = "    #{className}(void) : #{initMember} {}\n"
-    assert_equal(expected, block.makeDefWithDefaultBaseConstructor(className, "", initMember))
+      expected = "    #{className}(void) : #{initMember} {}\n"
+      assert_equal(expected, block.makeDefWithDefaultBaseConstructor(className, "", initMember))
 
-    arg = "int extra"
-    expectedArg = expectedTASet.empty? ? arg : "#{arg},#{expectedTASet}"
-    expected = "    #{className}(#{expectedArg}) : #{expectedCallBase}#{initMember} {}\n"
-    assert_equal(expected, block.makeDef(className, arg, initMember))
+      arg = "int extra"
+      expectedArg = expectedTASet.empty? ? arg : "#{arg},#{expectedTASet}"
+      expected = "    #{className}(#{expectedArg}) : #{expectedCallBase}#{initMember} {}\n"
+      assert_equal(expected, block.makeDef(className, arg, initMember))
 
-    expected = "    #{className}(#{arg}) : #{initMember} {}\n"
-    assert_equal(expected, block.makeDefWithDefaultBaseConstructor(className, arg, initMember))
+      expected = "    #{className}(#{arg}) : #{initMember} {}\n"
+      assert_equal(expected, block.makeDefWithDefaultBaseConstructor(className, arg, initMember))
+    end
   end
 
   data(
@@ -4277,6 +4279,19 @@ class TestClassBlock < Test::Unit::TestCase
     'two' => " NameC ( int a, const void* p )",
     'template' => " NameC<T>(T& arg)")
   def test_isConstructor?(data)
+    line = data
+    block = ClassBlock.new("class NameC")
+    assert_true(block.isConstructor?(line))
+  end
+
+  data(
+    'explicit 1' => "explicit NameC()",
+    'explicit 2' => " explicit  NameC()",
+    'inline 1' => "inline NameC()",
+    'inline 2' => "  inline NameC()",
+    'explicit inline' => "  explicit  inline  NameC()",
+    'inline explicit' => "inline explicit NameC()")
+  def test_isExplicitConstructor?(data)
     line = data
     block = ClassBlock.new("class NameC")
     assert_true(block.isConstructor?(line))

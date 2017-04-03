@@ -1327,11 +1327,11 @@ module Mockgen
       super(line)
       @className = className
       @callBase = ""
-      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSetStr, @arity = parse(line, className)
+      @valid, @typedArgSet, @typedArgSetWithoutDefault, @argTypeStr, @typeStr, @argSetStr, @arity, keyForParent = parse(line, className)
       @resolvedArgTypeStr = nil
 
       # A function name is not enough to support overloading
-      setKeyForParent(line) if @valid
+      setKeyForParent(keyForParent) if @valid
     end
 
     def getResolvedArgTypeStr(classBlock)
@@ -1365,11 +1365,13 @@ module Mockgen
       callBase = ""
       argSetStr = ""
       arity = 0
+      keyForParent = line.dup
 
       # Prevent from throwing RegexpError
+      # Same as ClassBlock.isConstructor?
       if !RegexpMetaCharacter.new.contained?(className) &&
-         md = phrase.match(/^\s*#{className}\s*\(\s*(.*)\s*\)/)
-        typedArgSet = md[1]
+         md = phrase.match(/^\s*((explicit|inline)\s+)*#{className}\s*\(\s*(.*)\s*\)/)
+        typedArgSet = md[3]
 
         argVariableSet = ArgVariableSet.new(phrase)
         typedArgSet = argVariableSet.argSetStr
@@ -1378,9 +1380,13 @@ module Mockgen
         argTypeStr = argVariableSet.argTypeStr
         arity = argVariableSet.arity
         valid = true
+
+        # Same as ClassBlock.isConstructor?
+        linemd = line.match(/^\s*((explicit|inline)\s+)*(.*)/)
+        keyForParent = linemd[3] if linemd
       end
 
-      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr, arity]
+      [valid, typedArgSet, typedArgSetWithoutDefault, argTypeStr, typeStr, argSetStr, arity, keyForParent]
     end
 
     def removeInitializerList(line)
@@ -2302,7 +2308,8 @@ module Mockgen
         # Already checked if @name contains meta characters
       end
 
-      str.match(/^\s*#{@name}\s*\(.*\)/) ? true : false
+      # Same as ConstructorBlock.parse
+      str.match(/^\s*((explicit|inline)\s+)*#{@name}\s*\(.*\)/) ? true : false
     end
 
     # Treat type(*func)(args...) as a variable having a function pointer
