@@ -127,6 +127,14 @@ namespace Sample1 {
             T data_;
         };
 
+        template <typename T=unsigned long long, typename U=unsigned int>
+        class Type2Class {
+        public:
+            explicit Type2Class(const T& arg) {}
+            virtual ~Type2Class(void) = default;
+            template <typename V> V Get(void);
+        };
+
         // Not support non-template classes that inherit a template class
         // clang creates "template <typename T = int> class TypedClass"
         // for the code shown below and it causes compile errors.
@@ -140,6 +148,7 @@ namespace Sample1 {
         class VariadicClass : private NONCOPYABLE_MIXIN {
         public:
             VariadicClass(void) : sizeS_(S), sizeV_(V), sizeTs_(sizeof...(Ts)) {}
+            ~VariadicClass(void) = default;
             size_t Get(void) const { return sizeS_ + sizeV_ * sizeTs_; }
         private:
             size_t sizeS_;

@@ -1463,6 +1463,11 @@ module Mockgen
 
       # Create a non-virtual default destructor if arg line is nil
       parsedLine = line
+      if (!line.nil? && line.include?("<"))
+        parsedLine = Mockgen::Common::StringOfAngleBrackets.new(line).parse.select do |element|
+          element[1].nil?
+        end.join(" ")
+      end
       parsedLine ||= "~#{@name} ()"
 
       super(parsedLine)
@@ -1754,6 +1759,11 @@ module Mockgen
       @definition = line.match(/\{\s*$/) ? true : false
       @superMemberSet = []
       @templateParam = nil
+
+      if (line.match(/\A\s*template\b/) || (@funcName.include?("<") && @funcName.include?(">")))
+        @valid = false
+        setKeyForParent(nil)
+      end
     end
 
     ## Public methods added in the base class

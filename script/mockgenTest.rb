@@ -2255,8 +2255,13 @@ class TestDestructorBlock < Test::Unit::TestCase
   data(
     'nil' => nil,
     'empty' => "~NameD()",
+    'noexcept' => "~NameD() noexcept",
     'void' => "~NameD(void)",
-    'space' => "~NameD(void)")
+    'space' => "~NameD(void)",
+    'template 1' => "~NameD<int>(void)",
+    'template 2' => "~NameD <int> (void)",
+    'nested template 1' => "~NameD<std::vector<int>>(void)",
+    'nested template 2' => "~NameD <std::vector < int > > (void)")
   def test_parseDestructor(data)
     line = data
     className = "NameD"
@@ -2491,7 +2496,11 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
     'variable 1' => "int var = (1 << 3)",
     'variable 2' => "decltype(T) var = (1 << 3)",
     'variable 3' => "decltype(T) var = 1 + (1 << 3)",
-    'static_assert' => 'static_assert(false, "Error")')
+    'static_assert' => 'static_assert(false, "Error")',
+    'template 1' => 'int Func<T>(long b)',
+    'template 2' => 'int Func<T,U>(long b)',
+    'template 3' => 'template <typename T> T Get(void)',
+    'template 4' => ' template<typename T> T Get(void)')
   def test_cannotInitializeAndParse(data)
     line = data
     ["", "{", " {", ";", " ;"].each do |suffix|
@@ -3622,6 +3631,32 @@ class TestClassBlock < Test::Unit::TestCase
     assert_equal([], block.instance_variable_get(:@constructorSet))
     assert_equal([], block.subConstructorSet)
     assert_not_equal([], block.instance_variable_get(:@allConstructorSet))
+  end
+
+  def test_parseTemplateClass
+    block = ClassBlock.new("class NameC")
+    assert_nil(block.parseChildren("public:"))
+
+    constructorLine = "NameC<T,U>();"
+    assert_not_nil(block.parseChildren(constructorLine))
+    assert_not_equal([], block.instance_variable_get(:@constructorSet))
+    assert_not_equal([], block.instance_variable_get(:@allConstructorSet))
+
+    destructorLine = "~NameC<T,U>();"
+    assert_not_nil(block.parseChildren(destructorLine))
+    assert_not_nil(block.instance_variable_get(:@destructor))
+
+    funcLine = "void Func<T>();"
+    assert_nil(block.parseChildren(funcLine))
+    assert_true(block.instance_variable_get(:@publicMemberFunctionSet).empty?)
+
+    funcLine = "void Func<T,U>();"
+    assert_nil(block.parseChildren(funcLine))
+    assert_true(block.instance_variable_get(:@publicMemberFunctionSet).empty?)
+
+    funcLine = "void Func();"
+    assert_not_nil(block.parseChildren(funcLine))
+    assert_false(block.instance_variable_get(:@publicMemberFunctionSet).empty?)
   end
 
   # A struct is treated as a class with default public access
