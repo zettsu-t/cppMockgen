@@ -229,6 +229,10 @@ public:
     virtual int FuncMissingI(PtrToFn f);
     virtual int FuncMissingI(PtrToMemFn f);
 
+    using BYTETYPE = unsigned char;
+    virtual int FuncMissingJ(const unsigned char* /* arg */);
+    virtual int FuncMissingK(const BYTETYPE* /* arg */);
+
     enum EnumType {
         // Has no members with value 0
         FIRST_MEMBER = 1,
