@@ -12,7 +12,7 @@ below. MinGW-w64, Bash on Ubuntu on Windows and Linux are also available.
 * Windows 10 Anniversary Update 64bit Edition
 * Cygwin 64bit version (2.6.1), MinGW-w64 (Distro 14.1) or Bash on Ubuntu on Windows
 * Google Test / Mock (1.7.0)
-* LLVM and clang (4.0.0)
+* LLVM and clang (4.0.1)
 * gcc (6.3.0)
 * Ruby (2.4.0)
 
