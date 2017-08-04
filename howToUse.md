@@ -24,7 +24,7 @@ I tested CppMockGen with the following versions of tools.
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
 |LLVM + clang|3.8.1|4.0.1|3.4|
-|gcc|5.4.0|6.3.0|4.8.4|
+|gcc|5.4.0|7.1.0|4.8.4|
 |Ruby|2.2.5p319|2.4.0p0(ActiveScriptRuby)|1.9.3p484|
 
 CppMockGen is executable on Linux but it needs changes on its Makefile
@@ -43,6 +43,10 @@ Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest
 * Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails.
 
 The later issue is because clang++ 4.0.0 does not create a definition of an abstract class BaseClassNotDefined. Attached _Makefile_vars_ makes clang++ 4.0.0 compile with the _-femit-all-decls_ option and links with _-lsupc++_ to avoid this issue.
+
+### Required changes on some platforms
+
+You may have to disable the definition of ```_GLIBCXX_USE_FLOAT128``` in _c++config.h_ to disable it when you use clang++. Surrounding it with ```#ifndef __clang__``` ... ```#endif``` is a way to do it.
 
 ### Sample code
 
