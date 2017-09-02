@@ -10,10 +10,10 @@ _CppMockGen_ is built on and runs on Cygwin with tools shown
 below. MinGW-w64, Bash on Ubuntu on Windows and Linux are also available.
 
 * Windows 10 Anniversary Update 64bit Edition
-* Cygwin 64bit version (2.6.1), MinGW-w64 (Distro 14.1) or Bash on Ubuntu on Windows
+* Cygwin 64bit version (2.6.1), MinGW-w64 (Distro 15.1) or Bash on Ubuntu on Windows
 * Google Test / Mock (1.7.0)
 * LLVM and clang (4.0.1)
-* gcc (7.1.0)
+* gcc (7.2.0)
 * Ruby (2.4.0)
 
 ## Quick start
