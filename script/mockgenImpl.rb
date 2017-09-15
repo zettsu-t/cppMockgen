@@ -400,14 +400,20 @@ module Mockgen
       @typeAliasSet = typeAliasSet
     end
 
+    # Workaround for LLVM 5.0.0
+    def removeRedundantNamespace(str)
+      return str unless str
+      (str.strip == "std::size_t") ? "size_t" : str
+    end
+
     def resolveAlias(typeStr)
-      result = typeStr.dup
-      previous = typeStr.dup
+      result = removeRedundantNamespace(typeStr).dup
+      previous = result.dup
 
       while true
         block = self
         while(block)
-          result = block.typeAliasSet.resolveAlias(result)
+          result = removeRedundantNamespace(block.typeAliasSet.resolveAlias(result))
           block = block.parent
         end
 
@@ -1565,6 +1571,20 @@ module Mockgen
 
       # A function name is not enough to support overloading
       setKeyForParent(line) if @valid
+      @argTypeStrSet = [@argTypeStr]
+    end
+
+    # Workaround for LLVM 5.0.0
+    def setParent(block)
+      super
+
+      argTypeStrAlias = nil
+      if !block.nil? && block.isClass? && @argTypeStr
+        name = block.getNamespace
+        argTypeStrAlias = @argTypeStr.gsub(/(\A|[^A-Za-z\d_:])#{name}::/, '\1')
+      end
+
+      @argTypeStrSet = [@argTypeStr, argTypeStrAlias].compact.uniq
     end
 
     def canTraverse?
@@ -1580,7 +1600,9 @@ module Mockgen
       fullname = getNonTypedFullname(@funcName)
       noMatchingTypes = @noMatchingTypes || filter.noOverloading
       filter.undefinedReferenceSet.getReferenceSetByFullname(fullname).any? do |reference|
-        FunctionReferenceSet.new(self, reference, fullname, @funcName, @argTypeStr, @postFunc, noMatchingTypes).compare
+        @argTypeStrSet.any? do |argTypeStr|
+          FunctionReferenceSet.new(self, reference, fullname, @funcName, argTypeStr, @postFunc, noMatchingTypes).compare
+        end
       end
     end
 
@@ -3687,6 +3709,8 @@ module Mockgen
         inputLine = rawLine.encode("UTF-8", *Mockgen::Constants::CHARACTER_ENCODING_PARAMETER_SET)
         line = Mockgen::Common::LineWithoutCRLF.new(inputLine).line.strip
         next if line.empty?
+        # Discard preprocessor directives
+        next if line[0] == "#"
 
         # Workaround for LLVM 4.0.0
         # separate "... };\n"s without "{" in a line

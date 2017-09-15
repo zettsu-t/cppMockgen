@@ -833,10 +833,39 @@ class TestBaseBlock < Test::Unit::TestCase
     assert_true(block.collectAliases.aliasSet.empty?)
   end
 
+  data(
+    'nil' => [nil, nil],
+    'not size_t' => ["size", "size"],
+    'size_t' => ["size_t", "size_t"],
+    'std::size_t' => ["std::size_t", "size_t"],
+    'spaces' => [" std::size_t ", "size_t"],
+    'not std::size_t' => ["std::size_tx", "std::size_tx"])
+  def test_removeRedundantNamespace(data)
+    name, expected = data
+    assert_equal(expected, BaseBlock.new("").removeRedundantNamespace(name))
+  end
+
   def test_resolveAlias
     block = BaseBlock.new("")
     name = "uint32_t"
     assert_equal(name, block.resolveAlias(name))
+  end
+
+  def test_resolveSizeAlias
+    child = BaseBlock.new("")
+    child.typeAliasSet.add("aliasName", "aliasSize")
+
+    parent = BaseBlock.new("")
+    parent.typeAliasSet.add("aliasSize", "mySize")
+    parent.connect(child)
+
+    grandParent = BaseBlock.new("")
+    grandParent.typeAliasSet.add("mySize", "std::size_t")
+    grandParent.connect(parent)
+
+    [[child, "aliasName"], [parent, "aliasSize"], [grandParent, "mySize"]].each do |block, name|
+      assert_equal("size_t", block.resolveAlias(name))
+    end
   end
 
   def test_findType
@@ -2415,6 +2444,31 @@ end
 
 class TestMemberFunctionBlock < Test::Unit::TestCase
   data(
+    'empty' => ["", [""]],
+    'primitive' => ["int i", ["int"]],
+    'size_t' => ["size_t s", ["size_t"]],
+    'std::size_t' => ["std::size_t s", ["std::size_t"]],
+    'exact class' => ["NameC::T t", ["NameC::T", "T"]],
+    'different class' => ["NameC2::T t", ["NameC2::T"]],
+    'different namespace' => ["M::NameC::T t", ["M::NameC::T"]],
+    'lower' => ["aNameC::T t", ["aNameC::T"]],
+    'upper' => ["ANameC::T t", ["ANameC::T"]],
+    'digit' => ["1NameC::T t", ["1NameC::T"]],
+    'underbar' => ["_NameC::T t", ["_NameC::T"]],
+    'multi' => ["NameC::T t, NameC::U i, NameC::V", ["NameC::T,NameC::U,NameC::V", "T,U,V"]],
+    'multi left' => ["NameC2::T t, NameC::U i, NameC::V", ["NameC2::T,NameC::U,NameC::V", "NameC2::T,U,V"]],
+    'multi middle' => ["NameC::T t, NameC2::U i, NameC::V", ["NameC::T,NameC2::U,NameC::V", "T,NameC2::U,V"]],
+    'multi right' => ["NameC::T t, NameC::U i, NameC2::V", ["NameC::T,NameC::U,NameC2::V", "T,U,NameC2::V"]])
+  def test_setParent(data)
+    argstr, expected = data
+    className = "NameC"
+    classBlock = ClassBlock.new("class #{className} {")
+    block = MemberFunctionBlock.new("int func(#{argstr});")
+    block.setParent(classBlock)
+    assert_equal(expected, block.instance_variable_get(:@argTypeStrSet))
+  end
+
+  data(
     'void no args' =>
     ["void Func()",
      "void Func()",
@@ -2540,6 +2594,25 @@ class TestMemberFunctionBlock < Test::Unit::TestCase
 
     refSet = TestMockRefSetClass.new(true, [refUnmatched1, refMatched1])
     assert_true(block.filterByReferenceSet(MinimumSymbolFilter.new(nil, refSet)))
+  end
+
+  data(
+    'name' => ["Size", [true, true]],
+    'class' => ["Name::Size", [true, false]],
+    'other class' => ["Other::Size", [false, false]],
+    'namespace' => ["Outer::Name::Size", [false, false]])
+  def test_filterByReferenceSetWithInnerTypedef(data)
+    refArgType, expectedSet = data
+    funcRef = TestMockRefClass.new("", "Func", "Func", refArgType, "")
+
+    [["Name::Size", "Size"], expectedSet].transpose.each do |argType, expected|
+      block = MemberFunctionBlock.new("void Func(#{argType} s);")
+      classBlock = ClassBlock.new("class Name {")
+      block.setParent(classBlock)
+      count = argType.include?("::") ? 2 : 1
+      assert_equal(count, block.instance_variable_get(:@argTypeStrSet).size)
+      assert_equal(expected, block.filterByReferenceSet(MinimumSymbolFilter.new(nil, TestMockRefMonoSetClass.new(funcRef))))
+    end
   end
 
   def test_filterByPointerToFunction
@@ -6203,6 +6276,7 @@ class TestCppFileParser < Test::Unit::TestCase
 
   def test_readAllLines
     lines = ["class A {",
+             "# 12",  # A preprocessor directive
              "};",
              "class B {",
              "    void func(void) { return; } };",

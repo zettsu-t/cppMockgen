@@ -294,6 +294,37 @@ non-default constructive, this may lead compilation errors. This is
 valid on multiple inheritance for default constructive interface
 classes.
 
+#### clang++ 5.0.0 specific behavior
+
+Unlink clang++ 4 or older, clang++ 5.0.0 -cc1 adds class name specifiers
+in the two cases below.
+
+* Converting size_t to std::size_t
+* Adding a classname:: specifier to arguments of member functions of the class
+
+In the later case, clang++ 5.0.0 converts
+
+```cpp
+class ClassName {
+    using BYTETYPE = unsigned char;
+    virtual int Func(BYTETYPE* arg);
+}
+```
+
+to
+
+```cpp
+class ClassName {
+    using BYTETYPE = unsigned char;
+    virtual int Func(ClassName::BYTETYPE* arg);
+}
+```
+
+CppMockGen handles these specifiers to resolve type aliases.
+
+The later code is also legitimate as inputs (hand-written code) so
+CppMockGen handles it properly with both clang++ 5.0.0 and older.
+
 ### Arguments of constructors for generated classes
 
 The generated mock, forwarder and decorator class inherit a tested

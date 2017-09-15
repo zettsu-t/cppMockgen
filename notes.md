@@ -263,6 +263,9 @@ Instead of writing types of pointers to functions as arguments
 directly, please consider to define their aliases and write them as
 arguments if available.
 
+const qualifiers for primitive types in arguments do not appear in
+linker symbols. CppMockGen fails to match _func(const int)_ in source code
+and undefined _func(int)_.
 
 ## Data structure and converting C++ code
 

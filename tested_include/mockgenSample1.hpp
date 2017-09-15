@@ -233,6 +233,10 @@ public:
     virtual int FuncMissingJ(const unsigned char* /* arg */);
     virtual int FuncMissingK(const BYTETYPE* /* arg */);
 
+    virtual int FuncMissingL1(const LocalStruct* /* arg */);
+    virtual int FuncMissingL2(const TopLevelClass::LocalStruct* /* arg */);
+    virtual int FuncMissingL3(size_t /* arg */);
+
     enum EnumType {
         // Has no members with value 0
         FIRST_MEMBER = 1,
