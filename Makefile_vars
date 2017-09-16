@@ -22,7 +22,9 @@ ifeq ($(OS),Windows_NT)
 # Cygwin
   ifneq (,$(findstring cygwin,$(shell gcc -dumpmachine)))
 BUILD_ON_CYGWIN=yes
-CLANG_CC1_ISYSTEM=$(addprefix -cxx-isystem,/usr/include /usr/include/w32api $(CYGWIN_GCC_INCLUDE_DIR) $(CYGWIN_GCC_INCLUDE_DIR)/c++ $(CYGWIN_GCC_INCLUDE_DIR)/c++/x86_64-pc-cygwin)
+
+# Must not set CLANG_CC1_ISYSTEM on clang++ 3.9.1 or later. It causes segmentation fault.
+# CLANG_CC1_ISYSTEM=$(addprefix -cxx-isystem,/usr/include /usr/include/w32api $(CYGWIN_GCC_INCLUDE_DIR) $(CYGWIN_GCC_INCLUDE_DIR)/c++ $(CYGWIN_GCC_INCLUDE_DIR)/c++/x86_64-pc-cygwin)
 # MinGW
   else
 BUILD_ON_MINGW=yes
