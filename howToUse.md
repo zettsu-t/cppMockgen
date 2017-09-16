@@ -39,10 +39,13 @@ Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest
 
 ### Known issues on some platforms
 
-* clang++ 5.0.0 on MinGW and GCC 7.2.0 generate stubs and mocks but cause ignorable errors.
+* If environment variable PATH contains C:\Program Files\Haskell Platform\8.0.1\mingw\bin, LLVM and MinGW may cause compilation errors.
 * Testing by ```make runthrough``` on Linux with clang++ 4.0.0 fails.
 
 The later issue is because clang++ 4.0.0 does not create a definition of an abstract class BaseClassNotDefined. Attached _Makefile_vars_ makes clang++ 4.0.0 compile with the _-femit-all-decls_ option and links with _-lsupc++_ to avoid this issue.
+
+
+
 
 ### Required changes on some platforms
 

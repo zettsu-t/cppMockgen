@@ -25,11 +25,11 @@ $(OBJ_DIR)/%.o: %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -c $<
 
 $(OBJ_DIR)/%.o: %.cc
-	$(CXX) $(CXXFLAGS_GTEST_GMOCK) $(INCLUDES_CLANG_GTEST) -o $@ -c $<
+	$(COMMON_CXX) $(CXXFLAGS_GTEST_GMOCK) $(INCLUDES_CLANG_GTEST) -o $@ -c $<
 
 # -MG indicates that CXX disregards generated headers
 $(OBJ_DIR)/%.d: %.cpp
-	$(CXX) $(CXXFLAGS) -MM -MG $< | sed 's|\(.*\)\.o|$(OBJ_DIR)/\1\.o|' > $@
+	$(COMMON_CXX) $(CXXFLAGS_DEPENDS) -MM -MG $< | sed 's|\(.*\)\.o|$(OBJ_DIR)/\1\.o|' > $@
 
 $(OBJ_DIR)/%$(PROCESSED_CPP_SUFFIX): %.cpp
 	$(CXX) $(CXXFLAGS) -o $@ -E $<

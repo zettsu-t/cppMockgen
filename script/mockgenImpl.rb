@@ -4521,7 +4521,8 @@ module Mockgen
       # Tempfile.create cannot create a tempfile in MinGW
       # and need to specify a filename for clang to output.
       # It is also useful to know how clang format .hpp files.
-      system("#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{isystemArgs} #{@inputFilename} > #{@convertedFilename}")
+      command = "#{Mockgen::Constants::CLANG_COMMAND} #{@clangArgs} #{isystemArgs} #{@inputFilename} > #{@convertedFilename}".gsub('\\"', '"')
+      system(command)
 
       parameterSet = CppFileParameterSet.new(@cppNameSpace, @inputFilename, @inLinkLogFilename, @convertedFilename,
                                              @stubOnly, @functionNameFilterSet, @classNameFilterOutSet,
