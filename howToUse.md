@@ -23,7 +23,7 @@ I tested CppMockGen with the following versions of tools.
 
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
-|LLVM + clang|4.0.1|5.0.0|3.4|
+|LLVM + clang|4.0.1|5.0.1|3.4|
 |gcc|6.4.0|7.2.0|4.8.4|
 |Ruby|2.3.3p222|2.4.0p0(ActiveScriptRuby)|1.9.3p484|
 
@@ -297,15 +297,15 @@ non-default constructive, this may lead compilation errors. This is
 valid on multiple inheritance for default constructive interface
 classes.
 
-#### clang++ 5.0.0 specific behavior
+#### clang++ 5.0.1 specific behavior
 
-Unlink clang++ 4 or older, clang++ 5.0.0 -cc1 adds class name specifiers
+Unlink clang++ 4 or older, clang++ 5.0.1 -cc1 adds class name specifiers
 in the two cases below.
 
 * Converting size_t to std::size_t
 * Adding a classname:: specifier to arguments of member functions of the class
 
-In the later case, clang++ 5.0.0 converts
+In the later case, clang++ 5.0.1 converts
 
 ```cpp
 class ClassName {
@@ -326,7 +326,7 @@ class ClassName {
 CppMockGen handles these specifiers to resolve type aliases.
 
 The later code is also legitimate as inputs (hand-written code) so
-CppMockGen handles it properly with both clang++ 5.0.0 and older.
+CppMockGen handles it properly with both clang++ 5.0.1 and older.
 
 ### Arguments of constructors for generated classes
 
