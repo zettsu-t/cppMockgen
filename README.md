@@ -35,6 +35,9 @@ make runthrough
 
 Attached _Makefile_ assumes Google Test / Mock are installed at $HOME/googletest.
 
+To use CppMockGen in your Makefile, [whatMakeDoes.md](whatMakeDoes.md)
+is a quick guide for it.
+
 ## License
 
 Copyright (c) 2016, 2017 Zettsu Tatsuya
