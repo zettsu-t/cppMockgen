@@ -15,7 +15,7 @@ CppMockGen is a set of ruby scripts and launches the clang front-end
 internally. This is my environment to develop it.
 
 * Windows 10 Anniversary Update 64bit Edition (Version 1607, OS build 14393.10)
-* Cygwin 64bit version (2.9.0), MinGW-w64 (Distro 15.1) or Bash on Ubuntu on Windows
+* Cygwin 64bit version (2.10.0), MinGW-w64 (Distro 15.4) or Bash on Ubuntu on Windows
 * Google Test / Mock (1.7.0)
 * LLVM, gcc and ruby
 
@@ -23,9 +23,9 @@ I tested CppMockGen with the following versions of tools.
 
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
-|LLVM + clang|5.0.1|5.0.1|3.4|
-|gcc|6.4.0|7.2.0|4.8.4|
-|Ruby|2.3.3p222|2.4.0p0(ActiveScriptRuby)|1.9.3p484|
+|LLVM + clang|5.0.1|6.0.0|3.4|
+|gcc|6.4.0|7.3.0|4.8.4|
+|Ruby|2.3.6p384|2.5.0p0|1.9.3p484|
 
 CppMockGen is executable on Linux but it needs changes on its Makefile
 to test CppMockGen with GNU _make_ on Linux. Note that clang++
