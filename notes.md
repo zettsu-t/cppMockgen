@@ -236,6 +236,21 @@ Using a type alias for the argument _f_ is a workaround for this case.
 virtual int FuncMissingH(int (Sample1::Types::BaseClass::*f)(int, const void **) __attribute__((thiscall)));
 ```
 
+### Non-instanciated inner classes
+
+With LLVM 7.0.0, CppMockGen does not make mocks for member functions
+of inner classes that are not instantiated (see code below).
+
+```cpp
+class ClassNotInstanciated {
+public:
+    static class Inner {
+    public:
+        int Func();
+    } inner_;
+};
+```
+
 ### Others
 
 CppMockGen does not support some C++ features such as

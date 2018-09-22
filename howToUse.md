@@ -23,7 +23,7 @@ I tested CppMockGen with the following versions of tools.
 
 |Package|Cygwin 64bit|MinGW-w64|Bash on Ubuntu on Windows|
 |:------|:------|:------|:------|
-|LLVM + clang|5.0.1|6.0.0|3.4|
+|LLVM + clang|5.0.1|7.0.0|3.4|
 |gcc|6.4.0|7.3.0|4.8.4|
 |Ruby|2.3.6p384|2.5.0p0|1.9.3p484|
 

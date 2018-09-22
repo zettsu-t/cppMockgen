@@ -12,7 +12,7 @@ below. MinGW-w64, Bash on Ubuntu on Windows and Linux are also available.
 * Windows 10 Anniversary Update 64bit Edition
 * Cygwin 64bit version (2.10.0), MinGW-w64 (Distro 15.4) or Bash on Ubuntu on Windows
 * Google Test / Mock [(latest)](https://github.com/google/googletest)
-* LLVM and clang (6.0.0)
+* LLVM and clang (7.0.0)
 * gcc (7.3.0)
 * Ruby (2.5.0)
 
@@ -40,7 +40,7 @@ is a quick guide for it.
 
 ## License
 
-Copyright (c) 2016, 2017 Zettsu Tatsuya
+Copyright (c) 2016-2018 Zettsu Tatsuya
 
 This software is released under the BSD 3-Clause License (the new BSD
 license), see [LICENSE.txt](LICENSE.txt). This follows the license of

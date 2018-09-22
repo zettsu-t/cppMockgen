@@ -61,7 +61,9 @@ int TopLevelSampleFunc(void) {
         + aTopLevelObject.GetValue() + localTopLevelObject.GetValue()
         + aTopLevelObject.FuncMissingF(nullptr, nullptr, nullptr)
         + aTopLevelObject.FuncMissingG(nullptr, 0)
+#if defined(CPPMOCKGEN_LLVM_VERSION) && (CPPMOCKGEN_LLVM_VERSION < 70)
         + ClassNotInstanciated::inner_.Func()
+#endif
         + TopLevelMissingFuncC() + TopLevelMissingFuncD(0) + TopLevelMissingFuncCwithoutExternC(0)
         + TopLevelMissingFuncCpp() + Sample1::MissingFuncInNamespace()
         + TopLevelMissingFuncE(nullptr, nullptr, nullptr)
